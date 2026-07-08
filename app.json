@@ -2,12 +2,19 @@
   "expo": {
     "name": "dude",
     "slug": "dude",
+    "scheme": "dude",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "Allow Dude to sync your steps, heart rate, and active calories.",
+        "NSHealthUpdateUsageDescription": "Allow Dude to log fitness data to your Apple Health.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.dude"
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +23,51 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.dude",
+      "permissions": [
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "Dude",
+      "shortName": "Dude",
+      "description": "Your personal fitness & nutrition coach",
+      "lang": "en",
+      "scope": "/",
+      "themeColor": "#39FF6A",
+      "backgroundColor": "#0a0a0a",
+      "display": "standalone",
+      "orientation": "portrait"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Dude to access your camera to scan barcodes and analyze food photos."
+        }
+      ],
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "Allow Dude to sync your steps, heart rate, and active calories.",
+          "healthUpdatePermission": "Allow Dude to log fitness data to your Apple Health."
+        }
+      ],
+      "react-native-health-connect"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bf4dcb80-b5ed-484e-ad41-0e4f77902ede"
+      }
     }
   }
 }
