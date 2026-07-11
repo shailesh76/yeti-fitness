@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DUDE Coach Dashboard",
+  title: "Yeti Coach Dashboard",
   description: "Real-time vitals and workout telemetry console",
 };
 

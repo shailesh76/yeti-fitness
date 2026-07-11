@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "dude",
-    "slug": "dude",
-    "scheme": "dude",
+    "name": "Yeti",
+    "slug": "yeti",
+    "scheme": "yeti",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,11 +10,11 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Allow Dude to sync your steps, heart rate, and active calories.",
-        "NSHealthUpdateUsageDescription": "Allow Dude to log fitness data to your Apple Health.",
+        "NSHealthShareUsageDescription": "Allow Yeti to sync your steps, heart rate, and active calories.",
+        "NSHealthUpdateUsageDescription": "Allow Yeti to log fitness data to your Apple Health.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.anonymous.dude"
+      "bundleIdentifier": "com.anonymous.yeti"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +24,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.dude",
+      "package": "com.anonymous.yeti",
       "permissions": [
         "android.permission.health.READ_STEPS",
         "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
@@ -35,8 +35,8 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "name": "Dude",
-      "shortName": "Dude",
+      "name": "Yeti",
+      "shortName": "Yeti",
       "description": "Your personal fitness & nutrition coach",
       "lang": "en",
       "scope": "/",
@@ -51,14 +51,14 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Dude to access your camera to scan barcodes and analyze food photos."
+          "cameraPermission": "Allow Yeti to access your camera to scan barcodes and analyze food photos."
         }
       ],
       [
         "react-native-health",
         {
-          "healthSharePermission": "Allow Dude to sync your steps, heart rate, and active calories.",
-          "healthUpdatePermission": "Allow Dude to log fitness data to your Apple Health."
+          "healthSharePermission": "Allow Yeti to sync your steps, heart rate, and active calories.",
+          "healthUpdatePermission": "Allow Yeti to log fitness data to your Apple Health."
         }
       ],
       "react-native-health-connect"

@@ -1,5 +1,5 @@
 /**
- * Dude Fitness App — Design System
+ * Yeti Fitness App — Design System
  * ─────────────────────────────────
  * Single source of truth for all visual tokens used across the
  * React Native client. Import named constants rather than

@@ -43,17 +43,29 @@ export async function uploadFileToR2(
       }
     } else {
       // On mobile, compress first using expo-image-manipulator to limit image sizes
-      // Resize to max width 1920, compress at 80% quality, and get base64 string
+      // Resize to max width 1920, compress at 80% quality
       const manipulated = await manipulateAsync(
         fileUri,
         [{ resize: { width: 1920 } }],
-        { compress: 0.8, format: SaveFormat.JPEG, base64: true }
+        { compress: 0.8, format: SaveFormat.JPEG }
       );
 
-      if (!manipulated.base64) {
+      // Convert to base64 using fetch + FileReader for reliability on mobile
+      const response = await fetch(manipulated.uri);
+      const blob = await response.blob();
+      base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = (reader.result as string).split('base64,')[1];
+          resolve(res || '');
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      if (!base64Data) {
         throw new Error('Image manipulation failed to produce base64 output');
       }
-      base64Data = manipulated.base64;
     }
 
     // Call Supabase Edge Function to perform upload

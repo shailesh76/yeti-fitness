@@ -2,8 +2,8 @@
   "cleanUrls": true,
   "outputDirectory": "dist",
   "buildCommand": "npx expo export --platform web",
-  "installCommand": "npm install --ignore-scripts",
+  "installCommand": "npm install --ignore-scripts --legacy-peer-deps",
   "rewrites": [
-    { "source": "/((?!.*\\.).*)", "destination": "/index.html" }
+    { "source": "/:path*", "destination": "/index" }
   ]
 }

@@ -181,6 +181,26 @@ export const useLogStore = create<LogState>((set, get) => ({
     set((state) => {
       if (!state.activeSession) return state;
       
+      let initialWeight = '';
+      let initialReps = '10';
+
+      // Find previous performance
+      if (state.logsHistory && state.logsHistory.length > 0) {
+        for (const log of state.logsHistory) {
+          const matchEx = log.logged_exercises?.find(
+            (ex: any) => ex.exercise_id === exercise.id
+          );
+          if (matchEx && matchEx.sets && matchEx.sets.length > 0) {
+            const lastSet = matchEx.sets[matchEx.sets.length - 1];
+            if (lastSet.weight && lastSet.reps) {
+              initialWeight = lastSet.weight === '0' ? '' : lastSet.weight;
+              initialReps = lastSet.reps === '0' ? '10' : lastSet.reps;
+              break;
+            }
+          }
+        }
+      }
+      
       const newLoggedEx = {
         plan_exercise_id: undefined,
         exercise_id: exercise.id,
@@ -189,7 +209,7 @@ export const useLogStore = create<LogState>((set, get) => ({
         instructions: exercise.instructions || '',
         gif_url: exercise.gif_url || '',
         sets: [
-          { weight: '', reps: '10', completed: false }
+          { weight: initialWeight, reps: initialReps, completed: false }
         ]
       };
       
@@ -254,6 +274,7 @@ export const useLogStore = create<LogState>((set, get) => ({
             payload: {
               session_id: dbSessionId,
               plan_exercise_id: ex.plan_exercise_id || null,
+              exercise_id: ex.exercise_id,
               weight: parseFloat(set.weight) || 0,
               reps: parseInt(set.reps) || 0,
               completed_at: completedAt
@@ -267,7 +288,7 @@ export const useLogStore = create<LogState>((set, get) => ({
 
     // Force flush to sync immediately (in case the online listener didn't fire)
     try {
-      useOfflineSyncStore.getState().flushQueue();
+      await useOfflineSyncStore.getState().flushQueue();
     } catch (e) {
       console.warn('Failed to flush sync queue after workout:', e);
     }
@@ -279,10 +300,10 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   fetchLogsHistory: async (userId) => {
     set({ loading: true });
-    // Join workout_sessions and session_sets to build the history shape
+    // Join workout_sessions and session_sets with exercises and plan_exercises to build the history shape
     const { data, error } = await supabase
       .from('workout_sessions')
-      .select('*, plan_day:plan_days(name), session_sets(*)')
+      .select('*, plan_day:plan_days(name), session_sets(*, exercise:exercises(*), plan_exercise:plan_exercises(*, exercise:exercises(*)))')
       .eq('athlete_id', userId)
       .order('completed_at', { ascending: false });
 
@@ -291,6 +312,37 @@ export const useLogStore = create<LogState>((set, get) => ({
       const mappedLogs = data.map(session => {
         const total_volume = session.session_sets?.reduce((acc: number, s: any) => acc + ((s.weight || 0) * (s.reps || 0)), 0) || 0;
         
+        // Group session_sets by exercise
+        const exercisesMap: { [key: string]: LoggedExercise } = {};
+        
+        (session.session_sets || []).forEach((setObj: any) => {
+          const directEx = setObj.exercise;
+          const planEx = setObj.plan_exercise;
+          const ex = directEx || planEx?.exercise;
+          
+          const exerciseId = ex?.id || setObj.exercise_id || 'unknown';
+          const exerciseName = ex?.name || 'Unknown Exercise';
+          const muscleGroup = ex?.muscle_group || 'Full Body';
+          
+          if (!exercisesMap[exerciseName]) {
+            exercisesMap[exerciseName] = {
+              plan_exercise_id: setObj.plan_exercise_id || undefined,
+              exercise_id: exerciseId,
+              name: exerciseName,
+              muscle_group: muscleGroup,
+              instructions: ex?.instructions || '',
+              gif_url: ex?.gif_url || '',
+              sets: []
+            };
+          }
+          
+          exercisesMap[exerciseName].sets.push({
+            weight: setObj.weight ? setObj.weight.toString() : '0',
+            reps: setObj.reps ? setObj.reps.toString() : '0',
+            completed: true
+          });
+        });
+        
         return {
           id: session.id,
           user_id: session.athlete_id,
@@ -298,7 +350,7 @@ export const useLogStore = create<LogState>((set, get) => ({
           started_at: session.started_at,
           completed_at: session.completed_at,
           total_volume,
-          logged_exercises: [], // We'd need a deeper join to map specific exercises, but charts mostly use total_volume
+          logged_exercises: Object.values(exercisesMap),
           workout_plans: { name: session.plan_day?.name || 'Workout' }
         };
       });

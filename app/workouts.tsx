@@ -56,16 +56,20 @@ export default function WorkoutScreen() {
   const router   = useRouter();
   const session  = useAuthStore((state) => state.session);
   const { workoutPlans, syncWorkoutPlans, loading } = useWorkoutStore();
-  const { startSession, activeSession, logsHistory } = useLogStore();
+  const { startSession, activeSession, logsHistory, fetchLogsHistory } = useLogStore();
+  const [expandedLogId, setExpandedLogId] = React.useState<string | null>(null);
 
   useEffect(() => {
-    if (session?.user?.id) syncWorkoutPlans(session.user.id);
+    if (session?.user?.id) {
+      syncWorkoutPlans(session.user.id);
+      fetchLogsHistory(session.user.id);
+    }
   }, [session]);
 
   // Redirect if a session is already active
   useEffect(() => {
     if (activeSession) router.replace('/workouts/session');
-  }, [activeSession]);
+  }, [activeSession?.id]);
 
   const handleStartWorkout = (plan: any) => {
     if (plan.workout_plan_exercises && plan.workout_plan_exercises.length > 0) {
@@ -203,7 +207,7 @@ export default function WorkoutScreen() {
                 style={sharedStyles.circleBtn}
                 activeOpacity={0.7}
               >
-                <Ionicons name="calendar-outline" size={20} color={P.TEXT_PRI} />
+                <Ionicons name="barbell-outline" size={20} color={P.TEXT_PRI} />
               </TouchableOpacity>
             </View>
 
@@ -461,6 +465,66 @@ export default function WorkoutScreen() {
               </TouchableOpacity>
             </Animated.View>
 
+            {/* ── Workout History ─────────────────────────────────────────── */}
+            {logsHistory && logsHistory.length > 0 && (
+              <Animated.View entering={FadeInDown.delay(420).duration(400)}>
+                <Text style={[sharedStyles.labelCaps, { marginTop: 24, marginBottom: 10 }]}>
+                  WORKOUT HISTORY
+                </Text>
+                {logsHistory.slice(0, 5).map((log: any, idx: number) => {
+                  const isExpanded = expandedLogId === log.id;
+                  const dateStr = log.completed_at
+                    ? new Date(log.completed_at).toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : 'Unknown Date';
+                  return (
+                    <TouchableOpacity
+                      key={log.id || idx}
+                      activeOpacity={0.85}
+                      onPress={() => setExpandedLogId(isExpanded ? null : log.id)}
+                      style={[styles.historyCard, { flexDirection: 'column', alignItems: 'stretch' }]}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={styles.historyName} numberOfLines={1}>
+                            {log.workout_plans?.name || 'Workout Session'}
+                          </Text>
+                          <Text style={styles.historyMeta}>
+                            {dateStr} · {log.total_volume ? `${log.total_volume} kg logged` : 'Completed'}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Ionicons name="checkmark-circle" size={20} color={P.ACCENT} />
+                          <Ionicons 
+                            name={isExpanded ? "chevron-up" : "chevron-down"} 
+                            size={16} 
+                            color={P.TEXT_MUT} 
+                          />
+                        </View>
+                      </View>
+                      
+                      {isExpanded && log.logged_exercises && log.logged_exercises.length > 0 && (
+                        <View style={{ marginTop: 6 }}>
+                          {log.logged_exercises.map((ex: any, exIdx: number) => (
+                            <View key={ex.exercise_id || exIdx} style={styles.historyExerciseRow}>
+                              <Text style={styles.historyExerciseName}>{ex.name}</Text>
+                              <Text style={styles.historyExerciseSets}>
+                                {ex.sets.map((s: any) => `${s.reps}x${s.weight}kg`).join(' · ')}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </Animated.View>
+            )}
+
             <View style={{ height: 40 }} />
           </ScrollView>
         </Animated.View>
@@ -707,5 +771,47 @@ const styles = StyleSheet.create({
     color:         P.TEXT_PRI,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
+  },
+
+  // History list styles
+  historyCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  historyName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: P.TEXT_PRI,
+    letterSpacing: -0.2,
+    marginBottom: 3,
+  },
+  historyMeta: {
+    fontSize: 11,
+    color: P.TEXT_MUT,
+    fontWeight: '500',
+  },
+  historyExerciseRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  historyExerciseName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: P.TEXT_SEC,
+    marginBottom: 2,
+  },
+  historyExerciseSets: {
+    fontSize: 11,
+    color: P.TEXT_MUT,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
   },
 });

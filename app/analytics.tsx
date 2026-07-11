@@ -6,11 +6,12 @@ import {
   ScrollView,
   TextInput,
   Platform,
-  Alert,
+  Alert as RNAlert,
   StyleSheet,
   Modal,
   Dimensions,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,6 +33,29 @@ import { SkeletonLoader } from '../components/TelemetryComponents';
 import { Ionicons } from '@expo/vector-icons';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import * as ImagePicker from 'expo-image-picker';
+import { getSignedUrl, uploadFileToR2 } from '../services/r2Service';
+
+const Alert = {
+  alert: (title: string, message?: string, buttons?: any[]) => {
+    if (Platform.OS === 'web') {
+      if (buttons && buttons.length > 0) {
+        const confirmBtn = buttons.find(b => b.style === 'destructive' || b.text === 'Delete' || b.text === 'OK' || !b.style);
+        const cancelBtn = buttons.find(b => b.style === 'cancel' || b.text === 'Cancel');
+        
+        const confirmVal = window.confirm(`${title}${message ? `\n\n${message}` : ''}`);
+        if (confirmVal && confirmBtn && confirmBtn.onPress) {
+          confirmBtn.onPress();
+        } else if (!confirmVal && cancelBtn && cancelBtn.onPress) {
+          cancelBtn.onPress();
+        }
+      } else {
+        window.alert(`${title}${message ? `: ${message}` : ''}`);
+      }
+    } else {
+      RNAlert.alert(title, message, buttons);
+    }
+  }
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface WeightLog {
@@ -165,7 +189,8 @@ export default function ProgressScreen() {
   const [weightLoading,setWeightLoading]= useState(false);
   const [latestInsight,setLatestInsight]= useState<string>('');
   const [selectedPr,   setSelectedPr]  = useState<any | null>(null);
-  const [progressPhotos, setProgressPhotos] = useState<{ uri: string; date: string }[]>([]);
+  const [progressPhotos, setProgressPhotos] = useState<{ id: string; uri: string; date: string; key: string }[]>([]);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Measurement state (stored locally, per‑type current + change)
   const [measurements, setMeasurements] = useState<Record<string, { current: number | null; prev: number | null }>>({});
@@ -255,16 +280,26 @@ export default function ProgressScreen() {
   const loadProgressPhotos = async () => {
     if (!session?.user?.id) return;
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('progress_photos')
-        .select('*')
+        .select('id, photo_key, created_at')
         .eq('user_id', session.user.id)
-        .order('taken_at', { ascending: false });
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+
       if (data) {
-        setProgressPhotos(data.map((p: any) => ({ uri: p.photo_url, date: p.taken_at })));
+        // Resolve private keys to temporary signed URLs in parallel
+        const resolved = await Promise.all(
+          data.map(async (p: any) => {
+            const url = await getSignedUrl(p.photo_key);
+            return { id: p.id, uri: url, date: p.created_at, key: p.photo_key };
+          })
+        );
+        setProgressPhotos(resolved);
       }
     } catch (e) {
-      console.warn(e);
+      console.error('Error loading progress photos:', e);
     }
   };
 
@@ -278,15 +313,69 @@ export default function ProgressScreen() {
       });
       if (result.canceled) return;
       const uri = result.assets[0].uri;
-      // Insert with a placeholder photo_url — actual upload logic stays unchanged
-      await supabase.from('progress_photos').insert({
+
+      setPhotoUploading(true);
+
+      // 1. Upload the image to Cloudflare R2 via Edge Function
+      const uploadRes = await uploadFileToR2(uri, 'progress-photos');
+      if (!uploadRes.success || !uploadRes.key) {
+        throw new Error(uploadRes.error || 'Failed to upload photo to storage');
+      }
+
+      // 2. Insert record in Supabase with R2 key
+      const { error } = await supabase.from('progress_photos').insert({
         user_id:   session?.user?.id,
-        photo_url: uri,
-        taken_at:  new Date().toISOString(),
+        photo_key: uploadRes.key,
+        notes:     '',
       });
-      loadProgressPhotos();
-    } catch (e) {
-      Alert.alert('Error', 'Could not add progress photo.');
+      if (error) throw error;
+
+      await loadProgressPhotos();
+    } catch (e: any) {
+      console.error('Error adding progress photo:', e);
+      Alert.alert('Error', e.message || 'Could not add progress photo.');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const handleDeleteProgressPhoto = async (id: string) => {
+    const performDelete = async () => {
+      try {
+        const { error } = await supabase
+          .from('progress_photos')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
+        await loadProgressPhotos();
+      } catch (e) {
+        console.error('Error deleting progress photo:', e);
+        if (Platform.OS === 'web') {
+          alert('Could not delete progress photo.');
+        } else {
+          Alert.alert('Error', 'Could not delete progress photo.');
+        }
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmDelete = window.confirm('Are you sure you want to delete this progress photo?');
+      if (confirmDelete) {
+        await performDelete();
+      }
+    } else {
+      Alert.alert(
+        'Delete Photo',
+        'Are you sure you want to delete this progress photo?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: performDelete,
+          }
+        ]
+      );
     }
   };
 
@@ -568,7 +657,8 @@ export default function ProgressScreen() {
                   <Text style={sharedStyles.labelCaps}>PROGRESS PHOTOS</Text>
                   <TouchableOpacity
                     onPress={handleAddProgressPhoto}
-                    style={styles.photoAddBtn}
+                    disabled={photoUploading}
+                    style={[styles.photoAddBtn, photoUploading && { opacity: 0.5 }]}
                     activeOpacity={0.8}
                   >
                     <Ionicons name="camera" size={13} color={P.ACCENT} />
@@ -576,7 +666,7 @@ export default function ProgressScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {progressPhotos.length === 0 ? (
+                {progressPhotos.length === 0 && !photoUploading ? (
                   /* Empty state */
                   <View style={[sharedStyles.card, styles.emptyState]}>
                     <Ionicons name="camera-outline" size={40} color={P.TEXT_MUT} style={{ marginBottom: 12 }} />
@@ -584,7 +674,8 @@ export default function ProgressScreen() {
                     <Text style={styles.emptyText}>Take your first photo to start tracking your visual transformation.</Text>
                     <TouchableOpacity
                       onPress={handleAddProgressPhoto}
-                      style={[styles.emptyActionBtn, glowStyle(P.ACCENT, 10, 0.30)]}
+                      disabled={photoUploading}
+                      style={[styles.emptyActionBtn, glowStyle(P.ACCENT, 10, 0.30), photoUploading && { opacity: 0.5 }]}
                       activeOpacity={0.85}
                     >
                       <Ionicons name="camera" size={16} color="#000" />
@@ -594,9 +685,17 @@ export default function ProgressScreen() {
                 ) : (
                   /* Photo grid */
                   <View style={styles.photoGrid}>
+                    {photoUploading && (
+                      <View style={[styles.photoTile, { justifyContent: 'center', alignItems: 'center', borderColor: P.ACCENT_BORDER, borderWidth: 1.5 }]}>
+                        <ActivityIndicator size="small" color={P.ACCENT} />
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: P.ACCENT, marginTop: 8, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                          Uploading...
+                        </Text>
+                      </View>
+                    )}
                     {progressPhotos.map((photo, idx) => (
                       <Animated.View
-                        key={idx}
+                        key={photo.id || idx}
                         entering={FadeInDown.delay(idx * 40).duration(350)}
                         style={styles.photoTile}
                       >
@@ -612,13 +711,21 @@ export default function ProgressScreen() {
                             {new Date(photo.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </Text>
                         </View>
+                        <TouchableOpacity
+                          onPress={() => handleDeleteProgressPhoto(photo.id)}
+                          style={styles.photoDeleteBtn}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="trash-outline" size={12} color="#ff4444" />
+                        </TouchableOpacity>
                       </Animated.View>
                     ))}
 
                     {/* Add photo tile — dashed green border */}
                     <TouchableOpacity
                       onPress={handleAddProgressPhoto}
-                      style={styles.photoAddTile}
+                      disabled={photoUploading}
+                      style={[styles.photoAddTile, photoUploading && { opacity: 0.5 }]}
                       activeOpacity={0.75}
                     >
                       <Ionicons name="add" size={26} color={P.ACCENT} />
@@ -1050,6 +1157,19 @@ const styles = StyleSheet.create({
     color:      '#fff',
     textTransform:'uppercase',
     letterSpacing:0.5,
+  },
+  photoDeleteBtn: {
+    position:          'absolute',
+    top:               6,
+    right:             6,
+    backgroundColor:   'rgba(0,0,0,0.72)',
+    width:             22,
+    height:            22,
+    borderRadius:      11,
+    justifyContent:    'center',
+    alignItems:        'center',
+    borderWidth:       1,
+    borderColor:       'rgba(255, 68, 68, 0.3)',
   },
   photoAddTile: {
     width:          '31%',

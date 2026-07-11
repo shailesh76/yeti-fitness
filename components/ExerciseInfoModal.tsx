@@ -81,7 +81,7 @@ export default function ExerciseInfoModal({ visible, onClose, exercise }: Exerci
               onPress={onClose} 
               className="bg-[#00FF88] rounded-xl py-3.5 items-center justify-center shadow-lg shadow-[#00FF88]/20"
             >
-              <Text className="text-[#080808] font-black text-sm uppercase tracking-wider">Got it, Dude</Text>
+              <Text className="text-[#080808] font-black text-sm uppercase tracking-wider">Got it, Yeti</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>

@@ -82,7 +82,7 @@ export default function ExerciseHistoryScreen() {
   const handleShareResult = async () => {
     if (!progressData?.pr) return;
     try {
-      const message = `🏆 New PR on ${exerciseName}! Crushed ${progressData.pr.weight_kg}kg for ${progressData.pr.reps} reps (Est. 1RM: ${progressData.pr.estimated_1rm}kg). Built different on Dude app!`;
+      const message = `🏆 New PR on ${exerciseName}! Crushed ${progressData.pr.weight_kg}kg for ${progressData.pr.reps} reps (Est. 1RM: ${progressData.pr.estimated_1rm}kg). Built different on Yeti app!`;
       await Share.share({ message });
     } catch (error) {
       console.warn("Error sharing:", error);

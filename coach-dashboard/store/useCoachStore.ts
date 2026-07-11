@@ -229,6 +229,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
         sets:session_sets(
           weight, 
           reps,
+          exercise:exercises(name),
           plan_exercise:plan_exercises(
             exercise:exercises(name)
           )
@@ -242,7 +243,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       const exerciseMap: Record<string, { name: string; sets: { weight: number; reps: number }[] }> = {};
       
       (l.sets || []).forEach((s: any) => {
-        const exName = s.plan_exercise?.exercise?.name || 'Unknown Exercise';
+        const exName = s.exercise?.name || s.plan_exercise?.exercise?.name || 'Unknown Exercise';
         if (!exerciseMap[exName]) {
           exerciseMap[exName] = { name: exName, sets: [] };
         }
@@ -321,9 +322,10 @@ export const useCoachStore = create<CoachState>((set, get) => ({
   fetchPreviousWeights: async (athleteId: string) => {
     try {
       const { data, error } = await supabase
-        .from('exercise_sets')
-        .select('exercise_id, weight_kg, completed_at, workout_logs!inner(user_id)')
-        .eq('workout_logs.user_id', athleteId);
+        .from('session_sets')
+        .select('exercise_id, weight, completed_at, workout_sessions!inner(athlete_id)')
+        .eq('workout_sessions.athlete_id', athleteId)
+        .not('completed_at', 'is', null);
         
       if (error) throw error;
       
@@ -331,10 +333,11 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       const times: Record<string, number> = {};
       
       (data || []).forEach((row: any) => {
+        if (!row.exercise_id) return;
         const time = new Date(row.completed_at).getTime();
         if (!times[row.exercise_id] || time > times[row.exercise_id]) {
           times[row.exercise_id] = time;
-          weights[row.exercise_id] = Number(row.weight_kg) || 0;
+          weights[row.exercise_id] = Number(row.weight) || 0;
         }
       });
       

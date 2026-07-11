@@ -95,30 +95,71 @@ export default function AiFoodScanScreen() {
     }
   };
 
+  const getBase64FromUri = async (uri: string): Promise<string> => {
+    if (uri.startsWith('data:')) {
+      return uri.split('base64,')[1];
+    }
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split('base64,')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   const processImageAndAnalyze = async (uri: string) => {
     setAnalyzing(true);
     try {
-      // Compress image to max 1024 width and convert to base64 on a native thread
-      const manipulated = await manipulateAsync(
-        uri,
-        [{ resize: { width: 1024 } }],
-        { compress: 0.7, format: SaveFormat.JPEG, base64: true }
-      );
+      let base64Data = '';
 
-      if (manipulated.base64) {
-        const parsedItems = await analyzeFoodPhoto(manipulated.base64);
+      if (Platform.OS === 'web') {
+        base64Data = await getBase64FromUri(uri);
+      } else {
+        // Compress image to max 1024 width on a native thread
+        const manipulated = await manipulateAsync(
+          uri,
+          [{ resize: { width: 1024 } }],
+          { compress: 0.7, format: SaveFormat.JPEG }
+        );
+        
+        // Convert to base64 using fetch + FileReader for reliability on native devices
+        const response = await fetch(manipulated.uri);
+        const blob = await response.blob();
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const res = (reader.result as string).split('base64,')[1];
+            resolve(res || '');
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      if (base64Data) {
+        const parsedItems = await analyzeFoodPhoto(base64Data);
         if (parsedItems.length > 0) {
           setDetectedItems(parsedItems);
         } else {
           Alert.alert('AI Analysis', 'No food items could be identified. Try another angle or background.', [
-            { text: 'Retry', onPress: () => { setShowCamera(true); setImageUri(null); } }
+            { text: 'Retry', onPress: () => { setShowCamera(Platform.OS !== 'web'); setImageUri(null); } }
           ]);
         }
+      } else {
+        throw new Error('Image base64 processing yielded empty result');
       }
     } catch (err) {
       console.error(err);
-      Alert.alert('Analysis Failed', 'Edge Function could not parse food macros. Please ensure your OpenAI API Key is configured.');
-      setShowCamera(true);
+      Alert.alert(
+        'Analysis Failed', 
+        'Could not analyze food photo. Please ensure your camera permission is active and try again.'
+      );
+      setShowCamera(Platform.OS !== 'web');
       setImageUri(null);
     } finally {
       setAnalyzing(false);
@@ -157,7 +198,7 @@ export default function AiFoodScanScreen() {
       Alert.alert(
         'Gains Synced!',
         'All identified items have been added to your log diary.',
-        [{ text: 'Great, Dude', onPress: () => router.replace('/food-diary') }]
+        [{ text: 'Great, Yeti', onPress: () => router.replace('/food-diary') }]
       );
     }
   };

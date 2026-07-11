@@ -91,7 +91,7 @@ export default function AuthScreen() {
         style={[sharedStyles.cardGlow, styles.card]}
       >
         <View style={styles.header}>
-          <Text style={styles.logoText}>Dude.</Text>
+          <Text style={styles.logoText}>Yeti.</Text>
           <Text style={styles.subtitleText}>Level Up Your Tonnage</Text>
         </View>
 

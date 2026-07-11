@@ -6,11 +6,33 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
+  Alert as RNAlert,
   ActivityIndicator,
   Platform,
   StyleSheet,
 } from 'react-native';
+
+const Alert = {
+  alert: (title: string, message?: string, buttons?: any[]) => {
+    if (Platform.OS === 'web') {
+      if (buttons && buttons.length > 0) {
+        const confirmBtn = buttons.find(b => b.style === 'destructive' || b.text === 'Delete' || b.text === 'OK' || !b.style);
+        const cancelBtn = buttons.find(b => b.style === 'cancel' || b.text === 'Cancel');
+        
+        const confirmVal = window.confirm(`${title}${message ? `\n\n${message}` : ''}`);
+        if (confirmVal && confirmBtn && confirmBtn.onPress) {
+          confirmBtn.onPress();
+        } else if (!confirmVal && cancelBtn && cancelBtn.onPress) {
+          cancelBtn.onPress();
+        }
+      } else {
+        window.alert(`${title}${message ? `: ${message}` : ''}`);
+      }
+    } else {
+      RNAlert.alert(title, message, buttons);
+    }
+  }
+};
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFoodStore, Food } from '../store/useFoodStore';
@@ -26,7 +48,7 @@ import Animated, {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { analyzeFoodPhoto, lookupBarcodeProduct, FoodPhotoAnalysis, BarcodeProductInfo } from '../services/nutritionApi';
+import { analyzeFoodPhoto, lookupBarcodeProduct, analyzeFoodDescription, FoodPhotoAnalysis, BarcodeProductInfo } from '../services/nutritionApi';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
 type CameraMode = 'photo' | 'barcode' | null;
@@ -41,7 +63,7 @@ interface DraftFood {
   confidence?:  number;
   barcode?:     string;
   raw_response: any;
-  source:       'photo' | 'barcode';
+  source:       'photo' | 'barcode' | 'text';
 }
 
 export default function FoodSearchScreen() {
@@ -73,6 +95,8 @@ export default function FoodSearchScreen() {
   const [customCarbs,      setCustomCarbs]      = useState('');
   const [customFat,        setCustomFat]        = useState('');
   const [customServing,    setCustomServing]    = useState('100g');
+  const [customDescription, setCustomDescription] = useState('');
+  const [customFormTab,     setCustomFormTab]    = useState<'ai' | 'manual'>('ai');
 
   // Serving Selector Modal State
   const [selectedFood,   setSelectedFood]   = useState<Food | null>(null);
@@ -202,11 +226,39 @@ export default function FoodSearchScreen() {
     handleBack();
   };
 
+  const handleAnalyzeMealDescription = async () => {
+    if (!customDescription.trim()) {
+      Alert.alert('Error', 'Please describe your meal first');
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const aiData = await analyzeFoodDescription(customDescription);
+      setDraftResult({
+        name:         aiData.name,
+        calories:     String(aiData.calories),
+        protein:      String(aiData.protein),
+        carbs:        String(aiData.carbs),
+        fat:          String(aiData.fat),
+        serving_size: '1 serving',
+        confidence:   aiData.confidence,
+        raw_response: aiData,
+        source:       'photo', // Reuse 'photo' to represent AI-derived macros
+      });
+      setCustomDescription('');
+      setShowCustomForm(false);
+    } catch (e: any) {
+      Alert.alert('Analysis Failed', e.message || 'Could not parse meal description.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const startCamera = async (mode: CameraMode) => {
     if (!permission?.granted && Platform.OS !== 'web') {
       const result = await requestPermission();
       if (!result.granted) {
-        Alert.alert('Permission Required', 'Dude needs camera access to log food from photos or barcodes.', [{ text: 'OK' }]);
+        Alert.alert('Permission Required', 'Yeti needs camera access to log food from photos or barcodes.', [{ text: 'OK' }]);
         return;
       }
     }
@@ -229,8 +281,8 @@ export default function FoodSearchScreen() {
         source:       'photo',
       });
       setCameraMode(null);
-    } catch (e) {
-      Alert.alert('Analysis Failed', 'Could not process the image.');
+    } catch (e: any) {
+      Alert.alert('Analysis Failed', e?.message || 'Could not process the image.');
     } finally {
       setIsProcessing(false);
     }
@@ -369,11 +421,21 @@ export default function FoodSearchScreen() {
             <Text style={styles.camTitle}>Upload Photo</Text>
           </View>
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-            <TouchableOpacity onPress={handlePickWebImage} style={styles.uploadBox}>
-              <Text style={{ fontSize: 36 }}>📤</Text>
-              <Text style={styles.uploadTitle}>Upload Food Image</Text>
-              <Text style={styles.uploadSub}>Select a photo from your computer to analyze.</Text>
-            </TouchableOpacity>
+            {isProcessing ? (
+              <View style={{ alignItems: 'center', gap: 16 }}>
+                <ActivityIndicator size="large" color={P.ACCENT} />
+                <Text style={{ color: P.TEXT_PRI, fontSize: 16, fontWeight: '800', letterSpacing: -0.3 }}>Analyzing Food Photo</Text>
+                <Text style={{ color: P.TEXT_MUT, fontSize: 12, textAlign: 'center', maxWidth: 280, fontWeight: '500', lineHeight: 18 }}>
+                  Running secure AI Vision telemetry... We are identifying items and calculating nutrients.
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={handlePickWebImage} style={styles.uploadBox}>
+                <Text style={{ fontSize: 36 }}>📤</Text>
+                <Text style={styles.uploadTitle}>Upload Food Image</Text>
+                <Text style={styles.uploadSub}>Select a photo from your computer to analyze.</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </SafeAreaView>
       );
@@ -577,14 +639,14 @@ export default function FoodSearchScreen() {
                 <Text style={styles.captureTileLabelSec}>Scan{'\n'}Barcode</Text>
               </TouchableOpacity>
 
-              {/* Custom — secondary */}
+              {/* AI Describe — secondary */}
               <TouchableOpacity
-                onPress={() => setShowCustomForm(true)}
+                onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}
                 style={styles.captureTileSecondary}
                 activeOpacity={0.8}
               >
-                <Ionicons name="create-outline" size={22} color={P.AMBER} />
-                <Text style={styles.captureTileLabelSec}>Custom{'\n'}Food</Text>
+                <Ionicons name="sparkles" size={22} color={P.ACCENT} />
+                <Text style={styles.captureTileLabelSec}>AI{'\n'}Describe</Text>
               </TouchableOpacity>
             </Animated.View>
           )}
@@ -603,8 +665,8 @@ export default function FoodSearchScreen() {
               {/* ── Results ───────────────────────────────────────────── */}
               <View style={[sharedStyles.rowBetween, { marginBottom: 10 }]}>
                 <Text style={sharedStyles.labelCaps}>Search Results</Text>
-                <TouchableOpacity onPress={() => setShowCustomForm(true)}>
-                  <Text style={styles.customFoodLink}>+ Custom Food</Text>
+                <TouchableOpacity onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}>
+                  <Text style={styles.customFoodLink}>✨ Describe Meal</Text>
                 </TouchableOpacity>
               </View>
 
@@ -615,10 +677,10 @@ export default function FoodSearchScreen() {
                   <Ionicons name="search" size={28} color={P.TEXT_MUT} style={{ marginBottom: 10 }} />
                   <Text style={styles.emptyText}>No foods match your search.</Text>
                   <TouchableOpacity
-                    onPress={() => setShowCustomForm(true)}
+                    onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}
                     style={styles.emptyCustomBtn}
                   >
-                    <Text style={styles.emptyCustomText}>Log Custom Food</Text>
+                    <Text style={styles.emptyCustomText}>AI Describe Meal</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -654,58 +716,127 @@ export default function FoodSearchScreen() {
           ) : (
             /* ── Custom Food Form ──────────────────────────────────────── */
             <Animated.View entering={FadeIn.duration(300)} style={styles.customForm}>
-              <View style={[sharedStyles.rowBetween, { marginBottom: 20 }]}>
-                <Text style={styles.customFormTitle}>Create Custom Food</Text>
+              <View style={[sharedStyles.rowBetween, { marginBottom: 16 }]}>
+                <Text style={styles.customFormTitle}>AI Meal Estimator</Text>
                 <TouchableOpacity onPress={() => setShowCustomForm(false)}>
                   <Text style={styles.customFormCancel}>Cancel</Text>
                 </TouchableOpacity>
               </View>
 
-              <FieldRow label="Food Name">
-                <TextInput style={styles.fieldInput} placeholder="e.g. Scrambled Eggs" placeholderTextColor={P.TEXT_MUT} value={customName} onChangeText={setCustomName} />
-              </FieldRow>
-              <FieldRow label="Brand (Optional)">
-                <TextInput style={styles.fieldInput} placeholder="e.g. Local Farm" placeholderTextColor={P.TEXT_MUT} value={customBrand} onChangeText={setCustomBrand} />
-              </FieldRow>
-
-              <View style={[sharedStyles.row, { gap: 12, marginBottom: 14 }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Calories (kcal)</Text>
-                  <TextInput style={[styles.fieldInput, { textAlign: 'center' }]} placeholder="140" placeholderTextColor={P.TEXT_MUT} keyboardType="numeric" value={customCalories} onChangeText={setCustomCalories} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Serving Size</Text>
-                  <TextInput style={[styles.fieldInput, { textAlign: 'center' }]} placeholder="2 eggs / 100g" placeholderTextColor={P.TEXT_MUT} value={customServing} onChangeText={setCustomServing} />
-                </View>
+              {/* Tabs for AI vs Manual */}
+              <View style={{ flexDirection: 'row', backgroundColor: P.BG, borderRadius: 10, padding: 3, marginBottom: 20, borderWidth: 1, borderColor: P.CARD_BORDER }}>
+                <TouchableOpacity
+                  onPress={() => setCustomFormTab('ai')}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    alignItems: 'center',
+                    backgroundColor: customFormTab === 'ai' ? P.CARD_BG : 'transparent',
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: customFormTab === 'ai' ? P.ACCENT : P.TEXT_MUT, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    ✨ Describe Meal
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setCustomFormTab('manual')}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    alignItems: 'center',
+                    backgroundColor: customFormTab === 'manual' ? P.CARD_BG : 'transparent',
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: customFormTab === 'manual' ? P.ACCENT : P.TEXT_MUT, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    📝 Manual Log
+                  </Text>
+                </TouchableOpacity>
               </View>
 
-              <View style={[sharedStyles.row, { gap: 8, marginBottom: 20 }]}>
-                {[
-                  { label: 'Protein (g)', val: customProtein, set: setCustomProtein, color: P.ACCENT },
-                  { label: 'Carbs (g)',   val: customCarbs,   set: setCustomCarbs,   color: P.BLUE  },
-                  { label: 'Fat (g)',     val: customFat,     set: setCustomFat,     color: P.AMBER },
-                ].map((f) => (
-                  <View key={f.label} style={{ flex: 1 }}>
-                    <Text style={[styles.fieldLabel, { color: f.color }]}>{f.label}</Text>
+              {customFormTab === 'ai' ? (
+                /* AI Meal Estimator Form */
+                <View>
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={styles.fieldLabel}>Describe what you ate</Text>
                     <TextInput
-                      style={[styles.fieldInput, { textAlign: 'center', borderColor: f.color + '30' }]}
-                      placeholder="0"
+                      style={[styles.fieldInput, { height: 100, textAlignVertical: 'top', paddingTop: 10, paddingHorizontal: 12 }]}
+                      placeholder="e.g. Two scrambled eggs, a piece of whole wheat sourdough toast with butter, and a cup of black coffee."
                       placeholderTextColor={P.TEXT_MUT}
-                      keyboardType="numeric"
-                      value={f.val}
-                      onChangeText={f.set}
+                      multiline
+                      numberOfLines={4}
+                      value={customDescription}
+                      onChangeText={setCustomDescription}
                     />
+                    <Text style={{ color: P.TEXT_MUT, fontSize: 10, marginTop: 6, fontStyle: 'italic', lineHeight: 14 }}>
+                      Write freely. The AI will estimate your calories and macros, and open a sheet for you to review and save.
+                    </Text>
                   </View>
-                ))}
-              </View>
 
-              <TouchableOpacity
-                style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35)]}
-                onPress={handleCreateCustomFood}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryBtnText}>Save Food & Log</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35), isProcessing && { opacity: 0.7 }]}
+                    onPress={handleAnalyzeMealDescription}
+                    disabled={isProcessing}
+                    activeOpacity={0.85}
+                  >
+                    {isProcessing ? (
+                      <ActivityIndicator color="#000" size="small" />
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Analyze with AI ✨</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                /* Manual Custom Food Form */
+                <View>
+                  <FieldRow label="Food Name">
+                    <TextInput style={styles.fieldInput} placeholder="e.g. Scrambled Eggs" placeholderTextColor={P.TEXT_MUT} value={customName} onChangeText={setCustomName} />
+                  </FieldRow>
+                  <FieldRow label="Brand (Optional)">
+                    <TextInput style={styles.fieldInput} placeholder="e.g. Local Farm" placeholderTextColor={P.TEXT_MUT} value={customBrand} onChangeText={setCustomBrand} />
+                  </FieldRow>
+
+                  <View style={[sharedStyles.row, { gap: 12, marginBottom: 14 }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Calories (kcal)</Text>
+                      <TextInput style={[styles.fieldInput, { textAlign: 'center' }]} placeholder="140" placeholderTextColor={P.TEXT_MUT} keyboardType="numeric" value={customCalories} onChangeText={setCustomCalories} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Serving Size</Text>
+                      <TextInput style={[styles.fieldInput, { textAlign: 'center' }]} placeholder="2 eggs / 100g" placeholderTextColor={P.TEXT_MUT} value={customServing} onChangeText={setCustomServing} />
+                    </View>
+                  </View>
+
+                  <View style={[sharedStyles.row, { gap: 8, marginBottom: 20 }]}>
+                    {[
+                      { label: 'Protein (g)', val: customProtein, set: setCustomProtein, color: P.ACCENT },
+                      { label: 'Carbs (g)',   val: customCarbs,   set: setCustomCarbs,   color: P.BLUE  },
+                      { label: 'Fat (g)',     val: customFat,     set: setCustomFat,     color: P.AMBER },
+                    ].map((f) => (
+                      <View key={f.label} style={{ flex: 1 }}>
+                        <Text style={[styles.fieldLabel, { color: f.color }]}>{f.label}</Text>
+                        <TextInput
+                          style={[styles.fieldInput, { textAlign: 'center', borderColor: f.color + '30' }]}
+                          placeholder="0"
+                          placeholderTextColor={P.TEXT_MUT}
+                          keyboardType="numeric"
+                          value={f.val}
+                          onChangeText={f.set}
+                        />
+                      </View>
+                    ))}
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35)]}
+                    onPress={handleCreateCustomFood}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.primaryBtnText}>Save Food & Log</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </Animated.View>
           )}
         </ScrollView>

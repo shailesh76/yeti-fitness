@@ -64,7 +64,7 @@ export default function ChallengeDetailScreen() {
       setIsSharing(true);
       const isAvailable = await Sharing.isAvailableAsync();
       if (isAvailable) {
-        await Sharing.shareAsync('https://dude.app/c/' + id, {
+        await Sharing.shareAsync('https://yeti.app/c/' + id, {
           dialogTitle: `Join me in the ${challenge?.name} challenge!`,
         });
       } else {

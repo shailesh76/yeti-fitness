@@ -9,6 +9,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { registerPushToken, scheduleWorkoutReminder } from '../services/pushNotificationService';
 import { useNotificationStore } from '../store/useNotificationStore';
 import { P } from '../constants/premiumTheme';
+import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
 
 // Error Boundary Component to prevent app crashes
 interface ErrorBoundaryProps {
@@ -77,6 +78,7 @@ export default function RootLayout() {
   const setSession = useAuthStore((state) => state.setSession);
 
   useEffect(() => {
+    useOfflineSyncStore.getState().initNetworkListener();
     useNotificationStore.getState().loadPreferences();
 
     supabase.auth.getSession().then(({ data: { session } }) => {

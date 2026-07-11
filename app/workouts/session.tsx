@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Modal, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useLogStore } from '../../store/useLogStore';
@@ -14,6 +14,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendLocalNotification } from '../../services/notificationService';
 import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
 
+// Custom Alert shim for web compatibility
+const AlertWeb = {
+  alert: (
+    title: string, 
+    message?: string, 
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+  ) => {
+    if (Platform.OS === 'web') {
+      let confirmText = message ? `${title}\n\n${message}` : title;
+      if (buttons && buttons.length > 0) {
+        confirmText += `\n\n(Click 'OK' to confirm, or 'Cancel' to keep lifting)`;
+        
+        const actionButton = buttons.find(b => b.style === 'destructive' || b.text.toLowerCase() === 'ok' || b.text.toLowerCase() === 'cancel workout' || b.text.toLowerCase() === 'delete');
+        if (window.confirm(confirmText)) {
+          if (actionButton && actionButton.onPress) {
+            actionButton.onPress();
+          } else {
+            const defaultButton = buttons.find(b => b.style !== 'cancel');
+            if (defaultButton && defaultButton.onPress) defaultButton.onPress();
+          }
+        }
+      } else {
+        window.alert(confirmText);
+      }
+    } else {
+      Alert.alert(title, message, buttons);
+    }
+  }
+};
+
 export default function WorkoutSessionScreen() {
   const router = useRouter();
   const session = useAuthStore((state) => state.session);
@@ -28,7 +58,9 @@ export default function WorkoutSessionScreen() {
     loading,
     prs,
     fetchPRs,
-    createPR 
+    createPR,
+    logsHistory,
+    fetchLogsHistory
   } = useLogStore();
   const { exercises, fetchExercises } = useWorkoutStore();
   const [prsHit, setPrsHit] = useState(false);
@@ -63,7 +95,7 @@ export default function WorkoutSessionScreen() {
       setSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeSession]);
+  }, [activeSession?.id]);
 
   // Fluctuating Heart Rate Effect (near-live during workouts)
   useEffect(() => {
@@ -110,12 +142,20 @@ export default function WorkoutSessionScreen() {
     const vitalsInterval = setInterval(syncVitals, 10000);
 
     return () => clearInterval(vitalsInterval);
-  }, [activeSession, session, wearablesConnected]);
+  }, [activeSession?.id, session, wearablesConnected]);
 
   // Load previous performance history and coach prescriptions for all exercises in the current session
   const [historyRefs, setHistoryRefs] = useState<Record<string, { last_lift: string; coach_note: string }>>({});
+  const loadedTelemetryRef = useRef(false);
+
   useEffect(() => {
-    if (!activeSession || !session?.user?.id) return;
+    if (!activeSession) {
+      loadedTelemetryRef.current = false;
+      return;
+    }
+    if (!session?.user?.id) return;
+    if (loadedTelemetryRef.current) return;
+    loadedTelemetryRef.current = true;
 
     const loadTelemetryReferences = async () => {
       try {
@@ -123,6 +163,11 @@ export default function WorkoutSessionScreen() {
         
         // Fetch current PRs on load
         fetchPRs(session.user.id);
+
+        // Fetch logs history if not already loaded
+        if (!logsHistory || logsHistory.length === 0) {
+          fetchLogsHistory(session.user.id);
+        }
 
         // 1. Fetch coach notes
         const { data: notes } = await supabase
@@ -162,16 +207,59 @@ export default function WorkoutSessionScreen() {
     };
 
     loadTelemetryReferences();
-  }, [activeSession, session]);
+  }, [activeSession?.id, session]);
 
   // If no active session, go back home
   useEffect(() => {
     if (!activeSession) {
       router.replace('/home');
     }
-  }, [activeSession]);
+  }, [activeSession?.id]);
 
   if (!activeSession) return null;
+
+  const getPrevSessionLastSet = (exerciseId: string) => {
+    if (!logsHistory || logsHistory.length === 0) return null;
+    for (const log of logsHistory) {
+      const matchEx = log.logged_exercises?.find(
+        (ex: any) => ex.exercise_id === exerciseId
+      );
+      if (matchEx && matchEx.sets && matchEx.sets.length > 0) {
+        const lastSet = matchEx.sets[matchEx.sets.length - 1];
+        if (lastSet.weight && lastSet.reps && lastSet.weight !== '0' && lastSet.reps !== '0') {
+          return {
+            weight: lastSet.weight,
+            reps: lastSet.reps
+          };
+        }
+      }
+    }
+    return null;
+  };
+
+  const getPrevPerformance = (exIdx: number, setIdx: number, exerciseId: string) => {
+    if (setIdx > 0) {
+      const currentEx = activeSession?.exercises[exIdx];
+      const prevSet = currentEx?.sets[setIdx - 1];
+      if (prevSet && prevSet.weight && prevSet.reps) {
+        return {
+          weight: prevSet.weight,
+          reps: prevSet.reps,
+          isCurrentSession: true
+        };
+      }
+      return null;
+    }
+
+    const prevSessionSet = getPrevSessionLastSet(exerciseId);
+    if (prevSessionSet) {
+      return {
+        ...prevSessionSet,
+        isCurrentSession: false
+      };
+    }
+    return null;
+  };
 
   const formatTime = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
@@ -187,29 +275,21 @@ export default function WorkoutSessionScreen() {
   };
 
   const handleCancel = () => {
-    if (Platform.OS === 'web') {
-      const confirmCancel = confirm('Are you sure you want to cancel? All logged sets for this session will be permanently lost.');
-      if (confirmCancel) {
-        cancelSession();
-        router.replace('/home');
-      }
-    } else {
-      Alert.alert(
-        'Cancel Workout?',
-        'Are you sure you want to cancel? All logged sets for this session will be permanently lost.',
-        [
-          { text: 'Keep Lifting', style: 'cancel' },
-          { 
-            text: 'Cancel Workout', 
-            style: 'destructive',
-            onPress: () => {
-              cancelSession();
-              router.replace('/home');
-            }
+    AlertWeb.alert(
+      'Cancel Workout?',
+      'Are you sure you want to cancel? All logged sets for this session will be permanently lost.',
+      [
+        { text: 'Keep Lifting', style: 'cancel' },
+        { 
+          text: 'Cancel Workout', 
+          style: 'destructive',
+          onPress: () => {
+            cancelSession();
+            router.replace('/home');
           }
-        ]
-      );
-    }
+        }
+      ]
+    );
   };
 
   const handleFinish = async () => {
@@ -221,7 +301,7 @@ export default function WorkoutSessionScreen() {
     );
 
     if (!hasCompletedSet) {
-      Alert.alert(
+      AlertWeb.alert(
         'No Sets Logged',
         'Please complete and check off at least one set before finishing the workout.'
       );
@@ -256,7 +336,7 @@ export default function WorkoutSessionScreen() {
         }
       });
     } else {
-      Alert.alert('Error', 'Failed to save workout log. Please try again.');
+      AlertWeb.alert('Error', 'Failed to save workout log. Please try again.');
     }
   };
 
@@ -364,133 +444,150 @@ export default function WorkoutSessionScreen() {
                 </View>
 
                 {/* Sets List */}
-                <View style={{ gap: 8 }}>
-                  {ex.sets.map((set, setIdx) => (
-                    <View 
-                      key={setIdx} 
-                      style={[
-                        styles.setRow,
-                        set.completed ? styles.setRowCompleted : null
-                      ]}
-                    >
-                      {/* Set Number / Delete */}
-                      <TouchableOpacity 
-                        onPress={() => removeSet(exIdx, setIdx)}
-                        disabled={ex.sets.length <= 1}
-                        style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        {ex.sets.length > 1 ? (
-                          <Text style={styles.deleteCross}>✕</Text>
-                        ) : (
-                          <Text style={styles.setNumberText}>{setIdx + 1}</Text>
-                        )}
-                      </TouchableOpacity>
+                <View style={{ gap: 10 }}>
+                  {ex.sets.map((set, setIdx) => {
+                    const prevPerf = getPrevPerformance(exIdx, setIdx, ex.exercise_id);
+                    return (
+                      <View key={setIdx} style={{ gap: 4 }}>
+                        <View 
+                          style={[
+                            styles.setRow,
+                            set.completed ? styles.setRowCompleted : null
+                          ]}
+                        >
+                          {/* Set Number / Delete */}
+                          <TouchableOpacity 
+                            onPress={() => removeSet(exIdx, setIdx)}
+                            disabled={ex.sets.length <= 1}
+                            style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            {ex.sets.length > 1 ? (
+                              <Text style={styles.deleteCross}>✕</Text>
+                            ) : (
+                              <Text style={styles.setNumberText}>{setIdx + 1}</Text>
+                            )}
+                          </TouchableOpacity>
 
-                      {/* Weight Input */}
-                      <View style={{ flex: 1, paddingHorizontal: 4 }}>
-                        <TextInput
-                          style={styles.setInput}
-                          placeholder="0"
-                          placeholderTextColor="#444"
-                          keyboardType="numeric"
-                          value={set.weight}
-                          onChangeText={(val) => updateSet(exIdx, setIdx, { weight: val })}
-                          selectTextOnFocus
-                        />
-                      </View>
+                          {/* Weight Input */}
+                          <View style={{ flex: 1, paddingHorizontal: 4 }}>
+                            <TextInput
+                              style={styles.setInput}
+                              placeholder="0"
+                              placeholderTextColor="#444"
+                              keyboardType="numeric"
+                              value={set.weight}
+                              onChangeText={(val) => updateSet(exIdx, setIdx, { weight: val })}
+                              selectTextOnFocus
+                            />
+                          </View>
 
-                      {/* Reps Input */}
-                      <View style={{ flex: 1, paddingHorizontal: 4 }}>
-                        <TextInput
-                          style={styles.setInput}
-                          placeholder="0"
-                          placeholderTextColor="#444"
-                          keyboardType="numeric"
-                          value={set.reps}
-                          onChangeText={(val) => updateSet(exIdx, setIdx, { reps: val })}
-                          selectTextOnFocus
-                        />
-                      </View>
+                          {/* Reps Input */}
+                          <View style={{ flex: 1, paddingHorizontal: 4 }}>
+                            <TextInput
+                              style={styles.setInput}
+                              placeholder="0"
+                              placeholderTextColor="#444"
+                              keyboardType="numeric"
+                              value={set.reps}
+                              onChangeText={(val) => updateSet(exIdx, setIdx, { reps: val })}
+                              selectTextOnFocus
+                            />
+                          </View>
 
-                      {/* Complete Checkbox */}
-                      <TouchableOpacity
-                        onPress={async () => {
-                          const nextVal = !set.completed;
-                          updateSet(exIdx, setIdx, { completed: nextVal });
-                          if (nextVal && activeSession.id) {
-                            try {
-                              const repsNum = parseInt(set.reps) || 0;
-                              const weightNum = parseFloat(set.weight) || 0.0;
-                              
-                              // Detect PR
-                              const { useOfflineSyncStore } = require('../../store/useOfflineSyncStore');
-                              const outboxPrs = useOfflineSyncStore.getState().outbox
-                                .filter((m: any) => m.type === 'INSERT_PR' && m.payload.exercise_id === ex.exercise_id)
-                                .map((m: any) => m.payload);
+                          {/* Complete Checkbox */}
+                          <TouchableOpacity
+                            onPress={async () => {
+                              const nextVal = !set.completed;
+                              updateSet(exIdx, setIdx, { completed: nextVal });
+                              if (nextVal && activeSession.id) {
+                                try {
+                                  const repsNum = parseInt(set.reps) || 0;
+                                  const weightNum = parseFloat(set.weight) || 0.0;
+                                  
+                                  // Detect PR
+                                  const { useOfflineSyncStore } = require('../../store/useOfflineSyncStore');
+                                  const outboxPrs = useOfflineSyncStore.getState().outbox
+                                    .filter((m: any) => m.type === 'INSERT_PR' && m.payload.exercise_id === ex.exercise_id)
+                                    .map((m: any) => m.payload);
 
-                              const exercisePrs = [
-                                ...prs.filter(p => p.exercise_id === ex.exercise_id),
-                                ...outboxPrs.map((p: any) => ({
-                                  exercise_id: p.exercise_id,
-                                  record_type: p.record_type,
-                                  value: p.value
-                                }))
-                              ];
+                                  const exercisePrs = [
+                                    ...prs.filter(p => p.exercise_id === ex.exercise_id),
+                                    ...outboxPrs.map((p: any) => ({
+                                      exercise_id: p.exercise_id,
+                                      record_type: p.record_type,
+                                      value: p.value
+                                    }))
+                                  ];
 
-                              const hasAnyPriorHistory = exercisePrs.length > 0;
-                              if (session?.user?.id) {
-                                if (weightNum > 0) {
-                                  const weightPr = exercisePrs.find(p => p.record_type === 'max_weight');
-                                  if (!weightPr || weightNum > parseFloat(weightPr.value)) {
-                                    createPR(session.user.id, ex.exercise_id, 'max_weight', weightNum);
-                                    if (hasAnyPriorHistory) {
-                                      setPrsHit(true);
-                                      sendLocalNotification(
-                                        "New Personal Record! 🏆",
-                                        `You set a new max weight of ${weightNum}kg on ${ex.name || 'Exercise'}!`
-                                      );
+                                  const hasAnyPriorHistory = exercisePrs.length > 0;
+                                  if (session?.user?.id) {
+                                    if (weightNum > 0) {
+                                      const weightPr = exercisePrs.find(p => p.record_type === 'max_weight');
+                                      if (!weightPr || weightNum > parseFloat(weightPr.value)) {
+                                        createPR(session.user.id, ex.exercise_id, 'max_weight', weightNum);
+                                        if (hasAnyPriorHistory) {
+                                          setPrsHit(true);
+                                          sendLocalNotification(
+                                            "New Personal Record! 🏆",
+                                            `You set a new max weight of ${weightNum}kg on ${ex.name || 'Exercise'}!`
+                                          );
+                                        }
+                                      }
+                                    } else if (repsNum > 0) {
+                                      const repsPr = exercisePrs.find(p => p.record_type === 'max_reps');
+                                      if (!repsPr || repsNum > parseInt(repsPr.value)) {
+                                        createPR(session.user.id, ex.exercise_id, 'max_reps', repsNum);
+                                        if (hasAnyPriorHistory) {
+                                          setPrsHit(true);
+                                          sendLocalNotification(
+                                            "New Personal Record! 🏆",
+                                            `You set a new max reps record of ${repsNum} reps on ${ex.name || 'Exercise'}!`
+                                          );
+                                        }
+                                      }
                                     }
                                   }
-                                } else if (repsNum > 0) {
-                                  const repsPr = exercisePrs.find(p => p.record_type === 'max_reps');
-                                  if (!repsPr || repsNum > parseInt(repsPr.value)) {
-                                    createPR(session.user.id, ex.exercise_id, 'max_reps', repsNum);
-                                    if (hasAnyPriorHistory) {
-                                      setPrsHit(true);
-                                      sendLocalNotification(
-                                        "New Personal Record! 🏆",
-                                        `You set a new max reps record of ${repsNum} reps on ${ex.name || 'Exercise'}!`
-                                      );
-                                    }
-                                  }
+                                } catch (err) {
+                                  console.warn("Failed to check personal record:", err);
                                 }
                               }
+                            }}
+                            style={[
+                              styles.checkbox,
+                              set.completed ? styles.checkboxCompleted : null
+                            ]}
+                          >
+                            <Text style={[
+                              styles.checkboxText,
+                              set.completed ? styles.checkboxTextCompleted : null
+                            ]}>✓</Text>
+                          </TouchableOpacity>
+                        </View>
 
-                              await supabase
-                                .from('exercise_sets')
-                                .insert({
-                                  workout_log_id: activeSession.id,
-                                  exercise_id: ex.exercise_id,
-                                  reps: repsNum,
-                                  weight_kg: weightNum,
-                                });
-                            } catch (err) {
-                              console.warn("Failed to push exercise set:", err);
-                            }
-                          }
-                        }}
-                        style={[
-                          styles.checkbox,
-                          set.completed ? styles.checkboxCompleted : null
-                        ]}
-                      >
-                        <Text style={[
-                          styles.checkboxText,
-                          set.completed ? styles.checkboxTextCompleted : null
-                        ]}>✓</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                        {/* Previous performance autofill hint */}
+                        {prevPerf && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              updateSet(exIdx, setIdx, {
+                                weight: prevPerf.weight,
+                                reps: prevPerf.reps
+                              });
+                            }}
+                            style={styles.hintBtn}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="sparkles" size={10} color={P.ACCENT} />
+                            <Text style={styles.hintText}>
+                              {prevPerf.isCurrentSession
+                                ? `Prev set: ${prevPerf.weight}kg x ${prevPerf.reps}`
+                                : `Last session: ${prevPerf.weight}kg x ${prevPerf.reps}`}
+                              <Text style={{ color: P.ACCENT + 'bb' }}> · Tap to autofill</Text>
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
               </Animated.View>
             ))}
@@ -1036,5 +1133,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
     marginTop: 4,
+  },
+  hintBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 48,
+    marginTop: -2,
+    marginBottom: 4,
+  },
+  hintText: {
+    fontSize: 10,
+    color: P.TEXT_MUT,
+    fontWeight: '600',
   },
 });

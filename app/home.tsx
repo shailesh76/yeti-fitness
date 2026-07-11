@@ -381,7 +381,7 @@ export default function HomeScreen() {
   // ── Greeting ──────────────────────────────────────────────────────────────
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  const firstName = profile?.full_name?.split(' ')[0] || 'Dude';
+  const firstName = profile?.full_name?.split(' ')[0] || 'Athlete';
 
   // ── Challenge rank ─────────────────────────────────────────────────────────
   const featuredChallenge = challenges?.[0] ?? null;

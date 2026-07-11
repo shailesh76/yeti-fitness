@@ -31,7 +31,15 @@ import { CSS } from "@dnd-kit/utilities";
 
 // --- Sub-components for DnD ---
 
-function DraggableExercise({ exercise, previousWeight }: { exercise: Exercise; previousWeight?: number }) {
+function DraggableExercise({ 
+  exercise, 
+  previousWeight, 
+  onAdd 
+}: { 
+  exercise: Exercise; 
+  previousWeight?: number;
+  onAdd: () => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `library-${exercise.id}`,
     data: { type: "library", exercise },
@@ -45,24 +53,39 @@ function DraggableExercise({ exercise, previousWeight }: { exercise: Exercise; p
       style={style}
       {...listeners}
       {...attributes}
-      className={`p-3 rounded-lg bg-surface-highlight border border-white/5 cursor-grab active:cursor-grabbing hover:bg-white/10 transition-colors ${
+      className={`p-3 rounded-lg bg-surface-highlight border border-white/5 cursor-grab active:cursor-grabbing hover:bg-white/10 transition-colors flex items-center justify-between gap-3 ${
         isDragging ? "opacity-50" : ""
       }`}
     >
-      <div className="flex justify-between items-center">
-        <div className="font-bold text-white text-sm">{exercise.name}</div>
-        {previousWeight !== undefined && (
-          <div className="text-[10px] text-primary font-bold bg-primary/10 px-1.5 py-0.5 rounded">
-            Prev: {previousWeight}kg
-          </div>
-        )}
+      <div className="flex-1 min-w-0">
+        <div className="flex justify-between items-center gap-2">
+          <div className="font-bold text-white text-sm truncate">{exercise.name}</div>
+          {previousWeight !== undefined && (
+            <div className="text-[10px] text-primary font-bold bg-primary/10 px-1.5 py-0.5 rounded shrink-0">
+              Prev: {previousWeight}kg
+            </div>
+          )}
+        </div>
+        <div className="text-xs text-gray-500 mt-0.5">{exercise.muscleGroup}</div>
       </div>
-      <div className="text-xs text-gray-500">{exercise.muscleGroup}</div>
+      
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        className="p-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-md transition-colors shrink-0 flex items-center justify-center"
+        title="Add to active day"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   );
 }
 
-function DraggableBundle({ bundle }: { bundle: any }) {
+function DraggableBundle({ bundle, onAdd }: { bundle: any; onAdd: () => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `bundle-${bundle.id}`,
     data: { type: "bundle", bundle },
@@ -76,12 +99,27 @@ function DraggableBundle({ bundle }: { bundle: any }) {
       style={style}
       {...listeners}
       {...attributes}
-      className={`p-3 rounded-lg bg-surface-highlight border border-white/5 cursor-grab active:cursor-grabbing hover:bg-white/10 transition-colors flex flex-col ${
+      className={`p-3 rounded-lg bg-surface-highlight border border-white/5 cursor-grab active:cursor-grabbing hover:bg-white/10 transition-colors flex items-center justify-between gap-3 ${
         isDragging ? "opacity-50" : ""
       }`}
     >
-      <div className="font-bold text-white text-sm">{bundle.name}</div>
-      <div className="text-xs text-gray-500 font-semibold">{bundle.bundle_exercises?.length || 0} exercises</div>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold text-white text-sm truncate">{bundle.name}</div>
+        <div className="text-xs text-gray-500 font-semibold mt-0.5">{bundle.bundle_exercises?.length || 0} exercises</div>
+      </div>
+      
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        className="p-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-md transition-colors shrink-0 flex items-center justify-center"
+        title="Add bundle to active day"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   );
 }
@@ -225,6 +263,43 @@ function PlanBuilderInner() {
   } = useCoachStore();
   const [search, setSearch] = useState("");
   const [planName, setPlanName] = useState("New Hypertrophy Plan");
+  const [activeView, setActiveView] = useState<'library' | 'builder'>('builder');
+
+  const handleAddExercise = (exercise: Exercise) => {
+    const newItem: AssignedExercise = {
+      id: `assigned-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      exerciseId: exercise.id,
+      name: exercise.name,
+      sets: "3",
+      reps: "10",
+      weight: previousWeights[exercise.id] ? `${previousWeights[exercise.id]}` : "",
+    };
+    
+    setDays(prev => prev.map(day => {
+      if (day.id === activeDayId) {
+        return { ...day, exercises: [...day.exercises, newItem] };
+      }
+      return day;
+    }));
+  };
+
+  const handleAddBundle = (bundle: any) => {
+    const newItems = (bundle.bundle_exercises || []).map((bex: any, idx: number) => ({
+      id: `assigned-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 9)}`,
+      exerciseId: bex.exercise_id,
+      name: bex.exercise?.name || 'Exercise',
+      sets: bex.sets.toString(),
+      reps: bex.reps.toString(),
+      weight: bex.weight?.toString() || "",
+    }));
+
+    setDays(prev => prev.map(day => {
+      if (day.id === activeDayId) {
+        return { ...day, exercises: [...day.exercises, ...newItems] };
+      }
+      return day;
+    }));
+  };
   
   const [days, setDays] = useState<PlanDay[]>([
     { id: "day-1", name: "Day 1", exercises: [] }
@@ -433,15 +508,35 @@ function PlanBuilderInner() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden">
       <DndContext 
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
+        {/* Mobile View Toggle Bar */}
+        <div className="md:hidden flex border-b border-white/5 bg-[#181818] p-2 gap-2 shrink-0">
+          <button
+            onClick={() => setActiveView('library')}
+            className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors text-center ${
+              activeView === 'library' ? 'bg-primary text-black' : 'bg-surface-highlight text-gray-400'
+            }`}
+          >
+            Library
+          </button>
+          <button
+            onClick={() => setActiveView('builder')}
+            className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors text-center ${
+              activeView === 'builder' ? 'bg-primary text-black' : 'bg-surface-highlight text-gray-400'
+            }`}
+          >
+            Builder
+          </button>
+        </div>
+
         {/* Left Panel: Library */}
-        <div className="w-80 border-r border-white/5 bg-[#131313] flex flex-col h-full">
+        <div className={`w-full md:w-80 border-r border-white/5 bg-[#131313] flex-col h-full shrink-0 ${activeView === 'library' ? 'flex' : 'hidden md:flex'}`}>
           <div className="p-6 border-b border-white/5">
             <h2 className="text-xl font-bold tracking-tight text-white mb-4">Library</h2>
             
@@ -483,6 +578,7 @@ function PlanBuilderInner() {
                   key={exercise.id} 
                   exercise={exercise} 
                   previousWeight={previousWeights[exercise.id]}
+                  onAdd={() => handleAddExercise(exercise)}
                 />
               ))
             ) : (
@@ -495,7 +591,7 @@ function PlanBuilderInner() {
                 </button>
                 {filteredBundles.map(bundle => (
                   <div key={bundle.id} className="relative group">
-                    <DraggableBundle bundle={bundle} />
+                    <DraggableBundle bundle={bundle} onAdd={() => handleAddBundle(bundle)} />
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
@@ -515,32 +611,32 @@ function PlanBuilderInner() {
         </div>
 
         {/* Right Panel: Builder */}
-        <div className="flex-1 flex flex-col h-full bg-[#131313]">
+        <div className={`flex-1 flex flex-col h-full bg-[#131313] ${activeView === 'builder' ? 'flex' : 'hidden md:flex'}`}>
           {/* Header */}
-          <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <div className="p-6 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
             <input
               type="text"
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}
-              className="text-3xl font-black tracking-tight text-white bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-gray-600"
+              className="text-2xl sm:text-3xl font-black tracking-tight text-white bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-gray-600 w-full sm:w-auto"
               placeholder="Plan Name"
             />
-            <div className="flex items-center gap-3">
-              <Button variant="secondary">Save Draft</Button>
-              <Button onClick={() => setShowAssignModal(true)}>Assign Plan</Button>
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <Button variant="secondary" className="flex-1 sm:flex-none">Save Draft</Button>
+              <Button onClick={() => setShowAssignModal(true)} className="flex-1 sm:flex-none">Assign Plan</Button>
             </div>
           </div>
 
           {/* Builder Canvas */}
-          <div className="flex-1 p-8 flex flex-col min-h-0">
+          <div className="flex-1 p-4 sm:p-8 flex flex-col min-h-0">
             
             {/* Tabs */}
-            <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
+            <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 shrink-0">
               {days.map((day) => (
                 <button
                   key={day.id}
                   onClick={() => setActiveDayId(day.id)}
-                  className={`px-6 py-2 rounded-full text-sm font-bold tracking-wider uppercase transition-colors ${
+                  className={`px-6 py-2 rounded-full text-sm font-bold tracking-wider uppercase transition-colors shrink-0 ${
                     activeDayId === day.id 
                       ? "bg-primary text-black" 
                       : "bg-surface-highlight text-gray-400 hover:text-white"
@@ -555,7 +651,7 @@ function PlanBuilderInner() {
                   setDays([...days, { id: newId, name: `Day ${days.length + 1}`, exercises: [] }]);
                   setActiveDayId(newId);
                 }}
-                className="px-4 py-2 rounded-full border border-dashed border-white/20 text-gray-400 hover:text-white hover:border-white/40 transition-colors flex items-center"
+                className="px-4 py-2 rounded-full border border-dashed border-white/20 text-gray-400 hover:text-white hover:border-white/40 transition-colors flex items-center shrink-0"
               >
                 <Plus className="h-4 w-4 mr-1" /> Add Day
               </button>

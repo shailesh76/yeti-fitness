@@ -27,17 +27,45 @@ export interface BarcodeProductInfo {
 export const analyzeFoodPhoto = async (imageUri: string): Promise<FoodPhotoAnalysis> => {
   try {
     let base64 = '';
-    // If it's already base64, clean it up
-    if (imageUri.startsWith('data:') || (!imageUri.startsWith('file:') && !imageUri.startsWith('/') && !imageUri.startsWith('http'))) {
+    // If it's already a base64 data URL or a raw base64 string
+    const isBase64 = imageUri.startsWith('data:') || 
+      (!imageUri.includes('://') && !imageUri.startsWith('/') && !imageUri.startsWith('file:'));
+
+    if (isBase64) {
       base64 = imageUri.includes('base64,') ? imageUri.split('base64,')[1] : imageUri;
+    } else if (Platform.OS === 'web' || imageUri.startsWith('http') || imageUri.startsWith('https')) {
+      // For web platform or remote HTTP URLs, use fetch to convert to base64
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = (reader.result as string).split('base64,')[1];
+          resolve(res);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
     } else {
-      // Resize and compress the photo
+      // Resize and compress the photo for local URIs on native platforms (ph://, content://, file://)
       const manipulated = await manipulateAsync(
         imageUri,
         [{ resize: { width: 1024 } }],
-        { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+        { compress: 0.7, format: SaveFormat.JPEG }
       );
-      base64 = manipulated.base64 || '';
+      
+      // Convert the local file URI to base64 using fetch + FileReader for mobile stability
+      const response = await fetch(manipulated.uri);
+      const blob = await response.blob();
+      base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = (reader.result as string).split('base64,')[1];
+          resolve(res || '');
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
     }
 
     if (!base64) {
@@ -166,5 +194,35 @@ export const lookupBarcodeProduct = async (barcode: string): Promise<BarcodeProd
   } catch (e) {
     console.error("Error looking up barcode:", e);
     return null;
+  }
+};
+
+/**
+ * Analyzes a text description of a meal using the Supabase edge function 'analyze-food-image'.
+ */
+export const analyzeFoodDescription = async (description: string): Promise<FoodPhotoAnalysis> => {
+  try {
+    const { data, error } = await supabase.functions.invoke('analyze-food-image', {
+      body: { description }
+    });
+
+    if (error) throw error;
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      throw new Error("Could not parse meal description.");
+    }
+
+    const combined: FoodPhotoAnalysis = {
+      name: data.map((item: any) => item.name || 'Unnamed food').join(' + '),
+      calories: Math.round(data.reduce((sum: number, item: any) => sum + (Number(item.calories) || 0), 0)),
+      protein: Math.round(data.reduce((sum: number, item: any) => sum + (Number(item.protein) || 0), 0) * 10) / 10,
+      carbs: Math.round(data.reduce((sum: number, item: any) => sum + (Number(item.carbs) || 0), 0) * 10) / 10,
+      fat: Math.round(data.reduce((sum: number, item: any) => sum + (Number(item.fat) || 0), 0) * 10) / 10,
+      confidence: 0.95
+    };
+
+    return combined;
+  } catch (e: any) {
+    console.error("Error analyzing food description:", e);
+    throw new Error(e.message || "Failed to analyze meal description.");
   }
 };
