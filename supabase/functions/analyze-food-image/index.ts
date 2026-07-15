@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,10 +13,117 @@ serve(async (req) => {
   }
 
   try {
+    // ── 1. Authenticate the caller ──────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Initialize service role client to check and log requests securely
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!serviceRoleKey) {
+      return new Response(JSON.stringify({ error: 'System configuration error: service role key missing' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const supabaseServiceRole = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      serviceRoleKey,
+      { auth: { persistSession: false } }
+    );
+
+    // Resolve Entitlements
+    const { data: entitlements } = await supabaseServiceRole
+      .from('user_entitlements')
+      .select('plan, is_active')
+      .eq('user_id', user.id)
+      .eq('is_active', true);
+
+    const isPremiumPlan = (entitlements || []).some(
+      (e: any) => e.plan === 'PRO' || e.plan === 'COACHING'
+    );
+
+    // Check Global Beta config
+    const { data: betaConfig } = await supabaseServiceRole
+      .from('beta_mode_config')
+      .select('is_global_beta_active')
+      .maybeSingle();
+    const isGlobalBeta = betaConfig?.is_global_beta_active ?? false;
+    const isPremium = isPremiumPlan || isGlobalBeta;
+    const subscriptionTier = isPremiumPlan 
+      ? ((entitlements || []).find((e: any) => e.plan === 'COACHING') ? 'COACHING' : 'PRO')
+      : 'FREE';
+
+    // Count daily food scans
+    const today = new Date().toISOString().split('T')[0];
+    const { count: currentScans } = await supabaseServiceRole
+      .from('ai_request_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('athlete_id', user.id)
+      .eq('coach_type', 'nutrition_image')
+      .eq('success', true)
+      .gte('requested_at', `${today}T00:00:00.000Z`);
+
+    const scanCount = currentScans || 0;
+
+    if (!isPremium && scanCount >= 10) {
+      // Log failed scan — does NOT increment count
+      await supabaseServiceRole.from('ai_request_logs').insert({
+        athlete_id: user.id,
+        subscription_tier: subscriptionTier,
+        success: false,
+        error_reason: 'daily_limit_exceeded',
+        coach_type: 'nutrition_image',
+      });
+
+      return new Response(JSON.stringify({ 
+        error: 'Daily food scan limit reached for free tier (max 10 scans/day). Upgrade to Pro for unlimited scans!' 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403,
+      });
+    }
+
+    // ── 2. Parse and validate body ─────────────────────────────────────────
     const { image, description } = await req.json()
     
     if (!image && !description) {
       return new Response(JSON.stringify({ error: "Missing image base64 data or description text" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      })
+    }
+
+    // Guard: image must not exceed 5MB base64 (~6.86MB encoded)
+    const MAX_IMAGE_BYTES = 7 * 1024 * 1024; // 7MB encoded ceiling
+    if (image && image.length > MAX_IMAGE_BYTES) {
+      return new Response(JSON.stringify({ error: "Image exceeds maximum allowed size (5MB)" }), {
+        status: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      })
+    }
+
+    // Guard: description must not exceed 2000 characters
+    if (description && description.length > 2000) {
+      return new Response(JSON.stringify({ error: "Description exceeds maximum length (2000 chars)" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       })
@@ -223,6 +331,14 @@ serve(async (req) => {
     if (!success) {
       throw new Error(lastError?.message || "Neither Gemini nor OpenAI models could successfully analyze the food.");
     }
+
+    // Log successful scan
+    await supabaseServiceRole.from('ai_request_logs').insert({
+      athlete_id: user.id,
+      subscription_tier: subscriptionTier,
+      success: true,
+      coach_type: 'nutrition_image',
+    });
 
     return new Response(JSON.stringify(foodItems), {
       status: 200,

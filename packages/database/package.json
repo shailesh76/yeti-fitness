@@ -1,0 +1,12 @@
+{
+  "name": "@yeti/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nozbe/watermelondb": "^0.28.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

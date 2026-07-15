@@ -1,0 +1,16 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/auth/callback/route": "app/auth/callback/route.js",
+  "/page": "app/page.js",
+  "/login/page": "app/login/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/icon.png/route": "app/icon.png/route.js",
+  "/dashboard/athletes/[id]/page": "app/dashboard/athletes/[id]/page.js",
+  "/dashboard/[userId]/page": "app/dashboard/[userId]/page.js",
+  "/exercises/new/page": "app/exercises/new/page.js",
+  "/dashboard/templates/builder/page": "app/dashboard/templates/builder/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/exercises/page": "app/exercises/page.js",
+  "/plans/builder/page": "app/plans/builder/page.js",
+  "/dashboard/subscription/page": "app/dashboard/subscription/page.js"
+}

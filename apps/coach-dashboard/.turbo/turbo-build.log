@@ -1,0 +1,45 @@
+
+> @yeti/coach-dashboard@0.1.0 build C:\Development\dude\apps\coach-dashboard
+> next build
+
+  ▲ Next.js 14.2.3
+  - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/14) ...
+   Generating static pages (3/14) 
+   Generating static pages (6/14) 
+   Generating static pages (10/14) 
+ ✓ Generating static pages (14/14)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    138 B          87.2 kB
+├ ○ /_not-found                          873 B          87.9 kB
+├ ƒ /auth/callback                       0 B                0 B
+├ ○ /dashboard                           3.21 kB         160 kB
+├ ƒ /dashboard/[userId]                  78.7 kB         244 kB
+├ ƒ /dashboard/athletes/[id]             2.9 kB         89.9 kB
+├ ○ /dashboard/subscription              4.08 kB         157 kB
+├ ○ /dashboard/templates/builder         1.11 kB         105 kB
+├ ○ /exercises                           4.5 kB          169 kB
+├ ○ /exercises/new                       4.14 kB         157 kB
+├ ○ /icon.png                            0 B                0 B
+├ ○ /login                               1.86 kB         164 kB
+├ ○ /plans/builder                       6.45 kB         189 kB
+└ ○ /settings                            3.54 kB         166 kB
++ First Load JS shared by all            87 kB
+  ├ chunks/65d48fa5-ddf92f1cb65b9603.js  53.6 kB
+  ├ chunks/801-8d032c1de70c0728.js       31.4 kB
+  └ other shared chunks (total)          1.95 kB
+
+
+ƒ Middleware                             84.4 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

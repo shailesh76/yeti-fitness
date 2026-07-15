@@ -1,0 +1,13 @@
+{
+  "name": "@yeti/sync",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nozbe/watermelondb": "^0.28.0",
+    "@supabase/supabase-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

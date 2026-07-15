@@ -1,0 +1,16 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "experimentalDecorators": true,
+    "paths": {
+      "@yeti/database/*": ["../../packages/database/*"],
+      "@yeti/database": ["../../packages/database"],
+      "@yeti/training-engine/*": ["../../packages/training-engine/*"],
+      "@yeti/training-engine": ["../../packages/training-engine"],
+      "@yeti/sync/*": ["../../packages/sync/*"],
+      "@yeti/sync": ["../../packages/sync"]
+    }
+  },
+  "exclude": ["node_modules", "babel.config.js", "metro.config.js", "supabase/functions", "coach-dashboard"]
+}

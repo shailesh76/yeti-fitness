@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Barbell Bench Press",
+    "category": "Chest",
+    "primary_muscles": ["CHEST"],
+    "secondary_muscles": ["TRICEPS", "SHOULDERS"],
+    "equipment": "BARBELL",
+    "difficulty": "INTERMEDIATE",
+    "instructions": "Lie on a flat bench. Grip the bar slightly wider than shoulder-width. Lower the bar to your mid-chest, then press it back up.",
+    "video_url": "https://example.com/videos/bench-press.mp4",
+    "alternative_exercises": ["Dumbbell Bench Press", "Push-ups"]
+  },
+  {
+    "name": "Barbell Squat",
+    "category": "Legs",
+    "primary_muscles": ["LEGS"],
+    "secondary_muscles": ["CORE"],
+    "equipment": "BARBELL",
+    "difficulty": "ADVANCED",
+    "instructions": "Rest the barbell on your upper back. Squat down until your thighs are parallel to the floor, then drive back up.",
+    "video_url": "https://example.com/videos/barbell-squat.mp4",
+    "alternative_exercises": ["Leg Press", "Goblet Squat"]
+  },
+  {
+    "name": "Pull-up",
+    "category": "Back",
+    "primary_muscles": ["BACK"],
+    "secondary_muscles": ["BICEPS"],
+    "equipment": "BODYWEIGHT",
+    "difficulty": "INTERMEDIATE",
+    "instructions": "Hang from a bar with an overhand grip. Pull your body up until your chin is over the bar, then lower back down slowly.",
+    "video_url": "https://example.com/videos/pull-up.mp4",
+    "alternative_exercises": ["Lat Pulldown", "Assisted Pull-up"]
+  }
+]
