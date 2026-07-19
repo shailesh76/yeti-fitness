@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeInDown, useSharedValue, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,8 @@ import { useAuthStore } from '../store/useAuthStore';
 import { HealthScoreEngine } from '@yeti/training-engine';
 import { useSyncManager } from '../hooks/useSyncManager';
 import { Workout, WorkoutSession } from '@yeti/database';
+import AppShell from '../components/AppShell';
+import { database, isNativeDbAvailable } from '../database';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#39FF6A';
@@ -54,6 +56,22 @@ const WeightTrendChart = ({ logs }: { logs: any[] }) => {
           <Ionicons name="analytics-outline" size={28} color={TEXT_SECONDARY} style={{ marginBottom: 8 }} />
           <Text style={{ color: TEXT_SECONDARY, fontSize: 13, textAlign: 'center', paddingHorizontal: 16 }}>
             Log weight on at least 2 days in the progress tracker to view your trend.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Skia (CanvasKit/WASM) is not reliably available on web — render a graceful
+  // fallback instead of crashing when the native canvas is unavailable.
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>WEIGHT TREND (30D)</Text>
+        <View style={{ height: 100, justifyContent: 'center', alignItems: 'center', marginTop: 16 }}>
+          <Ionicons name="phone-portrait-outline" size={26} color={TEXT_SECONDARY} style={{ marginBottom: 8 }} />
+          <Text style={{ color: TEXT_SECONDARY, fontSize: 12, textAlign: 'center', paddingHorizontal: 16 }}>
+            Trend charts are available in the Yeti mobile app.
           </Text>
         </View>
       </View>
@@ -106,7 +124,7 @@ const MacroProgressCard = ({ consumed, target }: { consumed: any, target: any })
   return (
     <View style={styles.card}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={styles.cardTitle}>TODAY'S NUTRITION</Text>
+        <Text style={styles.cardTitle}>TODAY&apos;S NUTRITION</Text>
         <Text style={{ color: ACCENT, fontSize: 12, fontWeight: 'bold' }}>
           {cCalories} / {tCalories} kcal
         </Text>
@@ -189,114 +207,119 @@ export default function HomeScreen() {
         }));
       setWeightLogs(filteredWeights);
 
-      // 4. Get active or scheduled workout session
-      const activeSessions = (await progressRepository['db'].get('workout_sessions')
-        .query(Q.where('status', 'active'))
-        .fetch()) as WorkoutSession[];
-      
-      if (activeSessions.length > 0) {
-        setTodayWorkout(`Resume: ${activeSessions[0].name}`);
-        setActiveSessionId(activeSessions[0].id);
-      } else {
-        const templates = (await workoutRepository.getWorkouts()) as Workout[];
-        if (templates.length > 0) {
-          setTodayWorkout(`Up Next: ${templates[0].name}`);
-          setActiveSessionId(null);
+      // 4 & 5. Active/scheduled workout session + Yeti score (last 14 days).
+      // Local WatermelonDB is unavailable on web — skip this section there and
+      // keep whatever score/workout state is already showing, rather than
+      // throwing (this used to reach into progressRepository's private `db`
+      // field via bracket access, bypassing the repository's own guards).
+      if (isNativeDbAvailable && database) {
+        const activeSessions = (await database.get('workout_sessions')
+          .query(Q.where('status', 'active'))
+          .fetch()) as WorkoutSession[];
+
+        if (activeSessions.length > 0) {
+          setTodayWorkout(`Resume: ${activeSessions[0].name}`);
+          setActiveSessionId(activeSessions[0].id);
         } else {
-          setTodayWorkout(null);
-          setActiveSessionId(null);
+          const templates = (await workoutRepository.getWorkouts()) as Workout[];
+          if (templates.length > 0) {
+            setTodayWorkout(`Up Next: ${templates[0].name}`);
+            setActiveSessionId(null);
+          } else {
+            setTodayWorkout(null);
+            setActiveSessionId(null);
+          }
         }
+
+        const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
+        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+        // Helper query for 14 day completions
+        const workoutsCompleted = await database.get('workout_sessions')
+          .query(
+            Q.where('user_id', userId),
+            Q.where('status', 'completed'),
+            Q.where('finished_at', Q.gte(fourteenDaysAgo))
+          ).fetchCount();
+
+        const mealsLogged = await database.get('meal_logs')
+          .query(
+            Q.where('athlete_id', userId),
+            Q.where('logged_at', Q.gte(fourteenDaysAgo))
+          ).fetchCount();
+
+        const checkInsCompleted = await database.get('check_ins')
+          .query(
+            Q.where('athlete_id', userId),
+            Q.where('created_at', Q.gte(fourteenDaysAgo))
+          ).fetchCount();
+
+        const aiInteractions = await database.get('ai_messages')
+          .query(
+            Q.where('role', 'user'),
+            Q.where('created_at', Q.gte(fourteenDaysAgo))
+          ).fetchCount();
+
+        // Check activity days (any log in last 14 days counts as an active day)
+        const daysActive = Math.min(
+          14,
+          Math.max(2, workoutsCompleted + Math.min(mealsLogged, 7) + checkInsCompleted + Math.min(aiInteractions, 3))
+        );
+
+        const lastSessions = await workoutRepository.getWorkoutHistory(userId);
+        const daysSinceLastWorkout = lastSessions.length > 0 && lastSessions[0].finished_at
+          ? Math.floor((Date.now() - lastSessions[0].finished_at) / (24 * 60 * 60 * 1000))
+          : 14;
+
+        const currentScoreResult = HealthScoreEngine.calculate({
+          workoutsCompleted,
+          workoutsAssigned: 8, // Standard baseline of 4 workouts per week over 14 days
+          mealsLogged,
+          aiInteractions,
+          checkInsCompleted,
+          daysActive,
+          daysSinceLastWorkout
+        });
+
+        // Calculate last week's score for differential
+        const workoutsCompletedPrev = await database.get('workout_sessions')
+          .query(
+            Q.where('user_id', userId),
+            Q.where('status', 'completed'),
+            Q.where('finished_at', Q.between(fourteenDaysAgo, weekAgo))
+          ).fetchCount();
+
+        const mealsLoggedPrev = await database.get('meal_logs')
+          .query(
+            Q.where('athlete_id', userId),
+            Q.where('logged_at', Q.between(fourteenDaysAgo, weekAgo))
+          ).fetchCount();
+
+        const checkInsCompletedPrev = await database.get('check_ins')
+          .query(
+            Q.where('athlete_id', userId),
+            Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
+          ).fetchCount();
+
+        const aiInteractionsPrev = await database.get('ai_messages')
+          .query(
+            Q.where('role', 'user'),
+            Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
+          ).fetchCount();
+
+        const prevScoreResult = HealthScoreEngine.calculate({
+          workoutsCompleted: workoutsCompletedPrev,
+          workoutsAssigned: 4,
+          mealsLogged: mealsLoggedPrev,
+          aiInteractions: aiInteractionsPrev,
+          checkInsCompleted: checkInsCompletedPrev,
+          daysActive: Math.min(7, daysActive / 2),
+          daysSinceLastWorkout: daysSinceLastWorkout + 7
+        });
+
+        setYetiScore(currentScoreResult.score);
+        setPrevYetiScore(prevScoreResult.score);
       }
-
-      // 5. Calculate Yeti score (last 14 days)
-      const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-
-      // Helper query for 14 day completions
-      const workoutsCompleted = await progressRepository['db'].get('workout_sessions')
-        .query(
-          Q.where('user_id', userId),
-          Q.where('status', 'completed'),
-          Q.where('finished_at', Q.gte(fourteenDaysAgo))
-        ).fetchCount();
-
-      const mealsLogged = await progressRepository['db'].get('meal_logs')
-        .query(
-          Q.where('athlete_id', userId),
-          Q.where('logged_at', Q.gte(fourteenDaysAgo))
-        ).fetchCount();
-
-      const checkInsCompleted = await progressRepository['db'].get('check_ins')
-        .query(
-          Q.where('athlete_id', userId),
-          Q.where('created_at', Q.gte(fourteenDaysAgo))
-        ).fetchCount();
-
-      const aiInteractions = await progressRepository['db'].get('ai_messages')
-        .query(
-          Q.where('role', 'user'),
-          Q.where('created_at', Q.gte(fourteenDaysAgo))
-        ).fetchCount();
-
-      // Check activity days (any log in last 14 days counts as an active day)
-      const daysActive = Math.min(
-        14,
-        Math.max(2, workoutsCompleted + Math.min(mealsLogged, 7) + checkInsCompleted + Math.min(aiInteractions, 3))
-      );
-
-      const lastSessions = await workoutRepository.getWorkoutHistory(userId);
-      const daysSinceLastWorkout = lastSessions.length > 0 && lastSessions[0].finished_at
-        ? Math.floor((Date.now() - lastSessions[0].finished_at) / (24 * 60 * 60 * 1000))
-        : 14;
-
-      const currentScoreResult = HealthScoreEngine.calculate({
-        workoutsCompleted,
-        workoutsAssigned: 8, // Standard baseline of 4 workouts per week over 14 days
-        mealsLogged,
-        aiInteractions,
-        checkInsCompleted,
-        daysActive,
-        daysSinceLastWorkout
-      });
-
-      // Calculate last week's score for differential
-      const workoutsCompletedPrev = await progressRepository['db'].get('workout_sessions')
-        .query(
-          Q.where('user_id', userId),
-          Q.where('status', 'completed'),
-          Q.where('finished_at', Q.between(fourteenDaysAgo, weekAgo))
-        ).fetchCount();
-
-      const mealsLoggedPrev = await progressRepository['db'].get('meal_logs')
-        .query(
-          Q.where('athlete_id', userId),
-          Q.where('logged_at', Q.between(fourteenDaysAgo, weekAgo))
-        ).fetchCount();
-
-      const checkInsCompletedPrev = await progressRepository['db'].get('check_ins')
-        .query(
-          Q.where('athlete_id', userId),
-          Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
-        ).fetchCount();
-
-      const aiInteractionsPrev = await progressRepository['db'].get('ai_messages')
-        .query(
-          Q.where('role', 'user'),
-          Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
-        ).fetchCount();
-
-      const prevScoreResult = HealthScoreEngine.calculate({
-        workoutsCompleted: workoutsCompletedPrev,
-        workoutsAssigned: 4,
-        mealsLogged: mealsLoggedPrev,
-        aiInteractions: aiInteractionsPrev,
-        checkInsCompleted: checkInsCompletedPrev,
-        daysActive: Math.min(7, daysActive / 2),
-        daysSinceLastWorkout: daysSinceLastWorkout + 7
-      });
-
-      setYetiScore(currentScoreResult.score);
-      setPrevYetiScore(prevScoreResult.score);
 
     } catch (e) {
       console.warn("Failed to load local analytics:", e);
@@ -313,13 +336,16 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={ACCENT} />
-      </View>
+      <AppShell activeTab="home">
+        <View style={{ flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={ACCENT} />
+        </View>
+      </AppShell>
     );
   }
 
   return (
+    <AppShell activeTab="home">
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
@@ -344,7 +370,7 @@ export default function HomeScreen() {
         {todayWorkout && (
           <Animated.View entering={FadeInDown.duration(400).delay(100)}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>TODAY'S WORKOUT</Text>
+              <Text style={styles.cardTitle}>TODAY&apos;S WORKOUT</Text>
               <Text style={{ color: TEXT_PRIMARY, fontSize: 20, fontWeight: 'bold', marginTop: 8 }}>
                 {todayWorkout}
               </Text>
@@ -370,6 +396,7 @@ export default function HomeScreen() {
 
       </ScrollView>
     </SafeAreaView>
+    </AppShell>
   );
 }
 
