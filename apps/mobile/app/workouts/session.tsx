@@ -5,7 +5,7 @@
  * allows athletes to log sets (weight/reps/RPE/tempo), and saves everything
  * offline-first via useSessionStore + useOfflineSyncStore.
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -113,7 +113,8 @@ interface ExerciseCardProps {
   onComplete: (exerciseIdx: number, setIdx: number) => void;
 }
 
-function ExerciseCard({ ex, exIndex, onUpdate, onComplete }: ExerciseCardProps) {
+const ExerciseCard = memo(function ExerciseCard({ ex, exIndex, onUpdate, onComplete }: ExerciseCardProps) {
+  const router = useRouter();
   const completedSets = ex.sets.filter((s) => s.isCompleted).length;
   const allDone = completedSets === ex.sets.length;
 
@@ -122,7 +123,17 @@ function ExerciseCard({ ex, exIndex, onUpdate, onComplete }: ExerciseCardProps) 
       {/* Exercise Header */}
       <View style={styles.cardHeader}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.exerciseName}>{ex.exerciseName}</Text>
+          <View style={styles.exerciseNameRow}>
+            <Text style={styles.exerciseName}>{ex.exerciseName}</Text>
+            {ex.exerciseId && (
+              <TouchableOpacity
+                onPress={() => router.push(`/exercises/${ex.exerciseId}`)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="information-circle-outline" size={18} color={P.TEXT_MUT} />
+              </TouchableOpacity>
+            )}
+          </View>
           <Text style={styles.exerciseTarget}>
             {ex.targetSets} × {ex.targetReps} reps
             {ex.targetWeightKg ? ` @ ${ex.targetWeightKg}kg` : ''}
@@ -176,7 +187,7 @@ function ExerciseCard({ ex, exIndex, onUpdate, onComplete }: ExerciseCardProps) 
       </View>
     </Animated.View>
   );
-}
+});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -576,6 +587,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
     gap: 8,
+  },
+  exerciseNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   exerciseName: {
     color: P.TEXT_PRI,
