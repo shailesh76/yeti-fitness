@@ -15,7 +15,7 @@ export default function MobileDashboard() {
 
       {/* Today's Focus */}
       <View style={styles.focusCard}>
-        <Text style={styles.focusLabel}>TODAY'S WORKOUT</Text>
+        <Text style={styles.focusLabel}>TODAY&apos;S WORKOUT</Text>
         <Text style={styles.focusTitle}>Push Day Hypertrophy</Text>
         <Text style={styles.focusMeta}>65 minutes • Chest, Shoulders, Triceps</Text>
         <View style={styles.button}>
@@ -29,7 +29,7 @@ export default function MobileDashboard() {
         <Text style={styles.insightText}>🔥 Your squat improved 8% this month!</Text>
       </View>
       <View style={[styles.insightCard, { borderLeftColor: '#f59e0b' }]}>
-        <Text style={styles.insightText}>⚠ Your protein was below target 3 days this week. Let's aim for 180g today.</Text>
+        <Text style={styles.insightText}>⚠ Your protein was below target 3 days this week. Let&apos;s aim for 180g today.</Text>
       </View>
     </ScrollView>
   );

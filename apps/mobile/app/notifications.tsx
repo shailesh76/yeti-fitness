@@ -72,9 +72,9 @@ export default function NotificationCenterScreen() {
             <View style={styles.emptyIconContainer}>
               <Ionicons name="notifications-off-outline" size={48} color={P.TEXT_MUT} />
             </View>
-            <Text style={styles.emptyTitle}>You're all caught up</Text>
+            <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
             <Text style={styles.emptySubtitle}>
-              When you get workout reminders, coach messages, or challenge updates, they'll show up here.
+              When you get workout reminders, coach messages, or challenge updates, they&apos;ll show up here.
             </Text>
           </Animated.View>
         ) : (

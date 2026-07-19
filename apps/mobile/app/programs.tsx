@@ -59,7 +59,7 @@ export default function MyProgramsScreen() {
             {workoutPlans.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyTitle}>No programs assigned</Text>
-                <Text style={styles.emptySubtitle}>Your coach hasn't assigned any workout programs to your account yet, dude.</Text>
+                <Text style={styles.emptySubtitle}>Your coach hasn&apos;t assigned any workout programs to your account yet, dude.</Text>
               </View>
             ) : (
               <View style={styles.listContainer}>
