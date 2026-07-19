@@ -70,24 +70,29 @@ export default function GoalsScreen() {
     }
 
     setLoading(true);
-    const { error } = await (userRepository as any).updateProfile({
-      id: session.user.id,
-      full_name: userStore.full_name,
-      age: parseInt(userStore.age),
-      gender: userStore.gender,
-      height_cm: parseFloat(userStore.height_cm),
-      weight_kg: parseFloat(userStore.weight_kg),
-      body_fat_percent: userStore.body_fat_percent ? parseFloat(userStore.body_fat_percent) : null,
-      activity_level: userStore.activity_level,
-      goal: userStore.goal,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      Alert.alert('Error saving profile', error.message);
-    } else {
+    try {
+      await userRepository.updateProfile(session.user.id, {
+        full_name: userStore.full_name,
+        age: parseInt(userStore.age),
+        gender: userStore.gender,
+        height_cm: parseFloat(userStore.height_cm),
+        weight_kg: parseFloat(userStore.weight_kg),
+        body_fat_percent: userStore.body_fat_percent ? parseFloat(userStore.body_fat_percent) : null,
+        activity_level: userStore.activity_level,
+        goal: userStore.goal,
+      });
       router.replace('/onboarding/notifications');
+    } catch (e: any) {
+      // Local WatermelonDB is unavailable on web — there is nothing more this
+      // screen can do locally, so proceed rather than stranding web users at
+      // onboarding. Any other unexpected failure is surfaced to the user.
+      if (typeof e?.message === 'string' && e.message.startsWith('LOCAL_DB_UNAVAILABLE')) {
+        router.replace('/onboarding/notifications');
+      } else {
+        Alert.alert('Error saving profile', e?.message ?? 'Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

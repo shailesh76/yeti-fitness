@@ -1,6 +1,6 @@
 import '../global.css';
-import { Stack } from 'expo-router';
-import React, { useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import React, { useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/useAuthStore';
 import { StatusBar } from 'expo-status-bar';
@@ -80,8 +80,20 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+// Routes reachable while signed out. Any other route needs a redirect to
+// /auth when the session expires or is revoked mid-use — protected screens
+// otherwise have no way of noticing and just keep rendering with a dead session.
+const PUBLIC_ROUTE_ROOTS = new Set(['auth', 'onboarding', 'forgot-password', 'reset-password']);
+
 export default function RootLayout() {
   const setSession = useAuthStore((state) => state.setSession);
+  const router = useRouter();
+  const segments = useSegments();
+  const segmentsRef = useRef(segments);
+
+  useEffect(() => {
+    segmentsRef.current = segments;
+  }, [segments]);
 
   useEffect(() => {
     // Resume any in-progress workout session from previous app session
@@ -108,6 +120,13 @@ export default function RootLayout() {
         const prefs = useNotificationStore.getState();
         if (prefs.workoutReminders) {
           scheduleWorkoutReminder('daily', 8, 0);
+        }
+      } else {
+        // Session expired / revoked / signed out. Redirect off protected
+        // screens rather than leaving them rendering with a dead session.
+        const currentRoot = segmentsRef.current[0];
+        if (currentRoot && !PUBLIC_ROUTE_ROOTS.has(currentRoot)) {
+          router.replace('/auth');
         }
       }
     });

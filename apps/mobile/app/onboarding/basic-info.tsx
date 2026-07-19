@@ -36,7 +36,7 @@ export default function BasicInfoScreen() {
             </View>
 
             <Text style={styles.title}>Tell us about you</Text>
-            <Text style={styles.subtitle}>Let's personalize your experience</Text>
+            <Text style={styles.subtitle}>Let&apos;s personalize your experience</Text>
 
             <View style={styles.inputContainer}>
               <Text style={[sharedStyles.labelCaps, styles.inputLabel]}>Full Name</Text>

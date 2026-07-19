@@ -55,7 +55,7 @@ export default function NotificationRationaleScreen() {
             Stay on Track
           </Text>
           <Text style={styles.subtitle}>
-            Get reminded when it's workout time, receive messages from your coach, and track your challenge rank changes.
+            Get reminded when it&apos;s workout time, receive messages from your coach, and track your challenge rank changes.
           </Text>
         </Animated.View>
 
