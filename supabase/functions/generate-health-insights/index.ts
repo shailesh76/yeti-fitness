@@ -155,6 +155,7 @@ Rules: Keep it exactly 3 sentences. Be encouraging, reference their metrics, and
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
+    console.error('[generate-health-insights] error:', error.message);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
