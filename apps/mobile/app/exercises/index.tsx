@@ -1,34 +1,94 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Platform, StyleSheet } from 'react-native';
-import { Image } from 'expo-image';
 import { useWorkoutStore } from '../../store/useWorkoutStore';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useRepositories } from '../../hooks/useRepositories';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import AppShell from '../../components/AppShell';
-import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
+import { P, sharedStyles } from '../../constants/premiumTheme';
+import { displayLabel } from '../../utils/exerciseDisplay';
 
-const MUSCLE_GROUPS = ['All', 'Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings/Glutes', 'Biceps', 'Triceps', 'Core'];
+// Used only until exercise_taxonomy has loaded from the server.
+const FALLBACK_MUSCLES = ['Arms', 'Back', 'Cardio', 'Chest', 'Core', 'Full Body', 'Legs', 'Shoulders'];
 
 export default function ExercisesScreen() {
   const { exercises, fetchExercises, loading } = useWorkoutStore();
+  const session = useAuthStore((state) => state.session);
+  const { exerciseRepository } = useRepositories();
   const router = useRouter();
+  const params = useLocalSearchParams<{ builderPick?: string }>();
+  const builderPickSuffix = params.builderPick === '1' ? '?builderPick=1' : '';
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMuscle, setSelectedMuscle] = useState('All');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedEquipment, setSelectedEquipment] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [focusedSearch, setFocusedSearch] = useState(false);
+
+  const [taxonomy, setTaxonomy] = useState<Record<string, string[]>>({});
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+
+  const userId = session?.user?.id;
 
   useEffect(() => {
     fetchExercises();
   }, []);
 
-  const toggleExpand = (id: string) => {
-    setExpandedId(expandedId === id ? null : id);
+  useEffect(() => {
+    exerciseRepository.getTaxonomy().then(setTaxonomy);
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    exerciseRepository.getFavoriteIds(userId).then(setFavoriteIds);
+    exerciseRepository.getRecentExerciseIds(userId, 8).then(setRecentIds);
+  }, [userId]);
+
+  const muscleOptions = ['All', ...(taxonomy.muscle?.length ? taxonomy.muscle : FALLBACK_MUSCLES)];
+  const equipmentOptions = ['All', ...(taxonomy.equipment || [])];
+  const categoryOptions = ['All', ...(taxonomy.category || [])];
+
+  const toggleFavorite = async (exerciseId: string) => {
+    if (!userId) return;
+    const wasFavorite = favoriteIds.has(exerciseId);
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      if (wasFavorite) next.delete(exerciseId); else next.add(exerciseId);
+      return next;
+    });
+    try {
+      if (wasFavorite) {
+        await exerciseRepository.removeFavorite(userId, exerciseId);
+      } else {
+        await exerciseRepository.addFavorite(userId, exerciseId);
+      }
+    } catch {
+      // Revert the optimistic update if the write failed.
+      setFavoriteIds(prev => {
+        const next = new Set(prev);
+        if (wasFavorite) next.add(exerciseId); else next.delete(exerciseId);
+        return next;
+      });
+    }
   };
 
+  const recentExercises = useMemo(
+    () => recentIds.map(id => exercises.find(e => e.id === id)).filter(Boolean) as typeof exercises,
+    [recentIds, exercises]
+  );
+
   const filteredExercises = exercises.filter(ex => {
-    const matchesSearch = ex.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (ex.instructions && ex.instructions.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch = !q ||
+      ex.name.toLowerCase().includes(q) ||
+      (ex.instructions && ex.instructions.toLowerCase().includes(q)) ||
+      (ex.equipment && ex.equipment.toLowerCase().includes(q)) ||
+      (ex.category && ex.category.toLowerCase().includes(q)) ||
+      (ex.body_part && ex.body_part.toLowerCase().includes(q));
+
     let matchesMuscle = selectedMuscle === 'All';
     if (!matchesMuscle && ex.muscle_group) {
       const exMuscle = ex.muscle_group.toLowerCase();
@@ -41,14 +101,18 @@ export default function ExercisesScreen() {
       }
     }
 
-    return matchesSearch && matchesMuscle;
+    const matchesEquipment = selectedEquipment === 'All' || ex.equipment === selectedEquipment;
+    const matchesCategory = selectedCategory === 'All' || ex.category === selectedCategory;
+    const matchesFavorites = !favoritesOnly || favoriteIds.has(ex.id);
+
+    return matchesSearch && matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
   });
 
   return (
     <AppShell activeTab="workout">
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
-          
+
           {/* Header */}
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
@@ -64,7 +128,7 @@ export default function ExercisesScreen() {
                 styles.searchInput,
                 focusedSearch ? styles.searchInputFocused : null
               ]}
-              placeholder="Search exercises or instructions..."
+              placeholder="Search exercises, equipment, muscles..."
               placeholderTextColor="#444"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -73,14 +137,48 @@ export default function ExercisesScreen() {
             />
           </View>
 
+          {/* Recently Trained */}
+          {recentExercises.length > 0 && !searchQuery && (
+            <View style={styles.chipsOuterContainer}>
+              <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Recently Trained</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                {recentExercises.map(ex => (
+                  <TouchableOpacity
+                    key={ex.id}
+                    onPress={() => setSearchQuery(ex.name)}
+                    style={styles.recentPill}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.recentPillText} numberOfLines={1}>{ex.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           {/* Muscle Group Chips */}
           <View style={styles.chipsOuterContainer}>
-            <ScrollView 
-              horizontal 
+            <ScrollView
+              horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ gap: 8 }}
             >
-              {MUSCLE_GROUPS.map(muscle => {
+              {userId && (
+                <TouchableOpacity
+                  onPress={() => setFavoritesOnly(!favoritesOnly)}
+                  style={[styles.chipBtn, favoritesOnly ? styles.favoriteChipSelected : null]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.chipText, favoritesOnly ? styles.favoriteChipTextSelected : null]}>
+                    ♥ Favorites
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {muscleOptions.map(muscle => {
                 const isSelected = selectedMuscle === muscle;
                 return (
                   <TouchableOpacity
@@ -104,13 +202,61 @@ export default function ExercisesScreen() {
             </ScrollView>
           </View>
 
+          {/* Equipment Chips */}
+          {equipmentOptions.length > 1 && (
+            <View style={styles.chipsOuterContainerTight}>
+              <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Equipment</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {equipmentOptions.map(eq => {
+                  const isSelected = selectedEquipment === eq;
+                  return (
+                    <TouchableOpacity
+                      key={eq}
+                      onPress={() => setSelectedEquipment(eq)}
+                      style={[styles.chipBtn, isSelected ? styles.chipBtnSelected : null]}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.chipText, isSelected ? styles.chipTextSelected : null]}>
+                        {eq === 'All' ? 'All' : displayLabel(eq)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Category Chips */}
+          {categoryOptions.length > 1 && (
+            <View style={styles.chipsOuterContainerTight}>
+              <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {categoryOptions.map(cat => {
+                  const isSelected = selectedCategory === cat;
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      onPress={() => setSelectedCategory(cat)}
+                      style={[styles.chipBtn, isSelected ? styles.chipBtnSelected : null]}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.chipText, isSelected ? styles.chipTextSelected : null]}>
+                        {cat === 'All' ? 'All' : displayLabel(cat)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={P.ACCENT} />
             </View>
           ) : (
-            <ScrollView 
-              showsVerticalScrollIndicator={false} 
+            <ScrollView
+              showsVerticalScrollIndicator={false}
               style={{ flex: 1, width: '100%' }}
               contentContainerStyle={{ pb: 120 } as any}
             >
@@ -119,25 +265,13 @@ export default function ExercisesScreen() {
               ) : (
                 <View style={styles.gridContainer}>
                   {filteredExercises.map(ex => {
-                    const isExpanded = expandedId === ex.id;
+                    const isFavorite = favoriteIds.has(ex.id);
                     return (
-                      <View 
-                        key={ex.id} 
-                        style={[
-                          sharedStyles.card,
-                          styles.exerciseCard,
-                          isExpanded ? [styles.exerciseCardExpanded, glowStyle(P.ACCENT, 10, 0.2)] : null
-                        ]}
-                      >
-                        {/* Top Accent bar */}
-                        <View style={[
-                          styles.accentBar,
-                          { backgroundColor: isExpanded ? P.ACCENT : 'rgba(255,255,255,0.04)' }
-                        ]} />
+                      <View key={ex.id} style={[sharedStyles.card, styles.exerciseCard]}>
+                        <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
 
-                        {/* Collapsed Card Trigger */}
-                        <TouchableOpacity 
-                          onPress={() => toggleExpand(ex.id)}
+                        <TouchableOpacity
+                          onPress={() => router.push(`/exercises/${ex.id}${builderPickSuffix}`)}
                           style={styles.cardTrigger}
                           activeOpacity={0.8}
                         >
@@ -145,48 +279,22 @@ export default function ExercisesScreen() {
                             <Text style={styles.exerciseName}>{ex.name}</Text>
                             <Text style={styles.muscleText}>
                               {ex.muscle_group || 'Full Body'}
+                              {ex.equipment ? `  ·  ${displayLabel(ex.equipment)}` : ''}
                             </Text>
                           </View>
-                          <Text style={styles.arrowIcon}>
-                            {isExpanded ? '▲' : '▼'}
-                          </Text>
-                        </TouchableOpacity>
-
-                        {/* Expanded Details */}
-                        {isExpanded && (
-                          <View style={styles.detailsContainer}>
-                            {/* GIF Showcase */}
-                            {ex.gif_url ? (
-                              <View style={styles.gifWrapper}>
-                                <Image
-                                  source={{ uri: ex.gif_url }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  contentFit="contain"
-                                  cachePolicy="disk"
-                                />
-                              </View>
-                            ) : (
-                              <View style={styles.noGifWrapper}>
-                                <Text style={styles.noGifText}>No animation available</Text>
-                              </View>
-                            )}
-
-                            {/* Instructions */}
-                            <Text style={[sharedStyles.labelCaps, styles.detailsLabel]}>Instructions</Text>
-                            <Text style={styles.instructionsText}>
-                              {ex.instructions || 'No instructions provided.'}
-                            </Text>
-
-                            {/* Navigation to Exercise History Progress */}
-                            <TouchableOpacity 
-                              onPress={() => router.push(`/exercises/${ex.id}/history`)}
-                              style={styles.progressBtn}
-                              activeOpacity={0.8}
+                          {userId && (
+                            <TouchableOpacity
+                              onPress={() => toggleFavorite(ex.id)}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              style={styles.favoriteBtn}
                             >
-                              <Text style={styles.progressBtnText}>View Progress History →</Text>
+                              <Text style={[styles.favoriteIcon, isFavorite ? styles.favoriteIconActive : null]}>
+                                {isFavorite ? '♥' : '♡'}
+                              </Text>
                             </TouchableOpacity>
-                          </View>
-                        )}
+                          )}
+                          <Text style={styles.arrowIcon}>›</Text>
+                        </TouchableOpacity>
                       </View>
                     );
                   })}
@@ -253,8 +361,28 @@ const styles = StyleSheet.create({
     borderColor: P.ACCENT,
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
+  sectionLabel: {
+    marginBottom: 8,
+  },
   chipsOuterContainer: {
     paddingVertical: 16,
+  },
+  chipsOuterContainerTight: {
+    paddingBottom: 12,
+  },
+  recentPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    maxWidth: 180,
+  },
+  recentPillText: {
+    color: P.TEXT_SEC,
+    fontSize: 11,
+    fontWeight: '700',
   },
   chipBtn: {
     paddingHorizontal: 14,
@@ -268,6 +396,10 @@ const styles = StyleSheet.create({
     borderColor: P.ACCENT,
     backgroundColor: P.ACCENT_DIM,
   },
+  favoriteChipSelected: {
+    borderColor: '#FF4B7A',
+    backgroundColor: 'rgba(255,75,122,0.12)',
+  },
   chipText: {
     color: P.TEXT_MUT,
     fontSize: 10,
@@ -277,6 +409,9 @@ const styles = StyleSheet.create({
   } as any,
   chipTextSelected: {
     color: P.ACCENT,
+  },
+  favoriteChipTextSelected: {
+    color: '#FF4B7A',
   },
   centered: {
     flex: 1,
@@ -297,9 +432,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
     padding: 0,
-  },
-  exerciseCardExpanded: {
-    borderColor: P.ACCENT_BORDER,
   },
   accentBar: {
     position: 'absolute',
@@ -329,71 +461,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginTop: 4,
   },
+  favoriteBtn: {
+    paddingHorizontal: 8,
+  },
+  favoriteIcon: {
+    fontSize: 18,
+    color: P.TEXT_MUT,
+  },
+  favoriteIconActive: {
+    color: '#FF4B7A',
+  },
   arrowIcon: {
     color: P.ACCENT,
     fontSize: 14,
     fontWeight: '900',
-  },
-  detailsContainer: {
-    paddingHorizontal: 18,
-    paddingBottom: 18,
-    borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
-    paddingTop: 18,
-  },
-  gifWrapper: {
-    width: '100%',
-    height: 220,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  noGifWrapper: {
-    width: '100%',
-    height: 80,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  noGifText: {
-    color: P.TEXT_MUT,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  detailsLabel: {
-    marginBottom: 8,
-    marginLeft: 2,
-  },
-  instructionsText: {
-    color: P.TEXT_SEC,
-    fontSize: 13,
-    lineHeight: 20,
-    fontWeight: '600',
-    marginBottom: 20,
-  },
-  progressBtn: {
-    width: '100%',
-    backgroundColor: P.ACCENT_DIM,
-    borderWidth: 1,
-    borderColor: P.ACCENT_BORDER,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progressBtnText: {
-    color: P.ACCENT,
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
 });
