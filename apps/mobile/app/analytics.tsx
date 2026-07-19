@@ -301,8 +301,14 @@ export default function ProgressScreen() {
         );
         setProgressPhotos(resolved);
       }
-    } catch (e) {
-      console.error('Error loading progress photos:', e);
+    } catch (e: any) {
+      // Local WatermelonDB is unavailable on web (LOCAL_DB_UNAVAILABLE) — expected
+      // there, not a real failure. Anything else is a genuine, unexpected error.
+      if (typeof e?.message === 'string' && e.message.startsWith('LOCAL_DB_UNAVAILABLE')) {
+        console.warn('Progress photos unavailable (no local DB on this platform):', e);
+      } else {
+        console.error('Error loading progress photos:', e);
+      }
     }
   };
 

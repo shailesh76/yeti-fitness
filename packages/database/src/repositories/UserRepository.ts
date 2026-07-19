@@ -10,6 +10,18 @@ export class UserRepository {
     this.supabase = supabase;
   }
 
+  /**
+   * Guards local WatermelonDB access. The native SQLite adapter is unavailable on
+   * web, where `db` is null — fail with a clear, catchable error instead of a
+   * cryptic "Cannot read properties of null" crash.
+   */
+  private requireDb(): Database {
+    if (!this.db) {
+      throw new Error('LOCAL_DB_UNAVAILABLE: local database is not available on this platform');
+    }
+    return this.db;
+  }
+
   async getProfile(userId: string): Promise<Profile | null> {
     try {
       const records = await this.db.get<Profile>('profiles').query().fetch();
@@ -22,6 +34,7 @@ export class UserRepository {
   }
 
   async updateProfile(userId: string, updates: any): Promise<Profile> {
+    this.requireDb();
     return this.db.write(async () => {
       const profile = await this.getProfile(userId);
       if (profile) {

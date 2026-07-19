@@ -11,6 +11,18 @@ export class NutritionRepository {
     this.supabase = supabase;
   }
 
+  /**
+   * Guards local WatermelonDB access. The native SQLite adapter is unavailable on
+   * web, where `db` is null — fail with a clear, catchable error instead of a
+   * cryptic "Cannot read properties of null" crash.
+   */
+  private requireDb(): Database {
+    if (!this.db) {
+      throw new Error('LOCAL_DB_UNAVAILABLE: local database is not available on this platform');
+    }
+    return this.db;
+  }
+
   // --- Food Operations ---
 
   async createFood(foodData: {
@@ -24,6 +36,7 @@ export class NutritionRepository {
     fat: number;
     serving_size?: string;
   }): Promise<Food> {
+    this.requireDb();
     return this.db.write(async () => {
       return this.db.get<Food>('foods').create(f => {
         if (foodData.id) f._raw.id = foodData.id;
@@ -40,6 +53,7 @@ export class NutritionRepository {
   }
 
   async searchFoodsLocal(term: string): Promise<Food[]> {
+    this.requireDb();
     return this.db.get<Food>('foods')
       .query(Q.where('name', Q.like(`%${term}%`)))
       .fetch();
@@ -71,6 +85,7 @@ export class NutritionRepository {
   // --- Meal Log Operations ---
 
   async logMeal(athleteId: string, foodId: string, servings: number): Promise<MealLog> {
+    this.requireDb();
     return this.db.write(async () => {
       return this.db.get<MealLog>('meal_logs').create(log => {
         log.athlete_id = athleteId;
@@ -83,6 +98,7 @@ export class NutritionRepository {
   }
 
   async updateMeal(id: string, updates: Partial<{servings: number}>): Promise<void> {
+    this.requireDb();
     await this.db.write(async () => {
       const log = await this.db.get<MealLog>('meal_logs').find(id);
       await log.update(l => {
@@ -92,6 +108,7 @@ export class NutritionRepository {
   }
 
   async deleteMeal(id: string): Promise<void> {
+    this.requireDb();
     await this.db.write(async () => {
       const log = await this.db.get<MealLog>('meal_logs').find(id);
       await log.markAsDeleted();
@@ -99,12 +116,18 @@ export class NutritionRepository {
   }
 
   async calculateDailyNutrition(
-    athleteId: string, 
+    athleteId: string,
     dateMs: number
   ): Promise<{ calories: number; protein: number; carbs: number; fat: number }> {
+    const zero = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    // Local DB unavailable on web — a zero-macro default is a reasonable, safe
+    // fallback (same pattern as getProfile()/getExerciseById() returning null),
+    // rather than throwing and aborting whatever multi-step load called this.
+    if (!this.db) return zero;
+
     const startOfDay = new Date(dateMs).setHours(0, 0, 0, 0);
     const endOfDay = new Date(dateMs).setHours(23, 59, 59, 999);
-    
+
     const logs = await this.db.get<MealLog>('meal_logs')
       .query(
         Q.where('athlete_id', athleteId),
@@ -127,11 +150,11 @@ export class NutritionRepository {
       }
     }
 
-    return { 
-      calories: Math.round(calories), 
-      protein: Math.round(protein), 
-      carbs: Math.round(carbs), 
-      fat: Math.round(fat) 
+    return {
+      calories: Math.round(calories),
+      protein: Math.round(protein),
+      carbs: Math.round(carbs),
+      fat: Math.round(fat)
     };
   }
 }

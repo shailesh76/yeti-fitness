@@ -10,6 +10,18 @@ export class ProgressRepository {
     this.supabase = supabase;
   }
 
+  /**
+   * Guards local WatermelonDB access for WRITE operations. The native SQLite
+   * adapter is unavailable on web, where `db` is null — fail with a clear,
+   * catchable error instead of a cryptic "Cannot read properties of null" crash.
+   */
+  private requireDb(): Database {
+    if (!this.db) {
+      throw new Error('LOCAL_DB_UNAVAILABLE: local database is not available on this platform');
+    }
+    return this.db;
+  }
+
   // --- Local Persistence ---
 
   async saveMeasurement(
@@ -23,6 +35,7 @@ export class ProgressRepository {
     legsCm?: number,
     notes?: string
   ): Promise<Measurement> {
+    this.requireDb();
     return this.db.write(async () => {
       return this.db.get<Measurement>('measurements').create(m => {
         m.user_id = userId;
@@ -41,12 +54,17 @@ export class ProgressRepository {
   }
 
   async getMeasurements(userId: string): Promise<Measurement[]> {
+    // Local DB unavailable on web — an empty list is a reasonable, safe fallback
+    // (identical UI state to "no measurements logged yet"), rather than throwing
+    // and aborting whatever multi-step load called this.
+    if (!this.db) return [];
     return this.db.get<Measurement>('measurements')
       .query(Q.where('user_id', userId), Q.sortBy('logged_at', Q.desc))
       .fetch();
   }
 
   async getWeightTrend(userId: string, days: number = 30): Promise<Measurement[]> {
+    if (!this.db) return [];
     const limitDate = Date.now() - days * 24 * 60 * 60 * 1000;
     return this.db.get<Measurement>('measurements')
       .query(

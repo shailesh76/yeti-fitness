@@ -126,14 +126,20 @@ export default function FoodDiaryScreen() {
   }, [selectedDate]);
 
   const fetchProfile = async () => {
-    let localProfile = await userRepository.getProfile(session!.user!.id);
-    if (!localProfile) {
-      const { data } = await userRepository.fetchProfileRemote(session!.user!.id);
-      if (data) {
-        localProfile = await userRepository.updateProfile(session!.user!.id, data);
+    try {
+      let localProfile = await userRepository.getProfile(session!.user!.id);
+      if (!localProfile) {
+        const { data } = await userRepository.fetchProfileRemote(session!.user!.id);
+        if (data) {
+          localProfile = await userRepository.updateProfile(session!.user!.id, data);
+        }
       }
+      if (localProfile) setProfile(localProfile);
+    } catch (e) {
+      // Local WatermelonDB is unavailable on web (LOCAL_DB_UNAVAILABLE) — the
+      // screen still works using whatever profile-derived defaults it already has.
+      console.warn('Could not cache profile locally:', e);
     }
-    if (localProfile) setProfile(localProfile);
   };
 
   const getTargets = () => {
@@ -450,7 +456,7 @@ export default function FoodDiaryScreen() {
             {/* ══════════════════════════════════════════════════════════
                 5. TODAY'S LOG — per meal-type sections
             ══════════════════════════════════════════════════════════ */}
-            <Text style={[sharedStyles.labelCaps, { marginBottom: 10 }]}>TODAY'S LOG</Text>
+            <Text style={[sharedStyles.labelCaps, { marginBottom: 10 }]}>TODAY&apos;S LOG</Text>
 
             {MEAL_TYPES.map((type, idx) => {
               const meta  = MEAL_META[type];

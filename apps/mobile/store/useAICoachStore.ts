@@ -6,8 +6,14 @@
  * Messages are persisted in Supabase ai_conversations + ai_messages.
  */
 import { create } from 'zustand';
-import { database } from '../database';
+import { database, isNativeDbAvailable } from '../database';
 import { supabase } from '../lib/supabase';
+
+// The AI Coach persists conversations/messages in the local WatermelonDB, which
+// is native-only. On web the adapter is unavailable, so we degrade gracefully with
+// a clear message instead of crashing on a null database handle.
+const WEB_UNAVAILABLE_MESSAGE =
+  'The AI Coach is available in the Yeti mobile app. This feature is not supported on web.';
 import { Q } from '@nozbe/watermelondb';
 import { 
   AICoachRepository, 
@@ -137,6 +143,14 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
   error: null,
 
   initConversation: async (userId: string) => {
+    if (!isNativeDbAvailable || !database) {
+      set({
+        isLoading: false,
+        error: WEB_UNAVAILABLE_MESSAGE,
+        messages: [{ id: 'web-unavailable', role: 'assistant', content: WEB_UNAVAILABLE_MESSAGE, createdAt: Date.now() }],
+      });
+      return;
+    }
     set({ isLoading: true, error: null });
     try {
       const conv = await aiCoachRepository.getOrCreateConversation(userId);
@@ -172,6 +186,11 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
   sendMessage: async (userId: string, text: string) => {
     const state = get();
     if (!text.trim() || state.isLoading) return;
+
+    if (!isNativeDbAvailable || !database) {
+      set({ error: WEB_UNAVAILABLE_MESSAGE });
+      return;
+    }
 
     const userMessage: AIMessage = {
       id: `user_${Date.now()}`,
