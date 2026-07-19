@@ -11,6 +11,8 @@ export interface WorkoutPlan {
   created_at: string;
   updated_at?: string;
   workout_plan_exercises?: WorkoutPlanExercise[];
+  /** Set on ownTemplates entries, which don't carry full nested exercise objects. */
+  exerciseCount?: number;
   assignment_id?: string;
   plan_day_id?: string;
   day_number?: number;
@@ -48,7 +50,11 @@ interface WorkoutState {
   fetchExercises: () => Promise<void>;
   fetchWorkoutPlans: (userId: string) => Promise<void>;
   syncWorkoutPlans: (userId: string) => Promise<void>;
-  createWorkoutPlan: (userId: string, name: string, exercises: Partial<WorkoutPlanExercise>[]) => Promise<void>;
+  // Athlete-authored templates (Step 4.5) — a separate list from coach-assigned
+  // workoutPlans above. Both lists are backed by WatermelonDB on native.
+  ownTemplates: WorkoutPlan[];
+  ownTemplatesLoading: boolean;
+  fetchOwnTemplates: (userId: string) => Promise<void>;
 }
 
 export const useWorkoutStore = create<WorkoutState>((set, get) => ({
@@ -75,22 +81,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   syncWorkoutPlans: async (userId: string) => {
     set({ loading: true });
     
-    // 1. Load from AsyncStorage cache first
-    try {
-      const cachedPlansStr = await AsyncStorage.getItem('@dude_workout_plans');
-      const cachedSyncedAt = await AsyncStorage.getItem('@dude_plans_last_synced_at');
-      
-      if (cachedPlansStr) {
-        set({ 
-          workoutPlans: JSON.parse(cachedPlansStr), 
-          lastSyncedAt: cachedSyncedAt 
-        });
-      }
-    } catch (e) {
-      console.warn("AsyncStorage workout plans load failed:", e);
-    }
-
-    // 2. Fetch remote updates via WorkoutRepository remote method
+    // Read the local WatermelonDB graph. SyncManager refreshes it separately.
     try {
       const remoteAssigned = await workoutRepository.fetchWorkoutPlansRemote(userId);
 
@@ -168,25 +159,33 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
           loading: false 
         });
 
-        await AsyncStorage.setItem('@dude_workout_plans', JSON.stringify(mappedPlans));
-        await AsyncStorage.setItem('@dude_plans_last_synced_at', nowStr);
       } else {
         set({ loading: false });
       }
     } catch (e) {
-      console.warn("Failed to sync remote workout plans, falling back to cache:", e);
+      console.warn("Failed to load local workout plans:", e);
       set({ loading: false });
     }
   },
 
-  createWorkoutPlan: async (userId: string, name: string, exercises: Partial<WorkoutPlanExercise>[]) => {
-    set({ loading: true });
+  ownTemplates: [],
+  ownTemplatesLoading: false,
+
+  fetchOwnTemplates: async (userId: string) => {
+    set({ ownTemplatesLoading: true });
     try {
-      await workoutRepository.createWorkoutPlanRemote(userId, name, exercises);
-      await get().fetchWorkoutPlans(userId);
-    } catch (error) {
-      console.error("Failed to create workout plan:", error);
-      set({ loading: false });
+      const plans = await workoutRepository.fetchOwnWorkoutPlans(userId);
+      const mapped: WorkoutPlan[] = plans.map((plan: any) => ({
+        id: plan.id,
+        name: plan.name,
+        created_at: plan.created_at,
+        updated_at: plan.updated_at,
+        exerciseCount: plan.days?.[0]?.exercises?.length || 0,
+      }));
+      set({ ownTemplates: mapped, ownTemplatesLoading: false });
+    } catch (e) {
+      console.warn('Failed to fetch own workout templates:', e);
+      set({ ownTemplatesLoading: false });
     }
-  }
+  },
 }));

@@ -308,6 +308,55 @@ export default schemaMigrations({
           ]
         })
       ]
+    },
+    {
+      toVersion: 6,
+      steps: [
+        addColumns({
+          table: 'exercises',
+          columns: [
+            { name: 'body_part', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'target_muscle', type: 'string', isOptional: true },
+            { name: 'secondary_muscles', type: 'string', isOptional: true },
+            { name: 'difficulty', type: 'string', isOptional: true },
+            { name: 'media_type', type: 'string', isOptional: true },
+            { name: 'thumbnail_url', type: 'string', isOptional: true },
+            { name: 'source', type: 'string', isOptional: true },
+            { name: 'source_id', type: 'string', isOptional: true },
+            { name: 'is_public', type: 'boolean', isOptional: true },
+          ]
+        })
+      ]
+    },
+    {
+      toVersion: 7,
+      steps: [
+        createTable({ name: 'workout_plans', columns: [
+          { name: 'user_id', type: 'string', isOptional: true, isIndexed: true },
+          { name: 'coach_id', type: 'string', isOptional: true, isIndexed: true },
+          { name: 'name', type: 'string' }, { name: 'notes', type: 'string', isOptional: true },
+          { name: 'created_at', type: 'number' }, { name: 'updated_at', type: 'number' },
+        ]}),
+        createTable({ name: 'plan_days', columns: [
+          { name: 'plan_id', type: 'string', isIndexed: true }, { name: 'day_number', type: 'number' },
+          { name: 'name', type: 'string', isOptional: true }, { name: 'created_at', type: 'number' },
+          { name: 'updated_at', type: 'number' },
+        ]}),
+        createTable({ name: 'plan_exercises', columns: [
+          { name: 'plan_day_id', type: 'string', isIndexed: true }, { name: 'exercise_id', type: 'string', isIndexed: true },
+          { name: 'sets', type: 'string', isOptional: true }, { name: 'reps', type: 'string', isOptional: true },
+          { name: 'weight', type: 'string', isOptional: true }, { name: 'target_rpe', type: 'number', isOptional: true },
+          { name: 'rest_seconds', type: 'number', isOptional: true }, { name: 'notes', type: 'string', isOptional: true },
+          { name: 'warmup_sets', type: 'number', isOptional: true }, { name: 'is_dropset', type: 'boolean', isOptional: true },
+          { name: 'superset_group', type: 'string', isOptional: true }, { name: 'order_index', type: 'number' },
+          { name: 'created_at', type: 'number' }, { name: 'updated_at', type: 'number' },
+        ]}),
+        createTable({ name: 'assigned_plans', columns: [
+          { name: 'plan_id', type: 'string', isIndexed: true }, { name: 'athlete_id', type: 'string', isIndexed: true },
+          { name: 'assigned_at', type: 'number' }, { name: 'start_date', type: 'string', isOptional: true },
+          { name: 'updated_at', type: 'number' },
+        ]}),
+      ]
     }
   ],
 });

@@ -17,6 +17,7 @@ import {
   AIMessage,
   AIMemory,
   AIUsage
+  ,WorkoutPlan, PlanDay, PlanExercise, AssignedPlan
 } from '@yeti/database';
 
 const ALL_MODELS = [
@@ -34,6 +35,10 @@ const ALL_MODELS = [
   AIMessage,
   AIMemory,
   AIUsage,
+  WorkoutPlan,
+  PlanDay,
+  PlanExercise,
+  AssignedPlan,
 ];
 
 let database: Database;
@@ -79,5 +84,9 @@ export {
   AIMessage,
   AIMemory,
   AIUsage,
+  WorkoutPlan,
+  PlanDay,
+  PlanExercise,
+  AssignedPlan,
   schema
 };

@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useWorkoutStore } from '../store/useWorkoutStore';
 import { useLogStore } from '../store/useLogStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -55,7 +55,7 @@ const todayDateStr = new Date().toDateString();
 export default function WorkoutScreen() {
   const router   = useRouter();
   const session  = useAuthStore((state) => state.session);
-  const { workoutPlans, syncWorkoutPlans, loading } = useWorkoutStore();
+  const { workoutPlans, syncWorkoutPlans, loading, ownTemplates, ownTemplatesLoading, fetchOwnTemplates } = useWorkoutStore();
   const { startSession, activeSession, logsHistory, fetchLogsHistory } = useLogStore();
   const [expandedLogId, setExpandedLogId] = React.useState<string | null>(null);
 
@@ -65,6 +65,17 @@ export default function WorkoutScreen() {
       fetchLogsHistory(session.user.id);
     }
   }, [session]);
+
+  // Own templates specifically need to refresh on every return to this screen
+  // (not just on session change) — creating/editing one on /workouts/create
+  // and navigating back must show the update without a full app reload.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (session?.user?.id) {
+        fetchOwnTemplates(session.user.id);
+      }
+    }, [session?.user?.id])
+  );
 
   // Redirect if a session is already active
   useEffect(() => {
@@ -120,20 +131,6 @@ export default function WorkoutScreen() {
       }
     });
 
-    // Check offline outbox
-    try {
-      
-      const outbox: any[] = [];
-      outbox.forEach((m: any) => {
-        if (m.type === 'INSERT_WORKOUT_SESSION' && m.payload.completed_at && m.payload.plan_day_id) {
-          const completedDate = new Date(m.payload.completed_at).toDateString();
-          if (completedDate === todayStr) {
-            ids.add(m.payload.plan_day_id);
-          }
-        }
-      });
-    } catch (e) {}
-
     return ids;
   }, [logsHistory]);
 
@@ -143,21 +140,6 @@ export default function WorkoutScreen() {
 
   // Plan summary text
   const currentPlanName = featuredPlan?.name ?? null;
-
-  // Week progress: count completed sessions in the current week
-  const weekStart = React.useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - d.getDay()); // Sunday
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
-
-  const workoutsThisWeek = React.useMemo(() => {
-    return (logsHistory ?? []).filter((l: any) => {
-      const d = l.completed_at ? new Date(l.completed_at) : null;
-      return d && d >= weekStart;
-    }).length;
-  }, [logsHistory, weekStart]);
 
   // Derive total plan days from workoutPlans array
   const totalPlanDays = React.useMemo(() => {
@@ -463,6 +445,40 @@ export default function WorkoutScreen() {
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={P.TEXT_MUT} />
               </TouchableOpacity>
+            </Animated.View>
+
+            {/* ── My Templates (athlete-authored, Step 4.5) ──────────────── */}
+            <Animated.View entering={FadeInDown.delay(390).duration(400)}>
+              <View style={[sharedStyles.rowBetween, { marginTop: 24, marginBottom: 10 }]}>
+                <Text style={sharedStyles.labelCaps}>MY TEMPLATES</Text>
+                <TouchableOpacity onPress={() => router.push('/workouts/create')} activeOpacity={0.8}>
+                  <Text style={styles.newTemplateText}>+ New</Text>
+                </TouchableOpacity>
+              </View>
+
+              {ownTemplatesLoading && ownTemplates.length === 0 ? (
+                <SkeletonLoader rows={1} height={64} />
+              ) : ownTemplates.length === 0 ? (
+                <TouchableOpacity onPress={() => router.push('/workouts/create')} style={styles.emptyTemplateCard} activeOpacity={0.8}>
+                  <Ionicons name="add-circle-outline" size={18} color={P.TEXT_MUT} />
+                  <Text style={styles.emptyTemplateText}>Build your own workout template</Text>
+                </TouchableOpacity>
+              ) : (
+                ownTemplates.map((template) => (
+                  <TouchableOpacity
+                    key={template.id}
+                    onPress={() => router.push(`/workouts/create?planId=${template.id}`)}
+                    style={styles.templateCard}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={styles.templateName} numberOfLines={1}>{template.name}</Text>
+                      <Text style={styles.templateMeta}>{template.exerciseCount ?? 0} exercises</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={P.TEXT_MUT} />
+                  </TouchableOpacity>
+                ))
+              )}
             </Animated.View>
 
             {/* ── Workout History ─────────────────────────────────────────── */}
@@ -771,6 +787,54 @@ const styles = StyleSheet.create({
     color:         P.TEXT_PRI,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
+  },
+
+  // My Templates
+  newTemplateText: {
+    color: P.ACCENT,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  emptyTemplateCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderStyle: 'dashed',
+    borderRadius: P.RADIUS_CARD,
+    padding: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  emptyTemplateText: {
+    color: P.TEXT_MUT,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  templateCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  templateName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: P.TEXT_PRI,
+    letterSpacing: -0.2,
+    marginBottom: 3,
+  },
+  templateMeta: {
+    fontSize: 11,
+    color: P.TEXT_SEC,
+    fontWeight: '500',
   },
 
   // History list styles
