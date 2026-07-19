@@ -1,0 +1,40 @@
+name: Live Verify (manual)
+
+# Runs the FULL test suite, including the live suites that hit the real Supabase
+# project (migration.test.ts, rls-live-security.test.ts, the live half of
+# auth.test.ts). Manual-only (workflow_dispatch) rather than on every push,
+# because these tests create real rows in the live project and can trip
+# Supabase's per-email rate limiting if run too frequently — see ci.yml for
+# the always-on, side-effect-free default. Use this before a release or
+# whenever you want a real end-to-end confidence check.
+#
+# Requires two repo secrets (Settings → Secrets and variables → Actions):
+#   EXPO_PUBLIC_SUPABASE_URL
+#   EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+on:
+  workflow_dispatch:
+
+jobs:
+  live-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run full test suite (including live)
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: pnpm test

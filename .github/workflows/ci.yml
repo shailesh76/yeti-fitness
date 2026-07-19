@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, beta-v1]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint mobile app
+        working-directory: apps/mobile
+        run: npx eslint .
+
+      - name: Lint coach-dashboard
+        working-directory: apps/coach-dashboard
+        run: npx next lint
+
+      - name: Typecheck mobile app
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+
+      - name: Typecheck coach-dashboard
+        working-directory: apps/coach-dashboard
+        run: npx tsc --noEmit
+
+      # No Supabase secrets are configured for this job on purpose. tests/helpers/live.ts
+      # only activates its live-Supabase suites (migration, rls-live-security, and the
+      # live half of auth) when EXPO_PUBLIC_SUPABASE_URL/ANON_KEY are present, so without
+      # them those tests auto-skip and only the fast, deterministic unit tests run.
+      # This keeps CI free of rate-limit flakiness and avoids creating real accounts in
+      # the live project on every push. See the separate live-verify workflow to run the
+      # full suite on demand.
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Build mobile app (web export)
+        working-directory: apps/mobile
+        run: npx expo export --platform web
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Build coach-dashboard
+        working-directory: apps/coach-dashboard
+        run: npx next build
