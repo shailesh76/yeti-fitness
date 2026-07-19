@@ -54,7 +54,7 @@ export function EmergencyControls() {
         <div className="flex items-center justify-between p-4 bg-gray-950 rounded-xl border border-gray-800">
           <div>
             <h3 className="text-white font-bold flex items-center gap-2"><Activity size={16} className={maintenanceMode ? 'text-yellow-500' : 'text-gray-500'}/> Maintenance Mode</h3>
-            <p className="text-sm text-gray-400">Display "Down for maintenance" screen to all mobile clients.</p>
+            <p className="text-sm text-gray-400">Display &quot;Down for maintenance&quot; screen to all mobile clients.</p>
           </div>
           <button 
             onClick={() => toggleSetting('maintenance_mode', maintenanceMode, setMaintenanceMode)}

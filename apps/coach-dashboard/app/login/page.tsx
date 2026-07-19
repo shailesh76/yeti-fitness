@@ -46,7 +46,7 @@ function LoginForm() {
       return;
     }
 
-    router.push("/dashboard");
+    router.push(profile.role === "admin" ? "/admin" : "/dashboard");
   };
 
   return (

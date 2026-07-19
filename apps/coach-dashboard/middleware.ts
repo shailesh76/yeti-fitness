@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PROTECTED_PREFIXES = ['/dashboard', '/plans'];
+const PROTECTED_PREFIXES = ['/dashboard', '/plans', '/admin'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -82,6 +82,14 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
+    // /admin is restricted to admin role only
+    if (pathname.startsWith('/admin') && profile?.role !== 'admin') {
+      console.log(`[Middleware] /admin access denied for role: ${profile?.role}, redirecting to /dashboard`);
+      const dashUrl = request.nextUrl.clone();
+      dashUrl.pathname = '/dashboard';
+      return NextResponse.redirect(dashUrl);
+    }
+
     console.log(`[Middleware] Access granted to Coach!`);
   } catch (err: any) {
     console.error(`[Middleware] Unhandled exception:`, err);
@@ -91,5 +99,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/plans/:path*'],
+  matcher: ['/dashboard/:path*', '/plans/:path*', '/admin/:path*', '/admin'],
 };

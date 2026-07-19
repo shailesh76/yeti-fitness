@@ -126,69 +126,88 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       return;
     }
 
-    // 2. Map to Client type and fetch adherence
-    const mappedClients: Client[] = await Promise.all(clientsData.map(async (row: any) => {
-      const p = row.athlete;
-      
-      const { data: logs } = await supabase
+    // 2. Batch-fetch everything needed across ALL clients in parallel — 4 queries
+    // total instead of 4 PER client (was 4N+1 round trips for N clients; now a
+    // fixed ~4, plus N adherence RPC calls since calculate_adherence has no
+    // batched equivalent yet). Grouping logic below preserves the exact same
+    // semantics as the original per-client queries (same sort orders, same
+    // "sum all of today's logs" aggregation), just computed client-side after
+    // one shared fetch instead of one fetch per client.
+    const athleteIds = clientsData.map((row: any) => row.athlete.id);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [workoutRes, plansRes, mealLogsRes, adherenceResults] = await Promise.all([
+      supabase
         .from('workout_sessions')
-        .select('completed_at')
-        .eq('athlete_id', p.id)
-        .order('completed_at', { ascending: false })
-        .limit(1);
-        
-      const lastWorkout = logs?.[0]?.completed_at ? new Date(logs[0].completed_at).getTime() : 0;
-      const initials = p.full_name ? p.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '??';
-
-      // Call adherence RPC
-      const { data: adherenceData } = await supabase.rpc('calculate_adherence', { athlete_id_param: p.id });
-
-      // Get current plan name
-      const { data: plans } = await supabase
+        .select('athlete_id, completed_at')
+        .in('athlete_id', athleteIds)
+        .order('completed_at', { ascending: false }),
+      supabase
         .from('assigned_plans')
-        .select('workout_plans(name)')
-        .eq('athlete_id', p.id)
-        .order('assigned_at', { ascending: false })
-        .limit(1);
-
-      let currentPlanName = 'No Plan';
-      if (plans && plans.length > 0 && plans[0].workout_plans) {
-        // Handle both object and array shapes depending on PostgREST response
-        const wp = plans[0].workout_plans as any;
-        currentPlanName = Array.isArray(wp) ? wp[0]?.name : wp?.name || 'No Plan';
-      }
-
-      // Get today's calories
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      const { data: mealLogs } = await supabase
+        .select('athlete_id, assigned_at, workout_plans(name)')
+        .in('athlete_id', athleteIds)
+        .order('assigned_at', { ascending: false }),
+      supabase
         .from('meal_logs')
-        .select('servings, food:foods(calories)')
-        .eq('user_id', p.id)
-        .gte('logged_at', startOfToday.toISOString());
+        .select('user_id, servings, food:foods(calories)')
+        .in('user_id', athleteIds)
+        .gte('logged_at', startOfToday.toISOString()),
+      Promise.all(athleteIds.map((id: string) => supabase.rpc('calculate_adherence', { athlete_id_param: id }))),
+    ]);
 
-      const caloriesLogged = (mealLogs || []).reduce((acc: number, log: any) => {
-        const calories = log.food?.calories || 0;
-        const servings = Number(log.servings) || 0;
-        return acc + Math.round(calories * servings);
-      }, 0);
+    // First occurrence per athlete_id after a DESC-sorted fetch == latest row,
+    // matching each original per-client `.order(...).limit(1)` query.
+    const lastWorkoutMap = new Map<string, number>();
+    (workoutRes.data || []).forEach((row: any) => {
+      if (!lastWorkoutMap.has(row.athlete_id) && row.completed_at) {
+        lastWorkoutMap.set(row.athlete_id, new Date(row.completed_at).getTime());
+      }
+    });
+
+    const planMap = new Map<string, string>();
+    (plansRes.data || []).forEach((row: any) => {
+      if (planMap.has(row.athlete_id)) return;
+      const wp = row.workout_plans as any;
+      const name = Array.isArray(wp) ? wp[0]?.name : wp?.name;
+      planMap.set(row.athlete_id, name || 'No Plan');
+    });
+
+    // Sum today's calories per athlete (same aggregation as the original,
+    // just grouped across all athletes' logs instead of one athlete's).
+    const caloriesMap = new Map<string, number>();
+    (mealLogsRes.data || []).forEach((log: any) => {
+      const calories = log.food?.calories || 0;
+      const servings = Number(log.servings) || 0;
+      caloriesMap.set(log.user_id, (caloriesMap.get(log.user_id) || 0) + Math.round(calories * servings));
+    });
+
+    // Adherence RPC results are positionally aligned with athleteIds.
+    const adherenceMap = new Map<string, number>();
+    athleteIds.forEach((id: string, idx: number) => {
+      adherenceMap.set(id, adherenceResults[idx]?.data || 0);
+    });
+
+    const mappedClients: Client[] = clientsData.map((row: any) => {
+      const p = row.athlete;
+      const initials = p.full_name ? p.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '??';
 
       return {
         id: p.id,
         name: p.full_name || 'Unknown',
         initials,
         avatarColor: 'bg-primary text-black',
-        lastWorkout,
-        adherenceScore: adherenceData || 0,
-        caloriesLogged, 
+        lastWorkout: lastWorkoutMap.get(p.id) || 0,
+        adherenceScore: adherenceMap.get(p.id) || 0,
+        caloriesLogged: caloriesMap.get(p.id) || 0,
         calorieTarget: p.daily_calorie_target || 2500,
         weight: p.weight_kg || 170,
         avgHeartRate: 70,
         wearableConnected: p.wearable_connected || false,
-        planName: currentPlanName,
+        planName: planMap.get(p.id) || 'No Plan',
         weekProgress: 'Active',
       };
-    }));
+    });
 
     set({ clients: mappedClients, loading: false });
   },

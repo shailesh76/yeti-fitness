@@ -9,13 +9,12 @@ const supabase = createBrowserClient(
 );
 
 interface BetaUser {
-  id: string;
   user_id: string;
   email: string;
-  plan: string;
-  is_active: boolean;
-  granted_by?: string;
-  granted_at: string;
+  plan_id: string;
+  status: string;
+  is_active: boolean;   // derived from status === 'active'
+  granted_at: string;   // mapped from created_at
   source: string;
 }
 
@@ -50,33 +49,25 @@ export default function SubscriptionAdmin() {
         .single();
       setGlobalBeta(flagData?.value === 'true');
 
-      // Fetch beta user grants joined with profiles for email
-      const { data: entitlements, error: entErr } = await supabase
-        .from('user_entitlements')
-        .select(`
-          id,
-          user_id,
-          plan,
-          is_active,
-          granted_by,
-          granted_at,
-          source,
-          profiles:profiles!user_id(email, full_name)
-        `)
-        .eq('plan', 'PRO')
-        .order('granted_at', { ascending: false });
-
-      if (entErr) throw entErr;
+      // Beta grants are read via the manage-entitlements edge function. Emails live
+      // in auth.users (not profiles) and require service_role, and routing through the
+      // function keeps a single authorization model instead of a direct, RLS-limited
+      // client query that would only ever return the caller's own row.
+      const { data: listRes, error: listErr } = await supabase.functions.invoke('manage-entitlements', {
+        body: { action: 'list' },
+      });
+      if (listErr || (listRes && listRes.error)) {
+        throw new Error(listErr?.message || listRes?.error || 'Failed to load entitlements');
+      }
 
       setBetaUsers(
-        (entitlements || []).map((e: any) => ({
-          id: e.id,
+        (listRes?.entitlements || []).map((e: any) => ({
           user_id: e.user_id,
-          email: e.profiles?.email || e.user_id,
-          plan: e.plan,
-          is_active: e.is_active,
-          granted_by: e.granted_by,
-          granted_at: e.granted_at,
+          email: e.email || e.user_id,
+          plan_id: e.plan_id,
+          status: e.status,
+          is_active: e.status === 'active',
+          granted_at: e.created_at,
           source: e.source || 'manual_grant',
         })),
       );
@@ -108,22 +99,12 @@ export default function SubscriptionAdmin() {
     if (!grantEmail.trim()) return;
     setGranting(true);
     try {
-      // Look up user by email
-      const { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', grantEmail.trim())
-        .single();
-
-      if (profileErr || !profile) {
-        throw new Error('No user found with that email address.');
-      }
-
-      // Invoke the secure edge function to grant PRO access
+      // Grant via the secure edge function — it resolves email → user server-side
+      // (profiles has no email column; emails live in auth.users).
       const { data: result, error: invokeErr } = await supabase.functions.invoke('manage-entitlements', {
         body: {
           action: 'grant',
-          athleteId: profile.id,
+          email: grantEmail.trim(),
           plan: 'PRO',
         }
       });
@@ -144,25 +125,14 @@ export default function SubscriptionAdmin() {
     }
   };
 
-  const revokePro = async (entitlementId: string, email: string) => {
+  const revokePro = async (userId: string, email: string) => {
     if (!confirm(`Revoke PRO access from ${email}?`)) return;
     try {
-      // Look up user by email first to get athleteId
-      const { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', email.trim())
-        .single();
-
-      if (profileErr || !profile) {
-        throw new Error('No user found with that email address.');
-      }
-
-      // Invoke the secure edge function to revoke PRO access
+      // We already have the user_id from the list — revoke directly via the edge function.
       const { data: result, error: invokeErr } = await supabase.functions.invoke('manage-entitlements', {
         body: {
           action: 'revoke',
-          athleteId: profile.id,
+          athleteId: userId,
         }
       });
 
@@ -299,10 +269,10 @@ export default function SubscriptionAdmin() {
                 </thead>
                 <tbody className="divide-y divide-gray-800">
                   {betaUsers.map((u) => (
-                    <tr key={u.id} className="text-gray-300 hover:bg-gray-900/50 transition-colors">
+                    <tr key={u.user_id} className="text-gray-300 hover:bg-gray-900/50 transition-colors">
                       <td className="px-4 py-3 font-medium text-white">{u.email}</td>
                       <td className="px-4 py-3">
-                        <span className="text-yellow-400 font-bold">{u.plan}</span>
+                        <span className="text-yellow-400 font-bold">{u.plan_id}</span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="bg-gray-800 px-2 py-1 rounded text-xs">{u.source}</span>
@@ -319,7 +289,7 @@ export default function SubscriptionAdmin() {
                       <td className="px-4 py-3">
                         {u.is_active && (
                           <button
-                            onClick={() => revokePro(u.id, u.email)}
+                            onClick={() => revokePro(u.user_id, u.email)}
                             className="text-red-400 hover:text-red-300 text-xs font-semibold transition-colors"
                           >
                             Revoke

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Users, NotebookPen, Dumbbell, MessageSquare, LogOut, Settings, ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import { LayoutDashboard, Users, NotebookPen, Dumbbell, MessageSquare, LogOut, Settings, ChevronLeft, ChevronRight, Menu, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 
@@ -20,8 +20,9 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [coachName, setCoachName] = useState<string>("...");
+  const [userRole, setUserRole] = useState<string>("coach");
   const [loggingOut, setLoggingOut] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(true); // Default to true for SSR/mobile
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -42,16 +43,17 @@ export function Sidebar() {
   };
 
   useEffect(() => {
-    // Load coach name from the live session
+    // Load coach name and role from the live session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session?.user) return;
       supabase
         .from("profiles")
-        .select("full_name")
+        .select("full_name, role")
         .eq("id", session.user.id)
         .single()
         .then(({ data }) => {
           if (data?.full_name) setCoachName(data.full_name);
+          if (data?.role) setUserRole(data.role);
         });
     });
   }, []);
@@ -136,7 +138,26 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-1 flex-col gap-2">
-          {NAV_ITEMS.map((item) => {
+          {/* Admin-only link */}
+          {userRole === "admin" && (
+            <Link
+              href="/admin"
+              title={isCollapsed ? "Admin Panel" : undefined}
+              className={cn(
+                "flex items-center rounded-xl py-3 text-sm font-semibold transition-all duration-300",
+                isCollapsed ? "justify-center px-0 h-11 w-11 mx-auto" : "gap-3 px-3",
+                pathname.startsWith("/admin")
+                  ? "bg-purple-500/10 text-purple-400"
+                  : "text-gray-400 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <ShieldAlert className="h-5 w-5 shrink-0" />
+              {!isCollapsed && <span>Admin Panel</span>}
+            </Link>
+          )}
+
+          {/* Standard nav — hide Dashboard link for admins (they go to /admin) */}
+          {NAV_ITEMS.filter(item => !(userRole === "admin" && item.href === "/dashboard" && item.name === "Dashboard")).map((item) => {
             const isActive = isNavActive(item.name, item.href);
             const Icon = item.icon;
             return (
@@ -175,7 +196,7 @@ export function Sidebar() {
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-bold text-white truncate">{coachName}</span>
-                <span className="text-xs text-gray-500 font-semibold">Coach</span>
+                <span className="text-xs text-gray-500 font-semibold capitalize">{userRole}</span>
               </div>
             )}
           </div>
