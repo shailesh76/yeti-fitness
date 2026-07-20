@@ -11,6 +11,9 @@ importers:
 
   .:
     devDependencies:
+      '@supabase/supabase-js':
+        specifier: 2.110.3
+        version: 2.110.3
       turbo:
         specifier: ^2.0.0
         version: 2.10.5
