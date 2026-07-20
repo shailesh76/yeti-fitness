@@ -1,11 +1,11 @@
 import { useRepositories } from '../../../hooks/useRepositories';
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, Platform, Share } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, Platform, Share, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-/* removed supabase */
 import { useAuthStore } from '../../../store/useAuthStore';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path, Circle, Line as SvgLine, Rect } from 'react-native-svg';
+import Svg, { Path, Circle, Line as SvgLine } from 'react-native-svg';
+import { P, glowStyle, sharedStyles } from '../../../constants/premiumTheme';
 
 interface HistoryPoint {
   date: string;
@@ -52,18 +52,13 @@ export default function ExerciseHistoryScreen() {
   const loadHistory = async () => {
     try {
       setLoading(true);
-
-      // Fetch exercise metadata from local database
       const ex = await exerciseRepository.getExerciseById(id as string);
-
       if (ex) {
         setExerciseName(ex.name);
         setMuscleGroup(ex.muscle_group || '');
       }
 
-      // Invoke exercise progression Edge Function via Repository Remote API
       const data = await workoutRepository.fetchExerciseHistoryRemote(id as string, session!.user!.id);
-
       if (data && data.success) {
         setProgressData(data.exercise_progress);
       }
@@ -84,13 +79,10 @@ export default function ExerciseHistoryScreen() {
     }
   };
 
-  // Render a responsive SVG line chart fallback
   const renderSVGChart = (history: HistoryPoint[]) => {
     if (history.length < 2) return null;
     
-    // Sort oldest to newest for graphing
     const chartData = [...history].reverse();
-    
     const width = 340;
     const height = 180;
     const padding = 30;
@@ -112,24 +104,19 @@ export default function ExerciseHistoryScreen() {
     }
     
     return (
-      <View className="items-center justify-center bg-black/45 p-4 rounded-3xl border border-white/[0.04] mb-6">
+      <View style={styles.chartBox}>
         <Svg width={width} height={height}>
-          {/* Horizontal grid guide lines */}
           <SvgLine x1={padding} y1={padding} x2={width - padding} y2={padding} stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="3 3" />
           <SvgLine x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="3 3" />
           <SvgLine x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="3 3" />
-          
-          {/* Progression path line */}
-          <Path d={pathD} fill="none" stroke="#39FF6A" strokeWidth="3" />
-          
-          {/* Graph node dots */}
+          <Path d={pathD} fill="none" stroke={P.ACCENT} strokeWidth="3" />
           {points.map((p, i) => (
-            <Circle key={i} cx={p.x} cy={p.y} r="4" fill="#0a0d0a" stroke="#39FF6A" strokeWidth="2.5" />
+            <Circle key={i} cx={p.x} cy={p.y} r="4" fill={P.BG} stroke={P.ACCENT} strokeWidth="2.5" />
           ))}
         </Svg>
-        <View className="flex-row justify-between w-full px-8 mt-1">
-          <Text className="text-gray-500 font-mono text-[8px] uppercase tracking-wider">{chartData[0].date}</Text>
-          <Text className="text-gray-500 font-mono text-[8px] uppercase tracking-wider">{chartData[chartData.length - 1].date}</Text>
+        <View style={sharedStyles.rowBetween}>
+          <Text style={styles.chartDateText}>{chartData[0].date}</Text>
+          <Text style={styles.chartDateText}>{chartData[chartData.length - 1].date}</Text>
         </View>
       </View>
     );
@@ -137,130 +124,157 @@ export default function ExerciseHistoryScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#0a0d0a] justify-center items-center">
-        <ActivityIndicator size="large" color="#39FF6A" />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={P.ACCENT} />
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#0a0d0a]">
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-6 pt-5">
-        
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header navigation bar */}
-        <View className="flex-row justify-between items-center mb-6">
+        <View style={styles.header}>
           <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             onPress={() => router.back()}
-            className="p-3 bg-white/[0.04] border border-white/[0.08] rounded-full"
+            style={styles.backBtn}
           >
-            <Text className="text-white text-xs font-black uppercase tracking-wider">Back</Text>
+            <Text style={styles.backBtnText}>‹ Back</Text>
           </TouchableOpacity>
           
           {progressData?.pr && (
             <TouchableOpacity 
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Share personal record"
               onPress={handleShareResult}
-              className="px-4 py-2 bg-[#39FF6A] rounded-full"
+              style={[styles.shareBtn, glowStyle(P.ACCENT, 12, 0.3)]}
             >
-              <Text className="text-[#0a0d0a] text-xs font-black uppercase tracking-wider">Share Rank</Text>
+              <Text style={styles.shareBtnText}>Share Rank</Text>
             </TouchableOpacity>
           )}
         </View>
 
         {/* Title */}
-        <View className="mb-6">
-          <Text className="text-[#39FF6A] text-[9px] font-black uppercase tracking-wider block">{muscleGroup}</Text>
-          <Text className="text-2xl font-black text-white mt-1 leading-tight tracking-tight">{exerciseName}</Text>
-          <Text className="text-gray-500 text-xs font-semibold mt-1">Estimated 1RM Progression & Metrics</Text>
+        <View style={{ marginBottom: 20 }}>
+          <Text style={sharedStyles.labelCaps}>{muscleGroup || 'Exercise'}</Text>
+          <Text style={styles.title}>{exerciseName}</Text>
+          <Text style={styles.subtitle}>Estimated 1RM Progression & Performance Logs</Text>
         </View>
 
         {progressData ? (
-          <View className="pb-12">
-            
-            {/* Progression Chart */}
+          <View style={{ paddingBottom: 40 }}>
             {progressData.history && progressData.history.length >= 2 ? (
               renderSVGChart(progressData.history)
             ) : (
-              <View className="bg-black/35 py-8 rounded-3xl border border-white/[0.04] mb-6 items-center justify-center text-center px-4">
-                <Text className="text-gray-500 text-xs font-black uppercase tracking-wider">Graph unavailable</Text>
-                <Text className="text-gray-650 text-[10px] font-semibold mt-1 max-w-[200px]">Perform this exercise in at least 2 sessions to visualize progress.</Text>
+              <View style={styles.emptyChartCard}>
+                <Text style={styles.emptyChartTitle}>Graph Unavailable</Text>
+                <Text style={styles.emptyChartSub}>Perform this exercise in at least 2 sessions to visualize progress.</Text>
               </View>
             )}
 
             {/* Performance Stats Cards */}
-            <View className="flex-row gap-4 mb-6">
-              
-              {/* Trend Vector */}
-              <View className="flex-1 bg-[#1c1b1b] border border-white/[0.04] p-4 rounded-3xl justify-between">
-                <Text className="text-gray-500 text-[8px] font-black uppercase tracking-wider block">Trend Vector</Text>
-                <Text className={`text-lg font-black uppercase tracking-tighter mt-2 ${
-                  progressData.trend === 'Improving' ? 'text-[#39FF6A]' : 
-                  progressData.trend === 'Declining' ? 'text-red-400' : 'text-gray-300'
-                }`}>{progressData.trend}</Text>
-              </View>
-
-              {/* Peak 1RM PR */}
-              <View className="flex-1 bg-[#1c1b1b] border border-white/[0.04] p-4 rounded-3xl justify-between">
-                <Text className="text-gray-500 text-[8px] font-black uppercase tracking-wider block font-bold">Peak 1RM</Text>
-                <Text className="text-[#00fbfb] text-xl font-mono font-black mt-2 tracking-tight">
-                  {progressData.pr?.estimated_1rm || 0} <Text className="text-[10px] text-gray-500 font-bold font-sans">kg</Text>
+            <View style={styles.statsRow}>
+              <View style={[sharedStyles.card, styles.statCard]}>
+                <Text style={sharedStyles.labelCaps}>Trend Vector</Text>
+                <Text style={[
+                  styles.statTrendText,
+                  progressData.trend === 'Improving' ? { color: P.ACCENT } :
+                  progressData.trend === 'Declining' ? { color: P.RED } : { color: P.TEXT_SEC }
+                ]}>
+                  {progressData.trend}
                 </Text>
               </View>
 
+              <View style={[sharedStyles.card, styles.statCard]}>
+                <Text style={sharedStyles.labelCaps}>Peak 1RM</Text>
+                <Text style={styles.statValText}>
+                  {progressData.pr?.estimated_1rm || 0} <Text style={{ fontSize: 11, color: P.TEXT_MUT }}>kg</Text>
+                </Text>
+              </View>
             </View>
 
-            {/* All-time Best Personal Record (PR) Card */}
+            {/* PR Card */}
             {progressData.pr && (
-              <View className="bg-[#1c1b1b] border border-yellow-500/10 rounded-3xl p-5 mb-6 relative overflow-hidden">
-                <View className="absolute top-0 left-0 right-0 h-[2px] bg-yellow-500/25" />
-                
-                <Text className="text-yellow-400 text-[8px] font-black uppercase tracking-wider">🏆 Personal Record (PR)</Text>
-                
-                <View className="flex-row justify-between items-end mt-4">
+              <View style={[sharedStyles.card, styles.prCard]}>
+                <Text style={[styles.prBadgeText, { color: P.ACCENT }]}>🏆 Personal Record (PR)</Text>
+                <View style={[sharedStyles.rowBetween, { marginTop: 12 }]}>
                   <View>
-                    <Text className="text-white text-3xl font-black font-mono leading-none tracking-tight">
-                      {progressData.pr.weight_kg} <Text className="text-xs font-bold text-gray-500 font-sans">kg</Text>
-                    </Text>
-                    <Text className="text-gray-400 text-[10px] font-black uppercase tracking-wider mt-1 font-mono">
-                      for {progressData.pr.reps} reps
-                    </Text>
+                    <Text style={styles.prWeightText}>{progressData.pr.weight_kg} kg</Text>
+                    <Text style={styles.prMetaText}>for {progressData.pr.reps} reps</Text>
                   </View>
-                  <View className="text-right">
-                    <Text className="text-gray-500 text-[9px] font-semibold block">{progressData.pr.workout_name}</Text>
-                    <Text className="text-gray-600 text-[8px] font-mono mt-0.5">{progressData.pr.date}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.prWorkoutName}>{progressData.pr.workout_name}</Text>
+                    <Text style={styles.prDateText}>{progressData.pr.date}</Text>
                   </View>
                 </View>
               </View>
             )}
 
-            {/* Chronological List History of Sets */}
-            <Text className="text-white font-black text-xs uppercase tracking-wider mb-3.5 ml-1">Workout Logs</Text>
-            <View className="space-y-2">
+            {/* Logs List */}
+            <Text style={[sharedStyles.labelCaps, { marginBottom: 12 }]}>Workout Logs</Text>
+            <View style={{ gap: 10 }}>
               {progressData.history.map((h, hidx) => (
-                <View 
-                  key={hidx} 
-                  className="bg-[#1c1b1b] border border-white/[0.03] p-4 rounded-2xl flex-row justify-between items-center"
-                >
-                  <View className="flex-1 pr-4">
-                    <Text className="text-white font-black text-sm tracking-tight">{h.workout_name}</Text>
-                    <Text className="text-gray-550 font-mono text-[9px] mt-1">{h.date}</Text>
+                <View key={hidx} style={[sharedStyles.card, styles.logCard]}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={styles.logTitle}>{h.workout_name}</Text>
+                    <Text style={styles.logDate}>{h.date}</Text>
                   </View>
-
-                  <View className="items-end">
-                    <Text className="text-[#39FF6A] font-mono font-black text-sm">{h.max_weight} kg max</Text>
-                    <Text className="text-gray-500 font-mono text-[8px] uppercase mt-0.5">Est. 1RM: {h.max_1rm} kg</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.logMaxWeight}>{h.max_weight} kg max</Text>
+                    <Text style={styles.logEstOneRM}>Est. 1RM: {h.max_1rm} kg</Text>
                   </View>
                 </View>
               ))}
             </View>
-
           </View>
         ) : (
-          <View className="py-12 items-center justify-center text-center">
-            <Text className="text-gray-500 text-sm font-semibold">No performance records logged yet, dude.</Text>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>No performance records logged yet.</Text>
           </View>
         )}
-
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: P.BG },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  backBtn: { paddingHorizontal: 12, paddingVertical: 8, minHeight: 44, justifyContent: 'center', borderRadius: P.RADIUS_FULL, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: P.CARD_BORDER },
+  backBtnText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '800' },
+  shareBtn: { paddingHorizontal: 16, paddingVertical: 8, minHeight: 44, justifyContent: 'center', borderRadius: P.RADIUS_FULL, backgroundColor: P.ACCENT },
+  shareBtnText: { color: '#0B0B0F', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  title: { fontSize: 26, fontWeight: '900', color: P.TEXT_PRI, letterSpacing: -0.5, marginTop: 4 },
+  subtitle: { fontSize: 12, color: P.TEXT_SEC, fontWeight: '600', marginTop: 4 },
+  chartBox: { backgroundColor: P.CARD_BG, padding: 16, borderRadius: P.RADIUS_CARD, borderWidth: 1, borderColor: P.CARD_BORDER, marginBottom: 20, alignItems: 'center' },
+  chartDateText: { color: P.TEXT_MUT, fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  emptyChartCard: { backgroundColor: P.CARD_BG, padding: 24, borderRadius: P.RADIUS_CARD, borderWidth: 1, borderColor: P.CARD_BORDER, marginBottom: 20, alignItems: 'center' },
+  emptyChartTitle: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
+  emptyChartSub: { color: P.TEXT_SEC, fontSize: 12, textAlign: 'center', marginTop: 6 },
+  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  statCard: { flex: 1, marginBottom: 0, padding: 14 },
+  statTrendText: { fontSize: 16, fontWeight: '900', marginTop: 6 },
+  statValText: { fontSize: 20, fontWeight: '900', color: P.TEXT_PRI, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', marginTop: 4 },
+  prCard: { marginBottom: 20, padding: 16, borderColor: P.ACCENT_BORDER },
+  prBadgeText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  prWeightText: { fontSize: 28, fontWeight: '900', color: P.TEXT_PRI, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  prMetaText: { fontSize: 12, color: P.TEXT_MUT, fontWeight: '700', marginTop: 2 },
+  prWorkoutName: { fontSize: 13, fontWeight: '700', color: P.TEXT_PRI },
+  prDateText: { fontSize: 11, color: P.TEXT_MUT, marginTop: 2 },
+  logCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, marginBottom: 0 },
+  logTitle: { fontSize: 14, fontWeight: '800', color: P.TEXT_PRI },
+  logDate: { fontSize: 11, color: P.TEXT_MUT, marginTop: 2 },
+  logMaxWeight: { fontSize: 14, fontWeight: '900', color: P.ACCENT },
+  logEstOneRM: { fontSize: 11, color: P.TEXT_MUT, marginTop: 2 },
+  emptyState: { paddingVertical: 40, alignItems: 'center' },
+  emptyStateText: { color: P.TEXT_MUT, fontSize: 13, fontWeight: '600' },
+});
+

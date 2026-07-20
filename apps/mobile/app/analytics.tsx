@@ -448,8 +448,11 @@ export default function ProgressScreen() {
                 <Text style={styles.pageTitle}>Progress 📈</Text>
               </View>
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Upload progress photo"
                 onPress={handleAddProgressPhoto}
-                style={sharedStyles.circleBtn}
+                style={[sharedStyles.circleBtn, { minHeight: 44, minWidth: 44 }]}
                 activeOpacity={0.7}
               >
                 <Ionicons name="camera-outline" size={20} color={P.TEXT_PRI} />
@@ -465,6 +468,10 @@ export default function ProgressScreen() {
                 return (
                   <TouchableOpacity
                     key={key}
+                    accessible={true}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`View ${label} analytics`}
                     onPress={() => setActiveTab(key)}
                     style={[styles.tabPill, active && styles.tabPillActive]}
                     activeOpacity={0.8}
@@ -538,6 +545,9 @@ export default function ProgressScreen() {
                       />
                     </View>
                     <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Save weight entry"
                       style={[styles.logBtn, glowStyle(P.ACCENT, 10, 0.30)]}
                       onPress={handleAddWeight}
                       disabled={weightLoading}
@@ -613,11 +623,14 @@ export default function ProgressScreen() {
                                 onChangeText={(v) => setMeasInput((prev) => ({ ...prev, [m.key]: v }))}
                               />
                               <TouchableOpacity
+                                accessible={true}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Save ${m.label} measurement`}
                                 onPress={() => handleSaveMeasurement(m.key)}
                                 style={styles.measSaveBtn}
                                 activeOpacity={0.8}
                               >
-                                <Ionicons name="checkmark" size={14} color="#000" />
+                                <Ionicons name="checkmark" size={16} color="#000" />
                               </TouchableOpacity>
                             </>
                           ) : (
@@ -626,11 +639,14 @@ export default function ProgressScreen() {
                                 {current !== null ? `${current} cm` : '—'}
                               </Text>
                               <TouchableOpacity
+                                accessible={true}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Edit ${m.label} measurement`}
                                 onPress={() => setMeasEditKey(m.key)}
                                 style={styles.measEditBtn}
                                 activeOpacity={0.7}
                               >
-                                <Ionicons name="add" size={14} color={P.TEXT_SEC} />
+                                <Ionicons name="add" size={16} color={P.TEXT_SEC} />
                               </TouchableOpacity>
                             </>
                           )}
@@ -650,12 +666,15 @@ export default function ProgressScreen() {
                 <View style={[sharedStyles.rowBetween, { marginBottom: 14 }]}>
                   <Text style={sharedStyles.labelCaps}>PROGRESS PHOTOS</Text>
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add progress photo from library"
                     onPress={handleAddProgressPhoto}
                     disabled={photoUploading}
                     style={[styles.photoAddBtn, photoUploading && { opacity: 0.5 }]}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="camera" size={13} color={P.ACCENT} />
+                    <Ionicons name="camera" size={14} color={P.ACCENT} />
                     <Text style={styles.photoAddBtnText}>Add Photo</Text>
                   </TouchableOpacity>
                 </View>
@@ -667,6 +686,9 @@ export default function ProgressScreen() {
                     <Text style={styles.emptyTitle}>No Progress Photos Yet</Text>
                     <Text style={styles.emptyText}>Take your first photo to start tracking your visual transformation.</Text>
                     <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Take first progress photo"
                       onPress={handleAddProgressPhoto}
                       disabled={photoUploading}
                       style={[styles.emptyActionBtn, glowStyle(P.ACCENT, 10, 0.30), photoUploading && { opacity: 0.5 }]}
@@ -706,17 +728,23 @@ export default function ProgressScreen() {
                           </Text>
                         </View>
                         <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete progress photo"
                           onPress={() => handleDeleteProgressPhoto(photo.id, photo.key)}
                           style={styles.photoDeleteBtn}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="trash-outline" size={12} color="#ff4444" />
+                          <Ionicons name="trash-outline" size={14} color="#ff4444" />
                         </TouchableOpacity>
                       </Animated.View>
                     ))}
 
-                    {/* Add photo tile — dashed green border */}
+                    {/* Add photo tile */}
                     <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Add progress photo"
                       onPress={handleAddProgressPhoto}
                       disabled={photoUploading}
                       style={[styles.photoAddTile, photoUploading && { opacity: 0.5 }]}
@@ -750,6 +778,9 @@ export default function ProgressScreen() {
                       entering={FadeInDown.delay(idx * 50).duration(350)}
                     >
                       <TouchableOpacity
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`View ${pr.exercises?.name || 'Exercise'} PR history`}
                         onPress={() => setSelectedPr(pr)}
                         style={sharedStyles.card}
                         activeOpacity={0.8}
@@ -813,11 +844,14 @@ export default function ProgressScreen() {
                   <Text style={styles.modalTitle}>{selectedPr?.exercises?.name}</Text>
                 </View>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close PR history modal"
                   onPress={() => setSelectedPr(null)}
                   style={styles.modalCloseBtn}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="close" size={16} color={P.TEXT_PRI} />
+                  <Ionicons name="close" size={18} color={P.TEXT_PRI} />
                 </TouchableOpacity>
               </View>
 
@@ -883,8 +917,10 @@ const styles = StyleSheet.create({
   },
   tabPill: {
     flex:              1,
-    paddingVertical:   9,
+    paddingVertical:   10,
+    minHeight:         44,
     alignItems:        'center',
+    justifyContent:    'center',
     borderRadius:      P.RADIUS_FULL,
     borderWidth:       1,
     borderColor:       P.CARD_BORDER,
@@ -976,6 +1012,7 @@ const styles = StyleSheet.create({
     borderRadius:      P.RADIUS_SM,
     paddingHorizontal: 14,
     height:            46,
+    minHeight:         44,
     gap:               10,
     borderWidth:       1,
     borderColor:       P.CARD_BORDER,
@@ -992,6 +1029,7 @@ const styles = StyleSheet.create({
     backgroundColor: P.ACCENT,
     paddingHorizontal: 22,
     height:          46,
+    minHeight:       44,
     borderRadius:    P.RADIUS_SM,
     alignItems:      'center',
     justifyContent:  'center',
@@ -1072,9 +1110,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   measEditBtn: {
-    width:           28,
-    height:          28,
-    borderRadius:    14,
+    width:           44,
+    height:          44,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    22,
     backgroundColor: P.CARD_BORDER + '80',
     borderWidth:     1,
     borderColor:     P.CARD_BORDER,
@@ -1082,9 +1122,11 @@ const styles = StyleSheet.create({
     justifyContent:  'center',
   },
   measSaveBtn: {
-    width:           32,
-    height:          32,
-    borderRadius:    16,
+    width:           44,
+    height:          44,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    22,
     backgroundColor: P.ACCENT,
     alignItems:      'center',
     justifyContent:  'center',
@@ -1100,6 +1142,7 @@ const styles = StyleSheet.create({
     fontSize:          14,
     fontWeight:        '700',
     minWidth:          70,
+    minHeight:         44,
     textAlign:         'center',
   },
 
@@ -1112,8 +1155,10 @@ const styles = StyleSheet.create({
     borderWidth:       1,
     borderColor:       P.ACCENT_BORDER,
     borderRadius:      P.RADIUS_FULL,
-    paddingHorizontal: 12,
-    paddingVertical:   6,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    minHeight:         44,
+    justifyContent:    'center',
   },
   photoAddBtnText: {
     fontSize:      10,
@@ -1157,9 +1202,11 @@ const styles = StyleSheet.create({
     top:               6,
     right:             6,
     backgroundColor:   'rgba(0,0,0,0.72)',
-    width:             22,
-    height:            22,
-    borderRadius:      11,
+    width:             32,
+    height:            32,
+    minHeight:         32,
+    minWidth:          32,
+    borderRadius:      16,
     justifyContent:    'center',
     alignItems:        'center',
     borderWidth:       1,
@@ -1221,7 +1268,8 @@ const styles = StyleSheet.create({
     gap:               8,
     backgroundColor:   P.ACCENT,
     paddingHorizontal: 22,
-    paddingVertical:   11,
+    paddingVertical:   12,
+    minHeight:         44,
     borderRadius:      P.RADIUS_FULL,
   },
   emptyActionText: {
@@ -1295,9 +1343,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   modalCloseBtn: {
-    width:           36,
-    height:          36,
-    borderRadius:    18,
+    width:           44,
+    height:          44,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    22,
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth:     1,
     borderColor:     P.CARD_BORDER,
@@ -1378,3 +1428,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
 });
+

@@ -1,119 +1,151 @@
 /**
  * premiumTheme.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Single source of truth for the neon-green premium dark aesthetic
- * introduced in the Home redesign. Import from here on every screen that
- * needs to stay consistent with that design language.
+ * Permanent single source of truth for Yeti Fitness's design system:
+ * - Concept A Minimal Premium foundation
+ * - Concept B Biometric Rings & Soft Glass Cards
+ * - Concept C AI Coach Telemetry Accents & Micro-interactions
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { Platform, StyleSheet } from 'react-native';
 
-// ─── Core palette ─────────────────────────────────────────────────────────────
+// ─── Core Color Palette ───────────────────────────────────────────────────────
 export const P = {
-  // Greens
-  ACCENT:        '#39FF6A',
-  ACCENT_DIM:    'rgba(57,255,106,0.12)',
-  ACCENT_GLOW:   'rgba(57,255,106,0.25)',
-  ACCENT_BORDER: 'rgba(57,255,106,0.22)',
+  // Primary Brand Accent & CTA (Master Reference Royal / Electric Blue)
+  ACCENT:        '#2563EB', // Royal Blue primary CTA
+  ACCENT_BRIGHT: '#3B82F6', // Electric Blue highlights
 
-  // Surfaces
-  BG:          '#0a0d0a',
-  CARD_BG:     '#0d120d',
-  CARD_BORDER: '#1e2a1e',
+  // Biometric & Ring Palette
+  CALORIES:      '#FF453A', // Calories Coral Red
+  PROTEIN:       '#FFD60A', // Protein Amber Gold
+  WATER:         '#64D2FF', // Water Cyber Cyan
+  STEPS:         '#30D158', // Steps / Success Kinetic Green
+  CARBS:         '#3B82F6', // Carbohydrates Blue
+  FAT:           '#FF453A', // Fat Red
 
-  // Text
-  TEXT_PRI: '#FFFFFF',
-  TEXT_SEC: '#8a9e8a',
-  TEXT_MUT: '#4d6b4d',
+  // Semantic & Auxiliary Colors
+  SUCCESS:       '#30D158', // Online / Success / Positive Change
+  WARNING:       '#FF9F0A', // Warning Amber
+  DESTRUCTIVE:   '#FF453A', // Alert / End Workout Red
+  INFO:          '#64D2FF', // Telemetry Info
 
-  // Accents
-  BLUE:  '#00D4FF',
-  AMBER: '#F59E0B',
-  RED:   '#EF4444',
+  // Legacy Backwards-Compatible Aliases
+  ACCENT_CYAN:   '#64D2FF',
+  ACCENT_BLUE:   '#3B82F6',
+  ACCENT_AMBER:  '#FFD60A',
+  ACCENT_ORANGE: '#FF9F0A',
+  ACCENT_RED:    '#FF453A',
+
+  BLUE:  '#3B82F6',
+  AMBER: '#FFD60A',
+  RED:   '#FF453A',
   GOLD:  '#FFD700',
 
-  // Sizes
-  RADIUS_CARD: 20,
+  // Translucent Accent Fills & Borders (Royal Blue)
+  ACCENT_DIM:    'rgba(37, 99, 235, 0.12)',
+  ACCENT_GLOW:   'rgba(37, 99, 235, 0.25)',
+  ACCENT_BORDER: 'rgba(59, 130, 246, 0.35)',
+
+  BLUE_DIM:      'rgba(59, 130, 246, 0.12)',
+  BLUE_BORDER:   'rgba(59, 130, 246, 0.30)',
+
+  CYAN_DIM:      'rgba(100, 210, 255, 0.12)',
+  CYAN_BORDER:   'rgba(100, 210, 255, 0.30)',
+
+  AMBER_DIM:     'rgba(255, 214, 10, 0.12)',
+  AMBER_BORDER:  'rgba(255, 214, 10, 0.30)',
+
+  // Dark Monolithic Surfaces (Master Reference)
+  BG:             '#0B0B0F', // Main screen background
+  CARD_BG:        '#12141C', // Dark Graphite card surface
+  CARD_GLASS:     'rgba(18, 20, 28, 0.75)', // Soft glass surface
+  CARD_BORDER:    'rgba(255, 255, 255, 0.07)', // Ultra-subtle 1px border
+  CARD_BORDER_HI: 'rgba(255, 255, 255, 0.14)',
+
+  // Typography Palette
+  TEXT_PRI: '#FFFFFF', // High contrast white
+  TEXT_SEC: '#94A3B8', // Medium zinc / slate secondary
+  TEXT_MUT: '#64748B', // Muted slate / caption
+  TEXT_SUB: '#475569', // Sub-caption / track line
+
+  // Sizing Tokens
+  RADIUS_CARD: 22,
+  RADIUS_PILL: 16,
   RADIUS_SM:   12,
   RADIUS_FULL: 9999,
 } as const;
 
-// ─── Cross-platform glow shadow helper ────────────────────────────────────────
-export const glowStyle = (color: string, radius = 16, opacity = 0.35) =>
+
+// ─── Cross-Platform Shadow & Glow Helpers ─────────────────────────────────────
+export const glowStyle = (color: string = P.ACCENT, radius = 16, opacity = 0.25) =>
   Platform.select({
     ios: {
       shadowColor:   color,
-      shadowOffset:  { width: 0, height: 0 },
+      shadowOffset:  { width: 0, height: 4 },
       shadowOpacity: opacity,
       shadowRadius:  radius,
     },
     android: {
       elevation:   8,
       borderWidth: 1,
-      borderColor: color + '55',
+      borderColor: color + '40',
     },
     default: {
       shadowColor:   color,
-      shadowOffset:  { width: 0, height: 0 },
+      shadowOffset:  { width: 0, height: 4 },
       shadowOpacity: opacity,
       shadowRadius:  radius,
     },
   }) ?? {};
 
-// ─── Shared style atoms ───────────────────────────────────────────────────────
+// ─── Shared Style Atoms ───────────────────────────────────────────────────────
 export const sharedStyles = StyleSheet.create({
-  /** Premium dark card container */
+  /** Premium Dark Graphite Card Container */
   card: {
     backgroundColor: P.CARD_BG,
     borderWidth:     1,
     borderColor:     P.CARD_BORDER,
     borderRadius:    P.RADIUS_CARD,
-    padding:         18,
-    marginBottom:    14,
+    padding:         20,
+    marginBottom:    16,
   },
-  /** Card with extra outer green glow (hero / primary cards) */
+  /** Hero Glass Card with subtle emerald glow border */
   cardGlow: {
     backgroundColor: P.CARD_BG,
     borderWidth:     1,
-    borderColor:     P.CARD_BORDER,
+    borderColor:     P.ACCENT_BORDER,
     borderRadius:    P.RADIUS_CARD,
-    padding:         18,
-    marginBottom:    14,
-    ...Platform.select({
-      ios: {
-        shadowColor:   P.ACCENT,
-        shadowOffset:  { width: 0, height: 0 },
-        shadowOpacity: 0.18,
-        shadowRadius:  20,
-      },
-      android: {
-        elevation:   12,
-        borderColor: P.ACCENT_BORDER,
-      },
-      default: {
-        shadowColor:   P.ACCENT,
-        shadowOffset:  { width: 0, height: 0 },
-        shadowOpacity: 0.18,
-        shadowRadius:  20,
-      },
-    }),
+    padding:         20,
+    marginBottom:    16,
+    ...glowStyle(P.ACCENT, 20, 0.18),
   },
-  /** Small uppercase section label */
+  /** Telemetry Glass Card with subtle Cyan glow */
+  cardTelemetry: {
+    backgroundColor: P.CARD_BG,
+    borderWidth:     1,
+    borderColor:     P.CYAN_BORDER,
+    borderRadius:    P.RADIUS_CARD,
+    padding:         20,
+    marginBottom:    16,
+    ...glowStyle(P.ACCENT_CYAN, 20, 0.15),
+  },
+  /** Section Headline Caps */
   labelCaps: {
-    fontSize:      10,
+    fontSize:      11,
     fontWeight:    '800' as const,
     color:         P.TEXT_MUT,
     textTransform: 'uppercase' as const,
-    letterSpacing: 1.2,
+    letterSpacing: 1.4,
   },
-  /** Scrollable screen content area */
+  /** Scrollable screen container */
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop:        Platform.OS === 'ios' ? 16 : 24,
     paddingBottom:     120,
     backgroundColor:   P.BG,
   },
-  /** Generic row flex */
+  /** Flex Row Helper */
   row: {
     flexDirection:  'row' as const,
     alignItems:     'center' as const,
@@ -123,10 +155,36 @@ export const sharedStyles = StyleSheet.create({
     alignItems:     'center' as const,
     justifyContent: 'space-between' as const,
   },
+  /** Circular Button (Header / Action) */
+  circleBtn: {
+    width:           44,
+    height:          44,
+    borderRadius:    22,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth:     1,
+    borderColor:     P.CARD_BORDER,
+    alignItems:      'center' as const,
+    justifyContent:  'center' as const,
+  },
+  /** Metric Badge Pill */
+  badgePill: {
+    paddingHorizontal: 10,
+    paddingVertical:   4,
+    borderRadius:      P.RADIUS_FULL,
+    backgroundColor:   P.ACCENT_DIM,
+    borderWidth:       1,
+    borderColor:       P.ACCENT_BORDER,
+  },
+  badgeText: {
+    fontSize:   11,
+    fontWeight: '800' as const,
+    color:      P.ACCENT,
+    letterSpacing: 0.5,
+  },
   /** Thin progress bar track */
   barBg: {
     height:          5,
-    backgroundColor: '#111c11',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius:    99,
     overflow:        'hidden' as const,
   },
@@ -135,15 +193,5 @@ export const sharedStyles = StyleSheet.create({
     height:       '100%' as any,
     borderRadius: 99,
   },
-  /** Circular dark button (header actions) */
-  circleBtn: {
-    width:           44,
-    height:          44,
-    borderRadius:    22,
-    backgroundColor: P.CARD_BG,
-    borderWidth:     1,
-    borderColor:     P.CARD_BORDER,
-    alignItems:      'center' as const,
-    justifyContent:  'center' as const,
-  },
 });
+

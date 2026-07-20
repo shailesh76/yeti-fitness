@@ -106,16 +106,26 @@ export default function DiagnosticsScreen() {
         </View>
       </SafeAreaView>
     );
-  }
-
-  return (
+  }  return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity 
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          onPress={() => router.back()} 
+          style={styles.backBtn}
+        >
           <Ionicons name="arrow-back" size={24} color={P.TEXT_PRI} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>System Diagnostics</Text>
-        <TouchableOpacity onPress={loadDiagnostics} style={styles.refreshBtn}>
+        <TouchableOpacity 
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Reload diagnostic metrics"
+          onPress={loadDiagnostics} 
+          style={styles.refreshBtn}
+        >
           <Ionicons name="refresh" size={20} color={P.ACCENT} />
         </TouchableOpacity>
       </View>
@@ -190,36 +200,135 @@ export default function DiagnosticsScreen() {
         {/* Diagnostics Actions */}
         <Text style={styles.sectionHeader}>Beta Commands</Text>
         <View style={styles.btnRow}>
-          <TouchableOpacity style={styles.btn} onPress={handleManualSync}>
+          <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Force manual database sync"
+            style={styles.btn} 
+            onPress={handleManualSync}
+          >
             <Ionicons name="cloud-upload-outline" size={18} color={P.BG} style={{ marginRight: 6 }} />
             <Text style={styles.btnText}>Force Sync</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.btn, { backgroundColor: '#1e2a1e', borderWidth: 1, borderColor: P.CARD_BORDER }]} onPress={handleTestNotification}>
+          <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Send test push notification"
+            style={[styles.btn, { backgroundColor: '#1e2a1e', borderWidth: 1, borderColor: P.CARD_BORDER }]} 
+            onPress={handleTestNotification}
+          >
             <Ionicons name="notifications-outline" size={18} color={P.ACCENT} style={{ marginRight: 6 }} />
             <Text style={[styles.btnText, { color: P.ACCENT }]}>Test Push</Text>
           </TouchableOpacity>
         </View>
-
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: P.BG },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: P.BG },
-  loadingText: { color: P.TEXT_SEC, marginTop: 12, fontSize: 14, fontWeight: 'bold' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: P.CARD_BORDER },
-  backBtn: { padding: 4 },
-  refreshBtn: { padding: 4 },
-  headerTitle: { color: P.TEXT_PRI, fontSize: 18, fontWeight: 'bold' },
-  container: { padding: 20, paddingBottom: 100 },
-  sectionHeader: { fontSize: 11, fontWeight: '900', color: P.TEXT_MUT, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, marginTop: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  label: { color: P.TEXT_SEC, fontSize: 14 },
-  value: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '500' },
-  btnRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
-  btn: { flex: 1, height: 48, borderRadius: 12, backgroundColor: P.ACCENT, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  btnText: { color: P.BG, fontWeight: 'bold', fontSize: 14 }
+  safeArea: {
+    flex: 1,
+    backgroundColor: P.BG,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: P.CARD_BORDER,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshBtn: {
+    width: 44,
+    height: 44,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: P.TEXT_PRI,
+    letterSpacing: -0.5,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    color: P.TEXT_MUT,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  container: {
+    padding: 20,
+  },
+  sectionHeader: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: P.TEXT_MUT,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 16,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.03)',
+  },
+  label: {
+    fontSize: 13,
+    color: P.TEXT_SEC,
+    fontWeight: '600',
+  },
+  value: {
+    fontSize: 13,
+    color: P.TEXT_PRI,
+    fontWeight: '700',
+    maxWidth: '55%',
+  },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  btn: {
+    flex: 1,
+    backgroundColor: P.ACCENT,
+    paddingVertical: 14,
+    minHeight: 44,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnText: {
+    color: P.BG,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
 });
+

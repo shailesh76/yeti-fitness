@@ -66,8 +66,24 @@ interface SessionState {
   /** Update a set's values while the athlete is entering data */
   updateSet: (exerciseIdx: number, setIdx: number, values: Partial<SetLog>) => void;
 
+  /** Add a new set to an exercise in the active session */
+  addSet: (exerciseIdx: number) => void;
+
+  /** Remove a set from an exercise in the active session */
+  removeSet: (exerciseIdx: number, setIdx: number) => void;
+
+  /** Add an exercise to the active session */
+  addExercise: (exercise: Omit<ExerciseInSession, 'sets'>) => void;
+
+  /** Remove an exercise from the active session */
+  removeExercise: (exerciseIdx: number) => void;
+
+  /** Replace an exercise in the active session */
+  replaceExercise: (exerciseIdx: number, newExercise: Omit<ExerciseInSession, 'sets'>) => void;
+
   /** Mark a set as completed and save it locally + enqueue for sync */
   completeSet: (exerciseIdx: number, setIdx: number, userId: string) => Promise<void>;
+
 
   /** Finish the session, save workout history, trigger progression analysis */
   finishSession: () => Promise<{ sessionId: string | null; totalVolume: number }>;
@@ -160,13 +176,90 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const exercises = [...state.activeSession.exercises];
       const sets = [...exercises[exerciseIdx].sets];
       sets[setIdx] = { ...sets[setIdx], ...values };
-      exercises[exerciseIdx] = { ...exercises[exerciseIdx], sets };
       const session = { ...state.activeSession, exercises };
-      // Background-persist for crash recovery
       AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
       return { activeSession: session };
     });
   },
+
+
+  addSet: (exerciseIdx) => {
+
+    set((state) => {
+      if (!state.activeSession) return state;
+      const exercises = [...state.activeSession.exercises];
+      const ex = exercises[exerciseIdx];
+      const lastSet = ex.sets[ex.sets.length - 1];
+      const newSet: SetLog = {
+        id: generateLocalId(),
+        setNumber: ex.sets.length + 1,
+        weightKg: lastSet?.weightKg ?? ex.targetWeightKg ?? 0,
+        reps: lastSet?.reps ?? parseInt(ex.targetReps?.split('-')[0] || '8', 10),
+        rpe: lastSet?.rpe,
+        tempo: lastSet?.tempo,
+        restSeconds: lastSet?.restSeconds ?? ex.restSeconds,
+        isWarmup: false,
+        isCompleted: false,
+      };
+      exercises[exerciseIdx] = { ...ex, sets: [...ex.sets, newSet] };
+      const session = { ...state.activeSession, exercises };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
+  removeSet: (exerciseIdx, setIdx) => {
+    set((state) => {
+      if (!state.activeSession) return state;
+      const exercises = [...state.activeSession.exercises];
+      const ex = exercises[exerciseIdx];
+      if (ex.sets.length <= 1) return state; // Keep at least 1 set
+      const sets = ex.sets.filter((_, idx) => idx !== setIdx).map((s, idx) => ({ ...s, setNumber: idx + 1 }));
+      exercises[exerciseIdx] = { ...ex, sets };
+      const session = { ...state.activeSession, exercises };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
+  addExercise: (newEx) => {
+    set((state) => {
+      if (!state.activeSession) return state;
+      const fullEx: ExerciseInSession = {
+        ...newEx,
+        sets: buildDefaultSets(newEx.targetSets || 3, newEx.targetReps || '8-10', newEx.targetWeightKg),
+      };
+      const session = { ...state.activeSession, exercises: [...state.activeSession.exercises, fullEx] };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
+  removeExercise: (exerciseIdx) => {
+    set((state) => {
+      if (!state.activeSession) return state;
+      const exercises = state.activeSession.exercises.filter((_, idx) => idx !== exerciseIdx);
+      const session = { ...state.activeSession, exercises };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
+  replaceExercise: (exerciseIdx, newEx) => {
+    set((state) => {
+      if (!state.activeSession) return state;
+      const exercises = [...state.activeSession.exercises];
+      const fullEx: ExerciseInSession = {
+        ...newEx,
+        sets: buildDefaultSets(newEx.targetSets || 3, newEx.targetReps || '8-10', newEx.targetWeightKg),
+      };
+      exercises[exerciseIdx] = fullEx;
+      const session = { ...state.activeSession, exercises };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
 
   completeSet: async (exerciseIdx, setIdx, userId) => {
     const state = get();

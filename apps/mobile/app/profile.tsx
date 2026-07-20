@@ -180,14 +180,19 @@ export default function MoreScreen() {
                 )}
               </View>
 
+
               {/* Goal Selection */}
-              <Text style={[sharedStyles.labelCaps, styles.sectionHeader]}>Current Goal</Text>
+
               <View style={styles.cardGroup}>
                 {GOALS.map((g) => {
                   const isSelected = profile?.goal === g.id;
                   return (
                     <TouchableOpacity
                       key={g.id}
+                      accessible={true}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: isSelected }}
+                      accessibilityLabel={`Set fitness goal to ${g.label}: ${g.desc}`}
                       onPress={() => handleUpdateGoal(g.id)}
                       disabled={updating}
                       style={[
@@ -217,6 +222,9 @@ export default function MoreScreen() {
               <Text style={[sharedStyles.labelCaps, styles.sectionHeader]}>Options</Text>
               <View style={styles.cardGroup}>
                 <TouchableOpacity 
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={wearablesConnected ? "Disconnect background wearables sync" : "Enable background wearables sync"}
                   onPress={wearablesConnected ? handleDisableWearables : handleEnableWearables}
                   style={[
                     styles.optionBtn,
@@ -239,6 +247,9 @@ export default function MoreScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Social Challenges & Leaderboards"
                   onPress={() => router.push('/challenges')}
                   style={styles.optionBtn}
                   activeOpacity={0.8}
@@ -251,6 +262,9 @@ export default function MoreScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open System Diagnostics"
                   onPress={() => router.push('/settings/diagnostics')}
                   style={styles.optionBtn}
                   activeOpacity={0.8}
@@ -272,6 +286,9 @@ export default function MoreScreen() {
                     <Text style={styles.optionSubtitle}>Get reminded on training days</Text>
                   </View>
                   <Switch 
+                    accessible={true}
+                    accessibilityRole="switch"
+                    accessibilityLabel="Toggle Workout Reminders"
                     value={notifStore.workoutReminders} 
                     onValueChange={(val) => notifStore.setPreference('workoutReminders', val)}
                     trackColor={{ false: '#222', true: P.ACCENT }}
@@ -285,6 +302,9 @@ export default function MoreScreen() {
                     <Text style={styles.optionSubtitle}>Updates from your assigned coach</Text>
                   </View>
                   <Switch 
+                    accessible={true}
+                    accessibilityRole="switch"
+                    accessibilityLabel="Toggle Coach Messages"
                     value={notifStore.coachMessages} 
                     onValueChange={(val) => notifStore.setPreference('coachMessages', val)}
                     trackColor={{ false: '#222', true: P.ACCENT }}
@@ -298,6 +318,9 @@ export default function MoreScreen() {
                     <Text style={styles.optionSubtitle}>Rank changes and invites</Text>
                   </View>
                   <Switch 
+                    accessible={true}
+                    accessibilityRole="switch"
+                    accessibilityLabel="Toggle Challenge Updates"
                     value={notifStore.challengeUpdates} 
                     onValueChange={(val) => notifStore.setPreference('challengeUpdates', val)}
                     trackColor={{ false: '#222', true: P.ACCENT }}
@@ -308,6 +331,9 @@ export default function MoreScreen() {
 
               {/* Log Out */}
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Log out of Yeti Fitness account"
                 onPress={handleSignOut}
                 style={styles.logoutBtn}
                 activeOpacity={0.8}
@@ -320,12 +346,14 @@ export default function MoreScreen() {
 
             </Animated.View>
           </ScrollView>
-
         </View>
       </SafeAreaView>
     </AppShell>
   );
 }
+
+
+
 
 const styles = StyleSheet.create({
   safeArea: {

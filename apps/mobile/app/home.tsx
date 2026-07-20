@@ -1,11 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback, memo } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Dimensions,
+  Platform,
+  Image,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { FadeIn, FadeInDown, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import Svg, { Circle } from 'react-native-svg';
 import { Canvas, Path, Skia } from "@shopify/react-native-skia";
 import { Q } from '@nozbe/watermelondb';
+import * as Haptics from 'expo-haptics';
+
 import { useRepositories } from '../hooks/useRepositories';
 import { EVENTS } from '../constants/analyticsEvents';
 import { useAuthStore } from '../store/useAuthStore';
@@ -14,401 +26,805 @@ import { useSyncManager } from '../hooks/useSyncManager';
 import { Workout, WorkoutSession } from '@yeti/database';
 import AppShell from '../components/AppShell';
 import { database, isNativeDbAvailable } from '../database';
+import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
+import { useHydrationStore } from '../store/useHydrationStore';
+import { SkeletonLoader } from '../components/TelemetryComponents';
 
 const { width } = Dimensions.get('window');
-const ACCENT = '#39FF6A';
-const BG = '#0a0d0a';
-const CARD_BG = '#0d120d';
-const TEXT_PRIMARY = '#FFFFFF';
-const TEXT_SECONDARY = '#8a9e8a';
 
-// ─── Score Component ────────────────────────────────────────────────────────
-const YetiScoreCard = ({ score, previousScore }: { score: number, previousScore: number }) => {
-  const animatedScore = useSharedValue(0);
-  
-  useEffect(() => {
-    animatedScore.value = withTiming(score, { duration: 1500 });
-  }, [score]);
+// ─── Reusable SVG Biometric Ring Component ───────────────────────────────────
+const BiometricRing = memo(({
+  size = 64,
+  strokeWidth = 6,
+  progress = 0.75,
+  color = P.ACCENT,
+  iconName,
+  valueText,
+  labelText,
+}: {
+  size?: number;
+  strokeWidth?: number;
+  progress?: number;
+  color?: string;
+  iconName?: keyof typeof Ionicons.glyphMap;
+  valueText: string;
+  labelText: string;
+}) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clampedProgress = Math.min(Math.max(progress, 0), 1);
+  const strokeDashoffset = circumference * (1 - clampedProgress);
 
+  return (
+    <View style={styles.ringWrapper}>
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size} height={size}>
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="rgba(255, 255, 255, 0.06)"
+            strokeWidth={strokeWidth}
+            fill="none"
+          />
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="none"
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        </Svg>
+        {iconName && (
+          <View style={styles.ringCenterIcon}>
+            <Ionicons name={iconName} size={size * 0.32} color={color} />
+          </View>
+        )}
+      </View>
+      <Text style={styles.ringValueText} numberOfLines={1}>{valueText}</Text>
+      <Text style={styles.ringLabelText} numberOfLines={1}>{labelText}</Text>
+    </View>
+  );
+});
+
+// ─── 1. Header & Greeting Bar ───────────────────────────────────────────
+const HeaderAndGreeting = memo(({
+  fullName,
+  streakDays = 12,
+  onPressProfile,
+  onPressCoach,
+}: {
+  fullName: string;
+  streakDays?: number;
+  onPressProfile: () => void;
+  onPressCoach: () => void;
+}) => {
+  const currentHour = new Date().getHours();
+  let greeting = 'Good morning';
+  if (currentHour >= 12 && currentHour < 17) greeting = 'Good afternoon';
+  else if (currentHour >= 17) greeting = 'Good evening';
+
+  const firstName = fullName.split(' ')[0] || 'Athlete';
+
+  return (
+    <View style={{ marginBottom: 20 }}>
+      {/* Top Brand & Bell Bar */}
+      <View style={styles.topBrandRow}>
+        <View style={styles.yetiBadgeContainer}>
+          <Text style={styles.yetiBadgeText}>YETI</Text>
+        </View>
+
+        <View style={styles.headerRightGroup}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Open AI Coach"
+            activeOpacity={0.7}
+            onPress={() => {
+              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onPressCoach();
+            }}
+            style={styles.bellBtn}
+          >
+            <Ionicons name="notifications-outline" size={20} color={P.TEXT_PRI} />
+            <View style={styles.notificationDot} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Greeting & Streak Row */}
+      <View style={sharedStyles.rowBetween}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greetingTitle}>
+            {greeting}, {firstName} 🖐
+          </Text>
+        </View>
+
+        <View style={styles.streakBadge}>
+          <Ionicons name="flame" size={16} color={P.WARNING} />
+          <Text style={styles.streakText}>STREAK {streakDays} days</Text>
+        </View>
+      </View>
+    </View>
+  );
+});
+
+// ─── 2. AI Motivational Hero Banner ───────────────────────────────────────
+const MotivationalBanner = memo(({ onPressAsk }: { onPressAsk: () => void }) => {
+  return (
+    <TouchableOpacity
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel="AI Coach Motivational Banner"
+      activeOpacity={0.85}
+      onPress={onPressAsk}
+      style={styles.heroBannerCard}
+    >
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <Text style={styles.heroBannerTitle}>Keep pushing forward!</Text>
+        <Text style={styles.heroBannerSub}>You're stronger than yesterday.</Text>
+      </View>
+      <View style={styles.mascotAvatarWrapper}>
+        <Image
+          source={require('../assets/yeti_mascot_avatar.png')}
+          style={styles.mascotImg}
+          resizeMode="cover"
+        />
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ─── 3. Today's Plan Card (Master Reference) ──────────────────────────────────
+const TodaysPlanCard = memo(({
+  todayWorkout,
+  activeSessionId,
+  onPressWorkout,
+}: {
+  todayWorkout: string;
+  activeSessionId: string | null;
+  onPressWorkout: () => void;
+}) => {
+  const isResume = !!activeSessionId;
+
+  return (
+    <View style={[sharedStyles.card, styles.planCard]}>
+      <View style={sharedStyles.rowBetween}>
+        <Text style={sharedStyles.labelCaps}>TODAY'S PLAN</Text>
+        <Ionicons name="ellipsis-horizontal" size={18} color={P.TEXT_MUT} />
+      </View>
+
+      <View style={sharedStyles.rowBetween}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={styles.planTitle}>{todayWorkout}</Text>
+          <Text style={styles.planSubtitle}>Chest, Shoulders, Triceps</Text>
+          
+          <View style={styles.planMetaRow}>
+            <View style={sharedStyles.row}>
+              <Ionicons name="barbell-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
+              <Text style={styles.planMetaText}>6 Exercises</Text>
+            </View>
+            <View style={[sharedStyles.row, { marginLeft: 14 }]}>
+              <Ionicons name="time-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
+              <Text style={styles.planMetaText}>75 min</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.planMascotContainer}>
+          <Image
+            source={require('../assets/yeti_mascot_avatar.png')}
+            style={styles.planMascotImg}
+            resizeMode="cover"
+          />
+        </View>
+      </View>
+
+
+      <TouchableOpacity
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={isResume ? `Resume Workout Session: ${todayWorkout}` : `Start Workout: ${todayWorkout}`}
+        activeOpacity={0.85}
+        onPress={() => {
+          if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onPressWorkout();
+        }}
+        style={[styles.primaryRoyalBtn, glowStyle(P.ACCENT, 16, 0.35)]}
+      >
+        <Text style={styles.primaryRoyalBtnText}>
+          {isResume ? 'RESUME WORKOUT' : 'START WORKOUT'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+// ─── 4. Daily Progress 4-Ring Widget ──────────────────────────────────────────
+const DailyProgressWidget = memo(({
+  calories,
+  targetCalories,
+  protein,
+  targetProtein,
+  waterMl,
+  targetWaterMl,
+  steps,
+  targetSteps = 10000,
+}: {
+  calories: number;
+  targetCalories: number;
+  protein: number;
+  targetProtein: number;
+  waterMl: number;
+  targetWaterMl: number;
+  steps?: number;
+  targetSteps?: number;
+}) => {
+  const router = useRouter();
+
+  const cPct = Math.min(calories / (targetCalories || 2000), 1);
+  const pPct = Math.min(protein / (targetProtein || 150), 1);
+  const wPct = Math.min(waterMl / (targetWaterMl || 2500), 1);
+  const sPct = Math.min((steps || 8247) / targetSteps, 1);
+
+  return (
+    <View style={sharedStyles.card}>
+      <View style={sharedStyles.rowBetween}>
+        <Text style={sharedStyles.labelCaps}>DAILY PROGRESS</Text>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Edit daily progress targets"
+          onPress={() => router.push('/food-diary')}
+        >
+          <Text style={styles.editActionText}>Edit</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 4 Rings Grid */}
+      <View style={styles.ringsRow}>
+        <BiometricRing
+          size={60}
+          strokeWidth={5}
+          progress={cPct}
+          color={P.CALORIES}
+          iconName="flame"
+          valueText={`${calories}`}
+          labelText="1,980 / 2,500"
+        />
+        <BiometricRing
+          size={60}
+          strokeWidth={5}
+          progress={pPct}
+          color={P.PROTEIN}
+          iconName="restaurant"
+          valueText={`${protein}g`}
+          labelText="152g / 170g"
+        />
+        <BiometricRing
+          size={60}
+          strokeWidth={5}
+          progress={wPct}
+          color={P.WATER}
+          iconName="water"
+          valueText={`${(waterMl / 1000).toFixed(1)}L`}
+          labelText="2.1L / 3.0L"
+        />
+        <BiometricRing
+          size={60}
+          strokeWidth={5}
+          progress={sPct}
+          color={P.STEPS}
+          iconName="footsteps"
+          valueText={`${steps || 8247}`}
+          labelText="8,247 / 10k"
+        />
+      </View>
+    </View>
+  );
+});
+
+// ─── 5. Nutrition Summary Bar Card ──────────────────────────────────────────
+const NutritionSummaryCard = memo(({
+  calories,
+  targetCalories,
+}: {
+  calories: number;
+  targetCalories: number;
+}) => {
+  const router = useRouter();
+  const pct = Math.min(calories / (targetCalories || 2000), 1);
+
+  return (
+    <View style={sharedStyles.card}>
+      <View style={sharedStyles.rowBetween}>
+        <Text style={sharedStyles.labelCaps}>NUTRITION SUMMARY</Text>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="See full nutrition diary"
+          onPress={() => router.push('/food-diary')}
+        >
+          <Text style={styles.editActionText}>See All</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={[sharedStyles.rowBetween, { marginTop: 12 }]}>
+        <Text style={styles.nutriLabelText}>Calories</Text>
+        <Text style={styles.nutriValText}>
+          {calories} / {targetCalories} kcal
+        </Text>
+      </View>
+
+      <View style={styles.nutriBarTrack}>
+        <View style={[styles.nutriBarFill, { width: `${pct * 100}%` }]} />
+      </View>
+    </View>
+  );
+});
+
+// ─── 6. Yeti Readiness Score Hero ────────────────────────────────────────────
+const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previousScore: number }) => {
   const diff = score - previousScore;
+  const isPositive = diff >= 0;
 
-  return (
-    <View style={[styles.card, { alignItems: 'center', paddingVertical: 32 }]}>
-      <Text style={styles.cardTitle}>YETI SCORE</Text>
-      <Text style={styles.yetiScoreText}>{score}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
-        <Ionicons name={diff >= 0 ? "arrow-up" : "arrow-down"} size={16} color={diff >= 0 ? ACCENT : '#ff4444'} />
-        <Text style={{ color: diff >= 0 ? ACCENT : '#ff4444', fontWeight: 'bold' }}>
-          {diff >= 0 ? '+' : ''}{diff} points from last week
-        </Text>
-      </View>
-    </View>
-  );
-};
-
-// ─── Chart Component ────────────────────────────────────────────────────────
-const WeightTrendChart = ({ logs }: { logs: any[] }) => {
-  if (logs.length < 2) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>WEIGHT TREND (30D)</Text>
-        <View style={{ height: 100, justifyContent: 'center', alignItems: 'center', marginTop: 16 }}>
-          <Ionicons name="analytics-outline" size={28} color={TEXT_SECONDARY} style={{ marginBottom: 8 }} />
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 13, textAlign: 'center', paddingHorizontal: 16 }}>
-            Log weight on at least 2 days in the progress tracker to view your trend.
-          </Text>
-        </View>
-      </View>
-    );
+  let readinessLabel = 'OPTIMAL RECOVERY';
+  let readinessColor: string = P.STEPS;
+  if (score < 60) {
+    readinessLabel = 'REST RECOMMENDED';
+    readinessColor = P.CALORIES;
+  } else if (score < 80) {
+    readinessLabel = 'MODERATE READINESS';
+    readinessColor = P.PROTEIN;
   }
 
-  // Skia (CanvasKit/WASM) is not reliably available on web — render a graceful
-  // fallback instead of crashing when the native canvas is unavailable.
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>WEIGHT TREND (30D)</Text>
-        <View style={{ height: 100, justifyContent: 'center', alignItems: 'center', marginTop: 16 }}>
-          <Ionicons name="phone-portrait-outline" size={26} color={TEXT_SECONDARY} style={{ marginBottom: 8 }} />
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 12, textAlign: 'center', paddingHorizontal: 16 }}>
-            Trend charts are available in the Yeti mobile app.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  const chartH = 80;
-  const chartW = width - 80; // card padding accounts for width
-  const weights = logs.map(l => l.weight_kg);
-  const minW = Math.min(...weights) - 0.5;
-  const maxW = Math.max(...weights) + 0.5;
-  const wRange = maxW - minW || 1;
-
-  const path = Skia.Path.Make();
-  logs.forEach((log, i) => {
-    const x = (i / (logs.length - 1)) * chartW;
-    const y = chartH - ((log.weight_kg - minW) / wRange) * chartH;
-    if (i === 0) {
-      path.moveTo(x, y);
-    } else {
-      path.lineTo(x, y);
-    }
-  });
-
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>WEIGHT TREND (30D)</Text>
-      <View style={{ height: 100, marginTop: 16 }}>
-        <Canvas style={{ flex: 1 }}>
-          <Path path={path} color={ACCENT} style="stroke" strokeWidth={3} strokeCap="round" strokeJoin="round" />
-        </Canvas>
+    <View style={sharedStyles.cardGlow}>
+      <View style={sharedStyles.rowBetween}>
+        <Text style={sharedStyles.labelCaps}>YETI READINESS SCORE</Text>
+        <View style={[styles.badgePill, { borderColor: readinessColor + '40', backgroundColor: readinessColor + '15' }]}>
+          <Text style={[styles.badgeText, { color: readinessColor }]}>{readinessLabel}</Text>
+        </View>
       </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-        <Text style={{ color: TEXT_SECONDARY, fontSize: 10 }}>
-          {new Date(logs[0].logged_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-        </Text>
-        <Text style={{ color: TEXT_SECONDARY, fontSize: 10 }}>
-          {new Date(logs[logs.length - 1].logged_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-        </Text>
-      </View>
-    </View>
-  );
-};
 
-// ─── Macro Component ────────────────────────────────────────────────────────
-const MacroProgressCard = ({ consumed, target }: { consumed: any, target: any }) => {
-  const cCalories = consumed.calories || 0;
-  const tCalories = target.calories || 2000;
-  
-  return (
-    <View style={styles.card}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={styles.cardTitle}>TODAY&apos;S NUTRITION</Text>
-        <Text style={{ color: ACCENT, fontSize: 12, fontWeight: 'bold' }}>
-          {cCalories} / {tCalories} kcal
-        </Text>
-      </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 }}>
-        <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: '#00D4FF', fontWeight: 'bold', fontSize: 16 }}>
-            {consumed.protein || 0}g / {target.protein || 150}g
-          </Text>
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 11, marginTop: 2 }}>Protein</Text>
+      <View style={styles.scoreRowContainer}>
+        <View style={styles.scoreCircleBadge}>
+          <Text style={styles.scoreNumberText}>{score}</Text>
+          <Text style={styles.scoreMaxText}>/100</Text>
         </View>
-        <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: '#F59E0B', fontWeight: 'bold', fontSize: 16 }}>
-            {consumed.carbs || 0}g / {target.carbs || 220}g
+
+        <View style={{ flex: 1, marginLeft: 16 }}>
+          <Text style={styles.scoreDetailHeader}>Strain vs. Recovery</Text>
+          <Text style={styles.scoreDetailSub}>
+            Computed via workout completion, nutrition logging, and check-in consistency over 14 days.
           </Text>
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 11, marginTop: 2 }}>Carbs</Text>
-        </View>
-        <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 16 }}>
-            {consumed.fat || 0}g / {target.fat || 65}g
-          </Text>
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 11, marginTop: 2 }}>Fats</Text>
+
+          <View style={styles.deltaRow}>
+            <Ionicons
+              name={isPositive ? 'trending-up' : 'trending-down'}
+              size={16}
+              color={isPositive ? P.STEPS : P.CALORIES}
+            />
+            <Text style={[styles.deltaText, { color: isPositive ? P.STEPS : P.CALORIES }]}>
+              {isPositive ? '+' : ''}{diff} pts from last week
+            </Text>
+          </View>
         </View>
       </View>
     </View>
   );
-};
+});
 
-// ─── Main HomeScreen Component ──────────────────────────────────────────────
+// ─── 7. Quick Actions Component ──────────────────────────────────────────────
+const QuickActionsGrid = memo(({
+  onNavigate,
+}: {
+  onNavigate: (route: string) => void;
+}) => {
+  const actions = [
+    { label: 'Log Workout', icon: 'barbell-outline', route: '/workouts', color: P.ACCENT },
+    { label: 'Scan Food', icon: 'camera-outline', route: '/ai-food-scan', color: P.WATER },
+    { label: 'Log Nutrition', icon: 'nutrition-outline', route: '/food-diary', color: P.PROTEIN },
+    { label: 'Progress Check', icon: 'analytics-outline', route: '/analytics', color: P.ACCENT_BRIGHT },
+  ];
+
+  return (
+    <View style={{ marginBottom: 20 }}>
+      <Text style={[sharedStyles.labelCaps, { marginBottom: 12 }]}>QUICK ACTIONS</Text>
+      <View style={styles.actionGridContainer}>
+        {actions.map((act) => (
+          <TouchableOpacity
+            key={act.label}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={act.label}
+            activeOpacity={0.7}
+            onPress={() => {
+              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onNavigate(act.route);
+            }}
+            style={styles.actionGridTile}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: act.color + '15', borderColor: act.color + '30' }]}>
+              <Ionicons name={act.icon as any} size={22} color={act.color} />
+            </View>
+            <Text style={styles.actionTileLabel}>{act.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+});
+
+// ─── Main HomeScreen Master Component ─────────────────────────────────────────
 export default function HomeScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
   const userId = session?.user?.id;
   const { sync } = useSyncManager();
 
-  const { progressRepository, nutritionRepository, workoutRepository, userRepository, eventRepository } = useRepositories();
+  const { progressRepository, nutritionRepository, workoutRepository, userRepository, eventRepository } =
+    useRepositories();
 
   const [loading, setLoading] = useState(true);
-  const [yetiScore, setYetiScore] = useState(80);
-  const [prevYetiScore, setPrevYetiScore] = useState(75);
-  const [weightLogs, setWeightLogs] = useState<any[]>([]);
-  const [consumedMacros, setConsumedMacros] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0 });
-  const [targetMacros, setTargetMacros] = useState({ calories: 2000, protein: 150, carbs: 220, fat: 65 });
-  const [todayWorkout, setTodayWorkout] = useState<string | null>(null);
+  const [athleteName, setAthleteName] = useState('Sailesh Shrestha');
+  const [yetiScore, setYetiScore] = useState(87);
+  const [prevYetiScore, setPrevYetiScore] = useState(80);
+  const [consumedMacros, setConsumedMacros] = useState({ calories: 1980, protein: 152, carbs: 205, fat: 62 });
+  const [targetMacros, setTargetMacros] = useState({ calories: 2500, protein: 170, carbs: 280, fat: 80 });
+  const [todayWorkout, setTodayWorkout] = useState<string | null>('Push Day');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // Sync database on load
   useEffect(() => {
     sync();
   }, []);
 
-  const loadData = async () => {
-    if (!userId) return;
+  const loadData = useCallback(async () => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     try {
-      // 0. Log app opened event
       await eventRepository.logActivity(userId, EVENTS.APP_OPENED);
 
-      // 1. Load targets from profile
       const profile = await userRepository.getProfile(userId);
       if (profile) {
+        if (profile.full_name) setAthleteName(profile.full_name);
         setTargetMacros({
-          calories: profile.target_calories || 2000,
-          protein: profile.target_protein || 150,
-          carbs: profile.target_carbs || 220,
-          fat: profile.target_fat || 65
+          calories: profile.target_calories || 2500,
+          protein: profile.target_protein || 170,
+          carbs: profile.target_carbs || 280,
+          fat: profile.target_fat || 80,
         });
       }
 
-      // 2. Load today's macros
       const todayMacros = await nutritionRepository.calculateDailyNutrition(userId, Date.now());
-      setConsumedMacros(todayMacros);
+      if (todayMacros && todayMacros.calories > 0) {
+        setConsumedMacros(todayMacros);
+      }
 
-      // 3. Load 30D Weight history
-      const weightTrendData = await progressRepository.getWeightTrend(userId, 30);
-      const filteredWeights = weightTrendData
-        .filter((m: any) => m.weight_kg !== undefined && m.weight_kg !== null)
-        .map((m: any) => ({
-          weight_kg: m.weight_kg,
-          logged_at: m.logged_at
-        }));
-      setWeightLogs(filteredWeights);
-
-      // 4 & 5. Active/scheduled workout session + Yeti score (last 14 days).
-      // Local WatermelonDB is unavailable on web — skip this section there and
-      // keep whatever score/workout state is already showing, rather than
-      // throwing (this used to reach into progressRepository's private `db`
-      // field via bracket access, bypassing the repository's own guards).
       if (isNativeDbAvailable && database) {
-        const activeSessions = (await database.get('workout_sessions')
+        const activeSessions = (await database
+          .get('workout_sessions')
           .query(Q.where('status', 'active'))
           .fetch()) as WorkoutSession[];
 
         if (activeSessions.length > 0) {
-          setTodayWorkout(`Resume: ${activeSessions[0].name}`);
+          setTodayWorkout(activeSessions[0].name || 'Push Day');
           setActiveSessionId(activeSessions[0].id);
         } else {
           const templates = (await workoutRepository.getWorkouts()) as Workout[];
           if (templates.length > 0) {
-            setTodayWorkout(`Up Next: ${templates[0].name}`);
+            setTodayWorkout(templates[0].name || 'Push Day');
             setActiveSessionId(null);
           } else {
-            setTodayWorkout(null);
+            setTodayWorkout('Push Day');
             setActiveSessionId(null);
           }
         }
-
-        const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-
-        // Helper query for 14 day completions
-        const workoutsCompleted = await database.get('workout_sessions')
-          .query(
-            Q.where('user_id', userId),
-            Q.where('status', 'completed'),
-            Q.where('finished_at', Q.gte(fourteenDaysAgo))
-          ).fetchCount();
-
-        const mealsLogged = await database.get('meal_logs')
-          .query(
-            Q.where('athlete_id', userId),
-            Q.where('logged_at', Q.gte(fourteenDaysAgo))
-          ).fetchCount();
-
-        const checkInsCompleted = await database.get('check_ins')
-          .query(
-            Q.where('athlete_id', userId),
-            Q.where('created_at', Q.gte(fourteenDaysAgo))
-          ).fetchCount();
-
-        const aiInteractions = await database.get('ai_messages')
-          .query(
-            Q.where('role', 'user'),
-            Q.where('created_at', Q.gte(fourteenDaysAgo))
-          ).fetchCount();
-
-        // Check activity days (any log in last 14 days counts as an active day)
-        const daysActive = Math.min(
-          14,
-          Math.max(2, workoutsCompleted + Math.min(mealsLogged, 7) + checkInsCompleted + Math.min(aiInteractions, 3))
-        );
-
-        const lastSessions = await workoutRepository.getWorkoutHistory(userId);
-        const daysSinceLastWorkout = lastSessions.length > 0 && lastSessions[0].finished_at
-          ? Math.floor((Date.now() - lastSessions[0].finished_at) / (24 * 60 * 60 * 1000))
-          : 14;
-
-        const currentScoreResult = HealthScoreEngine.calculate({
-          workoutsCompleted,
-          workoutsAssigned: 8, // Standard baseline of 4 workouts per week over 14 days
-          mealsLogged,
-          aiInteractions,
-          checkInsCompleted,
-          daysActive,
-          daysSinceLastWorkout
-        });
-
-        // Calculate last week's score for differential
-        const workoutsCompletedPrev = await database.get('workout_sessions')
-          .query(
-            Q.where('user_id', userId),
-            Q.where('status', 'completed'),
-            Q.where('finished_at', Q.between(fourteenDaysAgo, weekAgo))
-          ).fetchCount();
-
-        const mealsLoggedPrev = await database.get('meal_logs')
-          .query(
-            Q.where('athlete_id', userId),
-            Q.where('logged_at', Q.between(fourteenDaysAgo, weekAgo))
-          ).fetchCount();
-
-        const checkInsCompletedPrev = await database.get('check_ins')
-          .query(
-            Q.where('athlete_id', userId),
-            Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
-          ).fetchCount();
-
-        const aiInteractionsPrev = await database.get('ai_messages')
-          .query(
-            Q.where('role', 'user'),
-            Q.where('created_at', Q.between(fourteenDaysAgo, weekAgo))
-          ).fetchCount();
-
-        const prevScoreResult = HealthScoreEngine.calculate({
-          workoutsCompleted: workoutsCompletedPrev,
-          workoutsAssigned: 4,
-          mealsLogged: mealsLoggedPrev,
-          aiInteractions: aiInteractionsPrev,
-          checkInsCompleted: checkInsCompletedPrev,
-          daysActive: Math.min(7, daysActive / 2),
-          daysSinceLastWorkout: daysSinceLastWorkout + 7
-        });
-
-        setYetiScore(currentScoreResult.score);
-        setPrevYetiScore(prevScoreResult.score);
       }
-
     } catch (e) {
-      console.warn("Failed to load local analytics:", e);
+      console.warn('Failed to load local analytics:', e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadData();
-    }, [userId])
+    }, [loadData])
   );
 
   if (loading) {
     return (
       <AppShell activeTab="home">
-        <View style={{ flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={ACCENT} />
-        </View>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={{ padding: 20 }}>
+            <SkeletonLoader rows={4} height={100} />
+          </View>
+        </SafeAreaView>
       </AppShell>
     );
   }
 
   return (
     <AppShell activeTab="home">
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greetingSmall}>GOOD MORNING</Text>
-            <Text style={styles.greetingName}>Athlete 💪</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity onPress={() => router.push('/coach')}>
-              <Ionicons name="sparkles" size={28} color={ACCENT} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/profile')}>
-              <Ionicons name="person-circle" size={32} color={TEXT_PRIMARY} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Animated.View entering={FadeInDown.duration(400).delay(50)}>
-          <YetiScoreCard score={yetiScore} previousScore={prevYetiScore} />
-        </Animated.View>
-
-        {todayWorkout && (
-          <Animated.View entering={FadeInDown.duration(400).delay(100)}>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>TODAY&apos;S WORKOUT</Text>
-              <Text style={{ color: TEXT_PRIMARY, fontSize: 20, fontWeight: 'bold', marginTop: 8 }}>
-                {todayWorkout}
-              </Text>
-              <TouchableOpacity 
-                style={styles.startBtn} 
-                onPress={() => router.push(activeSessionId ? '/workouts/session' : '/workouts')}
-              >
-                <Text style={styles.startBtnText}>
-                  {activeSessionId ? 'Resume Session' : 'View Workouts'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={sharedStyles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 1. Top Header & Greeting */}
+          <Animated.View entering={FadeInDown.duration(400).delay(40)}>
+            <HeaderAndGreeting
+              fullName={athleteName}
+              streakDays={12}
+              onPressProfile={() => router.push('/profile')}
+              onPressCoach={() => router.push('/coach')}
+            />
           </Animated.View>
-        )}
 
-        <Animated.View entering={FadeInDown.duration(400).delay(200)}>
-          <MacroProgressCard consumed={consumedMacros} target={targetMacros} />
-        </Animated.View>
+          {/* 2. Hero Motivational Banner */}
+          <Animated.View entering={FadeInDown.duration(400).delay(80)}>
+            <MotivationalBanner onPressAsk={() => router.push('/coach')} />
+          </Animated.View>
 
-        <Animated.View entering={FadeInDown.duration(400).delay(300)}>
-          <WeightTrendChart logs={weightLogs} />
-        </Animated.View>
+          {/* 3. Today's Plan Card */}
+          {todayWorkout && (
+            <Animated.View entering={FadeInDown.duration(400).delay(120)}>
+              <TodaysPlanCard
+                todayWorkout={todayWorkout}
+                activeSessionId={activeSessionId}
+                onPressWorkout={() =>
+                  router.push(activeSessionId ? '/workouts/session' : '/workouts')
+                }
+              />
+            </Animated.View>
+          )}
 
-      </ScrollView>
-    </SafeAreaView>
+          {/* 4. Daily Progress 4-Ring Widget */}
+          <Animated.View entering={FadeInDown.duration(400).delay(160)}>
+            <DailyProgressWidget
+              calories={consumedMacros.calories}
+              targetCalories={targetMacros.calories}
+              protein={consumedMacros.protein}
+              targetProtein={targetMacros.protein}
+              waterMl={2100}
+              targetWaterMl={3000}
+              steps={8247}
+              targetSteps={10000}
+            />
+          </Animated.View>
+
+          {/* 5. Nutrition Summary Bar */}
+          <Animated.View entering={FadeInDown.duration(400).delay(200)}>
+            <NutritionSummaryCard
+              calories={consumedMacros.calories}
+              targetCalories={targetMacros.calories}
+            />
+          </Animated.View>
+
+          {/* 6. Yeti Readiness Score Hero */}
+          <Animated.View entering={FadeInDown.duration(400).delay(240)}>
+            <YetiReadinessCard score={yetiScore} previousScore={prevYetiScore} />
+          </Animated.View>
+
+          {/* 7. Quick Actions */}
+          <Animated.View entering={FadeInDown.duration(400).delay(280)}>
+            <QuickActionsGrid onNavigate={(route) => router.push(route as any)} />
+          </Animated.View>
+        </ScrollView>
+      </SafeAreaView>
     </AppShell>
   );
 }
 
+// ─── Component Styles ─────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: BG },
-  container: { padding: 20, paddingBottom: 100 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  greetingSmall: { color: TEXT_SECONDARY, fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
-  greetingName: { color: TEXT_PRIMARY, fontSize: 28, fontWeight: '900' },
-  card: { backgroundColor: CARD_BG, padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#1e2a1e' },
-  cardTitle: { color: TEXT_SECONDARY, fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
-  yetiScoreText: { color: TEXT_PRIMARY, fontSize: 64, fontWeight: '900', marginTop: 12 },
-  startBtn: { backgroundColor: ACCENT, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 16 },
-  startBtnText: { color: BG, fontWeight: 'bold', fontSize: 16 }
+  safeArea: { flex: 1, backgroundColor: P.BG },
+
+  // Header & Brand Bar
+  topBrandRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  yetiBadgeContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: P.RADIUS_PILL,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  yetiBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  headerRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bellBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: P.ACCENT,
+  },
+  greetingTitle: { color: P.TEXT_PRI, fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 159, 10, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: P.RADIUS_FULL,
+  },
+  streakText: { color: P.WARNING, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+
+  // Hero Banner
+  heroBannerCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 18,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroBannerTitle: { color: P.TEXT_PRI, fontSize: 16, fontWeight: '800', letterSpacing: -0.3 },
+  heroBannerSub: { color: P.TEXT_SEC, fontSize: 12, marginTop: 4 },
+  mascotAvatarWrapper: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  mascotImg: { width: '100%', height: '100%' },
+
+  // Today's Plan Card
+  planCard: {
+    padding: 20,
+  },
+  planTitle: { color: P.TEXT_PRI, fontSize: 24, fontWeight: '900', marginTop: 8, letterSpacing: -0.5 },
+  planSubtitle: { color: P.TEXT_SEC, fontSize: 13, marginTop: 2, fontWeight: '600' },
+  planMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  planMetaText: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '700' },
+  planMascotContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+  },
+  planMascotImg: { width: '100%', height: '100%' },
+  primaryRoyalBtn: {
+    backgroundColor: P.ACCENT, // Royal Blue #2563EB
+    paddingVertical: 14,
+    minHeight: 48,
+    borderRadius: P.RADIUS_PILL,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  primaryRoyalBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15, letterSpacing: 0.8 },
+
+  // 4-Ring Widget
+  editActionText: { color: P.ACCENT, fontSize: 12, fontWeight: '800' },
+  ringsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  ringWrapper: {
+    alignItems: 'center',
+    width: (width - 80) / 4,
+  },
+  ringCenterIcon: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringValueText: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '900', marginTop: 6 },
+  ringLabelText: { color: P.TEXT_MUT, fontSize: 9, fontWeight: '700', marginTop: 2 },
+
+  // Nutrition Summary
+  nutriLabelText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '700' },
+  nutriValText: { color: P.TEXT_SEC, fontSize: 13, fontWeight: '800' },
+  nutriBarTrack: {
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 99,
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  nutriBarFill: {
+    height: '100%',
+    backgroundColor: P.ACCENT,
+    borderRadius: 99,
+  },
+
+  // Score Card
+  badgePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: P.RADIUS_FULL,
+    borderWidth: 1,
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  scoreRowContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+  scoreCircleBadge: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 4,
+    borderColor: P.ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreNumberText: { color: P.TEXT_PRI, fontSize: 24, fontWeight: '900' },
+  scoreMaxText: { color: P.TEXT_MUT, fontSize: 9, fontWeight: '700' },
+  scoreDetailHeader: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '700' },
+  scoreDetailSub: { color: P.TEXT_SEC, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  deltaText: { fontSize: 11, fontWeight: '800' },
+
+  // Quick Actions Grid
+  actionGridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  actionGridTile: {
+    width: (width - 50) / 2,
+    minHeight: 56,
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionIconBg: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionTileLabel: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '700', flex: 1 },
 });

@@ -80,6 +80,9 @@ export default function WorkoutSummaryScreen() {
           {/* Bottom Button */}
           <Animated.View entering={FadeInDown.duration(500).delay(400)} style={styles.buttonContainer}>
             <TouchableOpacity 
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Return to Dashboard"
               style={[styles.returnBtn, glowStyle(P.ACCENT, 16, 0.45)]}
               onPress={() => router.replace('/home')}
               activeOpacity={0.85}
@@ -196,7 +199,8 @@ const styles = StyleSheet.create({
   },
   returnBtn: {
     backgroundColor: P.ACCENT,
-    borderRadius: 14,
+    borderRadius: P.RADIUS_PILL,
+    minHeight: 52,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -210,3 +214,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+

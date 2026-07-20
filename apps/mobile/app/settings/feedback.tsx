@@ -120,6 +120,10 @@ export default function BetaFeedbackScreen() {
               return (
                 <TouchableOpacity
                   key={cat}
+                  accessible={true}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isActive }}
+                  accessibilityLabel={`Select category ${cat}`}
                   style={[
                     styles.categoryChip,
                     isActive && styles.categoryChipActive,
@@ -147,6 +151,9 @@ export default function BetaFeedbackScreen() {
               return (
                 <TouchableOpacity
                   key={star}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Rate ${star} out of 5 stars`}
                   onPress={() => setRating(star)}
                   style={styles.starTouch}
                 >
@@ -161,6 +168,8 @@ export default function BetaFeedbackScreen() {
           {/* 3. Text Input */}
           <Text style={styles.sectionLabel}>Description</Text>
           <TextInput
+            accessible={true}
+            accessibilityLabel="Feedback description"
             style={styles.textInput}
             multiline
             numberOfLines={6}
@@ -175,6 +184,9 @@ export default function BetaFeedbackScreen() {
 
           {/* 4. Submit Button */}
           <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Submit feedback"
             style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
             onPress={handleSubmit}
             disabled={loading}
@@ -225,7 +237,9 @@ const styles = StyleSheet.create({
   },
   categoryChip: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: P.RADIUS_SM,
     backgroundColor: P.CARD_BG,
     borderWidth: 1,
@@ -251,6 +265,10 @@ const styles = StyleSheet.create({
   },
   starTouch: {
     padding: 4,
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   starIcon: {
     fontSize: 34,
@@ -274,6 +292,7 @@ const styles = StyleSheet.create({
   submitBtn: {
     backgroundColor: P.ACCENT,
     paddingVertical: 16,
+    minHeight: 44,
     borderRadius: P.RADIUS_SM,
     alignItems: 'center',
     justifyContent: 'center',
@@ -329,6 +348,8 @@ const styles = StyleSheet.create({
     borderColor: P.CARD_BORDER,
     paddingHorizontal: 24,
     paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: P.RADIUS_SM,
   },
   backBtnText: {
@@ -337,3 +358,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 });
+

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native
 import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
 interface AppShellProps {
@@ -20,6 +21,7 @@ const tabs = [
 
 export default function AppShell({ activeTab, children }: AppShellProps) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
@@ -29,7 +31,7 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
       setIsOffline(!navigator.onLine);
       window.addEventListener('online',  up);
       window.addEventListener('offline', down);
-      return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+      return () => { window.removeEventListener('online',  up); window.removeEventListener('offline', down); };
     } else {
       const check = async () => {
         try {
@@ -63,6 +65,8 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
     }
   };
 
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'ios' ? 24 : 12);
+
   return (
     <View style={{ flex: 1, backgroundColor: P.BG }}>
       {/* Offline banner */}
@@ -91,7 +95,7 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
           tint="dark" 
           style={styles.tabBarBlur}
         >
-          <View style={styles.tabBarInner}>
+          <View style={[styles.tabBarInner, { paddingBottom: bottomPadding }]}>
             {tabs.map((tab) => {
               const isFocused = activeTab === tab.id;
               const iconName = getTabIcon(tab.id, isFocused);
@@ -99,6 +103,9 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
               return (
                 <View key={tab.id} style={styles.tabItem}>
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${tab.label} tab`}
                     onPress={() => router.replace(tab.path)}
                     activeOpacity={0.7}
                     style={[
@@ -127,6 +134,7 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
     </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   tabBarContainer: {

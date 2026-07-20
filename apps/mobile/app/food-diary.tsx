@@ -72,8 +72,19 @@ function AnimatedBar({ pct, color, delay = 0 }: { pct: number; color: string; de
 export default function FoodDiaryScreen() {
   const router   = useRouter();
   const session  = useAuthStore((s) => s.session);
-  const { mealLogs, deleteMealLog, updateMealLog, initSync } = useFoodStore();
-  const { waterGoal, getWaterForDate, addWaterForDate, resetWaterForDate, loadGoal } = useHydrationStore();
+  
+  // Granular Zustand selectors to prevent unnecessary re-renders
+  const mealLogs = useFoodStore((s) => s.mealLogs);
+  const deleteMealLog = useFoodStore((s) => s.deleteMealLog);
+  const updateMealLog = useFoodStore((s) => s.updateMealLog);
+  const initSync = useFoodStore((s) => s.initSync);
+
+  const waterGoal = useHydrationStore((s) => s.waterGoal);
+  const getWaterForDate = useHydrationStore((s) => s.getWaterForDate);
+  const addWaterForDate = useHydrationStore((s) => s.addWaterForDate);
+  const resetWaterForDate = useHydrationStore((s) => s.resetWaterForDate);
+  const loadGoal = useHydrationStore((s) => s.loadGoal);
+
   const { userRepository } = useRepositories();
 
   const [profile,          setProfile]          = useState<any>(null);
@@ -85,6 +96,7 @@ export default function FoodDiaryScreen() {
   const [selectedDate,   setSelectedDate]   = useState<Date>(new Date());
   const [showMonthView,  setShowMonthView]  = useState(false);
   const [waterLogged,    setWaterLogged]    = useState(0);
+
 
   // Last 7 calendar days (for week strip)
   const calendarDays = React.useMemo(() => {
@@ -428,9 +440,9 @@ export default function FoodDiaryScreen() {
 
                 {/* Macros */}
                 <View style={styles.macroCols}>
-                  <MacroCol label="PROTEIN" value={rt.protein}  max={targets.protein}  color={P.ACCENT} pct={proteinPct} delay={200} />
-                  <MacroCol label="CARBS"   value={rt.carbs}    max={targets.carbs}    color={P.BLUE}   pct={carbsPct}   delay={300} />
-                  <MacroCol label="FAT"     value={rt.fat}      max={targets.fat}      color={P.AMBER}  pct={fatPct}     delay={400} />
+                  <MacroCol label="PROTEIN" value={rt.protein}  max={targets.protein}  color={P.ACCENT_CYAN} pct={proteinPct} delay={200} />
+                  <MacroCol label="CARBS"   value={rt.carbs}    max={targets.carbs}    color={P.BLUE}        pct={carbsPct}   delay={300} />
+                  <MacroCol label="FAT"     value={rt.fat}      max={targets.fat}      color={P.AMBER}       pct={fatPct}     delay={400} />
                 </View>
               </View>
 
@@ -444,13 +456,28 @@ export default function FoodDiaryScreen() {
                 <View style={{ flex: 1 }}>
                   <AnimatedBar pct={waterPct} color={P.BLUE} delay={500} />
                 </View>
-                <TouchableOpacity onPress={handleAddWater} style={styles.waterAddBtn} activeOpacity={0.7}>
-                  <Ionicons name="add" size={14} color={P.BLUE} />
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Log 250 milliliters of water"
+                  onPress={handleAddWater}
+                  style={styles.waterAddBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="add" size={16} color={P.BLUE} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleResetWater} style={styles.waterResetBtn} activeOpacity={0.7}>
-                  <Ionicons name="refresh-outline" size={12} color={P.TEXT_MUT} />
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reset water log for selected date"
+                  onPress={handleResetWater}
+                  style={styles.waterResetBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="refresh-outline" size={14} color={P.TEXT_MUT} />
                 </TouchableOpacity>
               </View>
+
             </Animated.View>
 
             {/* ══════════════════════════════════════════════════════════
@@ -869,9 +896,11 @@ const styles = StyleSheet.create({
     color:      P.BLUE,
   },
   waterAddBtn: {
-    width:           26,
-    height:          26,
-    borderRadius:    13,
+    width:           36,
+    height:          36,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    18,
     backgroundColor: P.BLUE + '18',
     borderWidth:     1,
     borderColor:     P.BLUE + '44',
@@ -879,9 +908,11 @@ const styles = StyleSheet.create({
     justifyContent:  'center',
   },
   waterResetBtn: {
-    width:           26,
-    height:          26,
-    borderRadius:    13,
+    width:           36,
+    height:          36,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    18,
     backgroundColor: P.CARD_BORDER + '88',
     alignItems:      'center',
     justifyContent:  'center',
@@ -906,8 +937,10 @@ const styles = StyleSheet.create({
     flexDirection:   'row',
     alignItems:      'center',
     gap:             4,
-    paddingHorizontal: 12,
-    paddingVertical:   6,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    minHeight:       44,
+    justifyContent:  'center',
     borderRadius:    P.RADIUS_FULL,
     borderWidth:     1,
   },
@@ -956,13 +989,18 @@ const styles = StyleSheet.create({
     color:      P.ACCENT,
   },
   logActionBtn: {
-    paddingHorizontal: 8,
-    paddingVertical:   4,
+    paddingHorizontal: 10,
+    paddingVertical:   6,
+    minHeight:         44,
+    minWidth:          44,
+    justifyContent:    'center',
+    alignItems:        'center',
     backgroundColor:   P.CARD_BORDER + '80',
-    borderRadius:      6,
+    borderRadius:      8,
     borderWidth:       1,
     borderColor:       P.CARD_BORDER,
   },
+
   logDeleteBtn: {
     backgroundColor: P.RED + '10',
     borderColor:     P.RED + '30',

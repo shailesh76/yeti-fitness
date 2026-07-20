@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFoodStore } from '../store/useFoodStore';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
 const MEALS = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'] as const;
 
@@ -26,7 +27,6 @@ export default function BarcodeScannerScreen() {
   const [syncing, setSyncing] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
 
-  // Scanning Red Line Animation
   const translateY = useSharedValue(-100);
   React.useEffect(() => {
     translateY.value = withRepeat(
@@ -42,23 +42,30 @@ export default function BarcodeScannerScreen() {
 
   if (!permission) {
     return (
-      <View className="flex-1 bg-[#0a0d0a] justify-center items-center">
-        <ActivityIndicator size="large" color="#39FF6A" />
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={P.ACCENT} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (!permission.granted) {
     return (
-      <SafeAreaView className="flex-1 bg-[#0a0d0a] justify-center items-center px-6">
-        <Text className="text-white text-lg font-black tracking-tight mb-2">Camera Permission Needed</Text>
-        <Text className="text-gray-500 text-sm text-center mb-6 font-semibold">We need access to your camera to scan food barcodes.</Text>
-        <TouchableOpacity 
-          className="bg-[#39FF6A] px-8 py-4 rounded-2xl shadow-lg shadow-[#39FF6A]/20"
-          onPress={requestPermission}
-        >
-          <Text className="text-[#000000] font-black text-base uppercase tracking-wider">Grant Permission</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.permTitle}>Camera Permission Needed</Text>
+          <Text style={styles.permSub}>We need access to your camera to scan food barcodes.</Text>
+          <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Grant camera permission"
+            style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.3)]}
+            onPress={requestPermission}
+          >
+            <Text style={styles.primaryBtnText}>Grant Permission</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -104,34 +111,38 @@ export default function BarcodeScannerScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#0a0d0a]">
+    <SafeAreaView style={styles.safeArea}>
       {/* Header */}
-      <View className="px-6 pt-5 pb-5 flex-row items-center border-b border-white/[0.04] bg-[#0a0d0a] z-10">
+      <View style={styles.header}>
         <TouchableOpacity 
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
           onPress={handleBack} 
-          className="mr-4 p-2.5 bg-white/[0.04] border border-[#39FF6A]/20 rounded-full"
+          style={styles.backBtn}
         >
-          <Text className="text-[#39FF6A] font-black">←</Text>
+          <Text style={styles.backBtnText}>‹</Text>
         </TouchableOpacity>
-        <View className="flex-1">
-          <Text className="text-2xl font-black text-white tracking-tight">Barcode Scanner</Text>
-          <Text className="text-[11px] text-gray-500 font-bold uppercase tracking-wider mt-0.5">Point camera at barcode</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Barcode Scanner</Text>
+          <Text style={styles.headerSub}>Point camera at barcode</Text>
         </View>
       </View>
 
       {/* Target Meal Type Selector */}
-      <View className="bg-[#0a0d0a] py-3 px-4 flex-row gap-2 border-b border-white/[0.04] z-10">
+      <View style={styles.mealSelectorRow}>
         {MEALS.map((meal) => {
           const isSelected = selectedMeal === meal;
           return (
             <TouchableOpacity
               key={meal}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={`Target meal ${meal}`}
               onPress={() => setSelectedMeal(meal)}
-              className={`flex-1 py-2 rounded-xl border items-center justify-center ${
-                isSelected ? 'bg-[#39FF6A]/10 border-[#39FF6A]' : 'bg-black/40 border-white/[0.04]'
-              }`}
+              style={[styles.mealChip, isSelected && styles.mealChipSelected]}
             >
-              <Text className={`font-black text-[9px] uppercase tracking-wider ${isSelected ? 'text-[#39FF6A]' : 'text-gray-500'}`}>
+              <Text style={[styles.mealChipText, isSelected && { color: P.ACCENT }]}>
                 {meal}
               </Text>
             </TouchableOpacity>
@@ -141,35 +152,38 @@ export default function BarcodeScannerScreen() {
 
       {/* Scanner viewfinder / Web Manual Input */}
       {Platform.OS === 'web' ? (
-        <View className="flex-1 justify-center items-center px-6 bg-[#0a0d0a]">
-          <View className="w-full max-w-md bg-[#1c1b1b] p-6 rounded-3xl border border-white/[0.04] gap-4">
-            <Text className="text-white text-lg font-black tracking-tight">Manual Barcode Entry</Text>
-            <Text className="text-gray-500 text-xs font-semibold">Webcams are low resolution for barcodes. Type the barcode digits below to query OpenFoodFacts.</Text>
+        <View style={styles.webContainer}>
+          <View style={styles.webCard}>
+            <Text style={styles.webCardTitle}>Manual Barcode Entry</Text>
+            <Text style={styles.webCardSub}>Webcams are low resolution for barcodes. Type the barcode digits below to query OpenFoodFacts.</Text>
             
             <TextInput
-              className="bg-black/40 text-white px-4 py-3.5 rounded-xl border border-white/[0.04] text-base font-bold text-center"
+              style={styles.webInput}
               placeholder="e.g. 5449000000996"
-              placeholderTextColor="#444"
+              placeholderTextColor={P.TEXT_MUT}
               value={manualBarcode}
               onChangeText={setManualBarcode}
               keyboardType="numeric"
             />
 
             <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Search and log barcode product"
               onPress={() => handleBarcodeScanned({ data: manualBarcode })}
               disabled={syncing || !manualBarcode}
-              className="bg-[#39FF6A] py-4 rounded-xl items-center justify-center shadow-lg shadow-[#39FF6A]/20"
+              style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.3)]}
             >
               {syncing ? (
-                <ActivityIndicator color="#000000" />
+                <ActivityIndicator color="#0B0B0F" />
               ) : (
-                <Text className="text-[#000000] font-black text-sm uppercase tracking-wider">Search & Log Product</Text>
+                <Text style={styles.primaryBtnText}>Search & Log Product</Text>
               )}
             </TouchableOpacity>
           </View>
         </View>
       ) : (
-        <View className="flex-1 justify-center items-center relative bg-black">
+        <View style={styles.cameraWrapper}>
           <CameraView
             style={StyleSheet.absoluteFill}
             onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
@@ -178,21 +192,18 @@ export default function BarcodeScannerScreen() {
             }}
           />
 
-          {/* Viewfinder Target Mask overlay */}
-          <View className="w-72 h-48 border-2 border-white/20 rounded-3xl justify-center items-center relative overflow-hidden bg-transparent">
-            {/* Animated red laser scanning line */}
-            <Animated.View style={lineStyle} className="h-0.5 w-full bg-[#39FF6A]" />
+          <View style={styles.viewfinderFrame}>
+            <Animated.View style={[styles.laserLine, lineStyle]} />
             
-            {/* Loading overlay if fetching */}
             {syncing && (
-              <View className="absolute inset-0 bg-black/70 justify-center items-center">
-                <ActivityIndicator size="large" color="#39FF6A" />
-                <Text className="text-white text-xs font-black uppercase tracking-wider mt-3">Syncing database...</Text>
+              <View style={styles.syncOverlay}>
+                <ActivityIndicator size="large" color={P.ACCENT} />
+                <Text style={styles.syncText}>Syncing database...</Text>
               </View>
             )}
           </View>
 
-          <Text className="text-white/60 text-xs font-bold uppercase tracking-widest absolute bottom-24 text-center px-6">
+          <Text style={styles.hintText}>
             Align barcode inside the central frame
           </Text>
         </View>
@@ -200,3 +211,33 @@ export default function BarcodeScannerScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: P.BG },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: P.CARD_BORDER },
+  backBtn: { width: 44, height: 44, minHeight: 44, borderRadius: 22, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  backBtnText: { color: P.ACCENT, fontSize: 20, fontWeight: '800' },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: P.TEXT_PRI, letterSpacing: -0.5 },
+  headerSub: { fontSize: 11, color: P.TEXT_MUT, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
+  mealSelectorRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: P.CARD_BORDER },
+  mealChip: { flex: 1, minHeight: 44, paddingVertical: 8, borderRadius: 12, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, alignItems: 'center', justifyContent: 'center' },
+  mealChipSelected: { backgroundColor: P.ACCENT_DIM, borderColor: P.ACCENT_BORDER },
+  mealChipText: { fontSize: 10, fontWeight: '800', color: P.TEXT_MUT, textTransform: 'uppercase', letterSpacing: 0.5 },
+  permTitle: { fontSize: 18, fontWeight: '900', color: P.TEXT_PRI, textAlign: 'center' },
+  permSub: { fontSize: 13, color: P.TEXT_SEC, textAlign: 'center', marginTop: 8, marginBottom: 20 },
+  primaryBtn: { width: '100%', backgroundColor: P.ACCENT, borderRadius: P.RADIUS_PILL, minHeight: 52, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnText: { color: '#0B0B0F', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  webContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  webCard: { width: '100%', maxWidth: 420, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: P.RADIUS_CARD, padding: 24, gap: 14 },
+  webCardTitle: { fontSize: 18, fontWeight: '900', color: P.TEXT_PRI },
+  webCardSub: { fontSize: 12, color: P.TEXT_MUT, lineHeight: 18 },
+  webInput: { backgroundColor: P.BG, color: P.TEXT_PRI, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: P.CARD_BORDER, textAlign: 'center', fontSize: 16, fontWeight: '700' },
+  cameraWrapper: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  viewfinderFrame: { width: 280, height: 190, borderRadius: P.RADIUS_CARD, borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' },
+  laserLine: { height: 2, width: '100%', backgroundColor: P.ACCENT },
+  syncOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' },
+  syncText: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 10 },
+  hintText: { position: 'absolute', bottom: 40, color: P.TEXT_MUT, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center', paddingHorizontal: 20 },
+});
+

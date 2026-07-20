@@ -1216,6 +1216,7 @@ const styles = StyleSheet.create({
     backgroundColor: P.ACCENT,
     borderRadius:    P.RADIUS_SM,
     paddingVertical: 15,
+    minHeight:       44,
     alignItems:      'center',
     justifyContent:  'center',
     ...Platform.select({
@@ -1235,6 +1236,7 @@ const styles = StyleSheet.create({
     borderColor:     P.CARD_BORDER,
     borderRadius:    P.RADIUS_SM,
     paddingVertical: 15,
+    minHeight:       44,
     alignItems:      'center',
     justifyContent:  'center',
   },
@@ -1278,13 +1280,16 @@ const styles = StyleSheet.create({
     marginTop:     3,
   },
   sheetCloseBtn: {
-    width:           32,
-    height:          32,
-    borderRadius:    16,
+    width:           44,
+    height:          44,
+    minHeight:       44,
+    minWidth:        44,
+    borderRadius:    22,
     backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems:      'center',
     justifyContent:  'center',
   },
+
   lowConfidenceWarn: {
     flexDirection:   'row',
     alignItems:      'center',

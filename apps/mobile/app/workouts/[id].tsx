@@ -175,9 +175,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT_BORDER,
@@ -215,8 +215,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   infoBtn: {
-    width: 20,
-    height: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -270,8 +271,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.01)',
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: P.RADIUS_PILL,
+    minHeight: 52,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
@@ -293,3 +295,4 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
+

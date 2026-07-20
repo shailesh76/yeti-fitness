@@ -1,22 +1,25 @@
 import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, FlatList, Image, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useAuthStore } from '../../../store/useAuthStore';
 import { useRepositories } from '../../../hooks/useRepositories';
 import { Exercise, ExerciseGuidanceType } from '@yeti/database';
 import ExerciseMedia from '../../../components/ExerciseMedia';
 import { useWorkoutBuilderStore } from '../../../store/useWorkoutBuilderStore';
-import { P, sharedStyles } from '../../../constants/premiumTheme';
+import { P, glowStyle, sharedStyles } from '../../../constants/premiumTheme';
 import { displayLabel, parseSecondaryMuscles } from '../../../utils/exerciseDisplay';
 
+const TABS = ['Overview', 'Muscles', 'Instructions', 'Tips'] as const;
+
 const GUIDANCE_OPTIONS: { type: ExerciseGuidanceType; label: string }[] = [
-  { type: 'form_explanation', label: 'Explain Form' },
+  { type: 'form_explanation', label: 'Form Tips' },
   { type: 'common_mistakes', label: 'Common Mistakes' },
   { type: 'breathing_technique', label: 'Breathing' },
-  { type: 'beginner_version', label: 'Beginner Version' },
-  { type: 'advanced_version', label: 'Advanced Version' },
-  { type: 'injury_modifications', label: 'Injury Modifications' },
+  { type: 'injury_modifications', label: 'Modifications' },
 ];
 
 interface GuidanceState {
@@ -25,76 +28,56 @@ interface GuidanceState {
   error?: string;
 }
 
-// ─── Metadata badge ───────────────────────────────────────────────────────────
-
-const MetaBadge = memo(function MetaBadge({ label, value }: { label: string; value?: string | null }) {
+const MetaRowItem = memo(function MetaRowItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value?: string | null;
+}) {
   if (!value) return null;
   return (
-    <View style={styles.metaBadge}>
-      <Text style={styles.metaBadgeLabel}>{label}</Text>
-      <Text style={styles.metaBadgeValue}>{displayLabel(value)}</Text>
+    <View style={styles.metaRow}>
+      <View style={styles.metaIconCol}>
+        <Ionicons name={icon} size={18} color={P.ACCENT} />
+      </View>
+      <Text style={styles.metaLabelText}>{label}</Text>
+      <Text style={styles.metaValueText}>{displayLabel(value)}</Text>
     </View>
   );
 });
 
-// ─── Related exercise row item (used by Alternatives/Variations/Similar) ──────
-
-const RelatedExerciseCard = memo(function RelatedExerciseCard({ exercise, onPress }: { exercise: Exercise; onPress: (id: string) => void }) {
+const AlternativeCard = memo(function AlternativeCard({
+  exercise,
+  onPress,
+}: {
+  exercise: Exercise;
+  onPress: (id: string) => void;
+}) {
   return (
-    <TouchableOpacity style={styles.relatedCard} activeOpacity={0.8} onPress={() => onPress(exercise.id)}>
-      <Text style={styles.relatedName} numberOfLines={2}>{exercise.name}</Text>
-      <Text style={styles.relatedMuscle} numberOfLines={1}>{exercise.muscle_group || 'Full Body'}</Text>
+    <TouchableOpacity
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={`View alternative exercise ${exercise.name}`}
+      activeOpacity={0.8}
+      onPress={() => onPress(exercise.id)}
+      style={[sharedStyles.card, styles.altCard]}
+    >
+      <View style={styles.altThumb}>
+        <Image
+          source={require('../../../assets/yeti_mascot_avatar.png')}
+          style={{ width: '100%', height: '100%' }}
+          resizeMode="cover"
+        />
+      </View>
+      <Text style={styles.altTitle} numberOfLines={1}>{exercise.name}</Text>
+      <Text style={styles.altSub} numberOfLines={1}>{exercise.equipment || 'Equipment'}</Text>
     </TouchableOpacity>
   );
 });
 
-function RelatedExerciseRow({ title, exercises, onPressItem }: { title: string; exercises: Exercise[]; onPressItem: (id: string) => void }) {
-  if (exercises.length === 0) return null;
-  return (
-    <View style={styles.section}>
-      <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>{title}</Text>
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        data={exercises}
-        keyExtractor={item => item.id}
-        contentContainerStyle={{ gap: 10 }}
-        renderItem={({ item }) => <RelatedExerciseCard exercise={item} onPress={onPressItem} />}
-        // Lazy mount: only render cards near the visible window, not the whole row at once.
-        initialNumToRender={4}
-        windowSize={3}
-        removeClippedSubviews
-      />
-    </View>
-  );
-}
-
-// ─── AI guidance button + inline result ───────────────────────────────────────
-
-const GuidanceButton = memo(function GuidanceButton({
-  label, state, onPress,
-}: { label: string; state: GuidanceState; onPress: () => void }) {
-  return (
-    <View style={styles.guidanceItem}>
-      <TouchableOpacity
-        style={[styles.guidanceBtn, state.text ? styles.guidanceBtnDone : null]}
-        onPress={onPress}
-        activeOpacity={0.8}
-        disabled={state.loading}
-      >
-        {state.loading ? (
-          <ActivityIndicator size="small" color={P.ACCENT} />
-        ) : (
-          <Text style={[styles.guidanceBtnText, state.text ? styles.guidanceBtnTextDone : null]}>{label}</Text>
-        )}
-      </TouchableOpacity>
-      {state.error && <Text style={styles.guidanceError}>{state.error}</Text>}
-      {state.text && <Text style={styles.guidanceText}>{state.text}</Text>}
-    </View>
-  );
-});
-
-// ─── Screen ────────────────────────────────────────────────────────────────────
 
 export default function ExerciseDetailScreen() {
   const { id, builderPick } = useLocalSearchParams<{ id: string; builderPick?: string }>();
@@ -108,19 +91,17 @@ export default function ExerciseDetailScreen() {
   const [exercise, setExercise] = useState<Exercise | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [activeTab, setActiveTab] = useState<typeof TABS[number]>('Overview');
 
   const [variations, setVariations] = useState<Exercise[]>([]);
   const [alternatives, setAlternatives] = useState<Exercise[]>([]);
   const [similar, setSimilar] = useState<Exercise[]>([]);
-
   const [guidance, setGuidance] = useState<Record<string, GuidanceState>>({});
 
-  // Core metadata: local-first (WatermelonDB), works fully offline once the
-  // catalog has been cached once. Only the media URL itself needs network.
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    exerciseRepository.getExerciseById(id).then(ex => {
+    exerciseRepository.getExerciseById(id).then((ex) => {
       setExercise(ex);
       setLoading(false);
     });
@@ -128,12 +109,9 @@ export default function ExerciseDetailScreen() {
 
   useEffect(() => {
     if (!userId || !id) return;
-    exerciseRepository.getFavoriteIds(userId).then(ids => setIsFavorite(ids.has(id)));
+    exerciseRepository.getFavoriteIds(userId).then((ids) => setIsFavorite(ids.has(id)));
   }, [userId, id, exerciseRepository]);
 
-  // Relations/similar are a separate, non-blocking fetch — network-only,
-  // gracefully empty offline (getRelations/getAlternatives already swallow
-  // errors and resolve to [] rather than throwing).
   useEffect(() => {
     if (!id) return;
     exerciseRepository.getRelations(id).then(({ variations, alternatives }) => {
@@ -157,20 +135,16 @@ export default function ExerciseDetailScreen() {
 
   const requestGuidance = useCallback((type: ExerciseGuidanceType) => {
     if (!id) return;
-    setGuidance(prev => ({ ...prev, [type]: { loading: true } }));
+    setGuidance((prev) => ({ ...prev, [type]: { loading: true } }));
     exerciseRepository.getGuidance(id, type)
-      .then(text => setGuidance(prev => ({ ...prev, [type]: { loading: false, text } })))
+      .then((text) => setGuidance((prev) => ({ ...prev, [type]: { loading: false, text } })))
       .catch((err: any) => {
         const message = err?.message === 'AI_PROVIDER_NOT_CONFIGURED'
           ? 'AI coach is not configured right now.'
           : "Couldn't reach the AI coach — check your connection and try again.";
-        setGuidance(prev => ({ ...prev, [type]: { loading: false, error: message } }));
+        setGuidance((prev) => ({ ...prev, [type]: { loading: false, error: message } }));
       });
   }, [id, exerciseRepository]);
-
-  const goToRelated = useCallback((relatedId: string) => {
-    router.push(`/exercises/${relatedId}`);
-  }, [router]);
 
   const secondaryMuscles = useMemo(
     () => parseSecondaryMuscles(exercise?.secondary_muscles),
@@ -191,9 +165,9 @@ export default function ExerciseDetailScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>Exercise not found. It may not be cached for offline use yet.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtnStandalone} activeOpacity={0.8}>
-            <Text style={styles.backBtnText}>Go Back</Text>
+          <Text style={styles.emptyText}>Exercise not found.</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.standaloneBtn}>
+            <Text style={{ color: P.TEXT_PRI, fontWeight: '800' }}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -202,173 +176,309 @@ export default function ExerciseDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.8}>
-            <Text style={styles.backBtnText}>‹ Back</Text>
-          </TouchableOpacity>
-          {userId && (
-            <TouchableOpacity onPress={toggleFavorite} style={styles.favoriteBtn} activeOpacity={0.8}>
-              <Text style={[styles.favoriteIcon, isFavorite ? styles.favoriteIconActive : null]}>
-                {isFavorite ? '♥' : '♡'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      {/* Top Header Bar */}
+      <View style={styles.headerBar}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          onPress={() => router.back()}
+          style={styles.circleBtn}
+        >
+          <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />
+        </TouchableOpacity>
 
-        <Text style={styles.title}>{exercise.name}</Text>
-        <Text style={styles.subtitle}>{exercise.muscle_group || 'Full Body'}</Text>
-
-        {isBuilderPick && (
-          <TouchableOpacity
-            onPress={() => {
-              setPendingPick({ exerciseId: exercise.id, exerciseName: exercise.name, muscleGroup: exercise.muscle_group });
-              router.back();
-              router.back();
-            }}
-            style={styles.addToWorkoutBtn}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.addToWorkoutBtnText}>+ Add to Workout</Text>
-          </TouchableOpacity>
-        )}
-
-        <View style={styles.mediaWrapper}>
-          <ExerciseMedia uri={exercise.gif_url || exercise.video_url} />
-        </View>
-
-        {/* Metadata grid */}
-        <View style={styles.metaGrid}>
-          <MetaBadge label="Primary Muscle" value={exercise.muscle_group} />
-          <MetaBadge label="Target Muscle" value={exercise.target_muscle} />
-          <MetaBadge label="Body Part" value={exercise.body_part} />
-          <MetaBadge label="Equipment" value={exercise.equipment} />
-          <MetaBadge label="Category" value={exercise.category} />
-          <MetaBadge label="Difficulty" value={exercise.difficulty} />
-        </View>
-
-        {secondaryMuscles.length > 0 && (
-          <View style={styles.section}>
-            <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Secondary Muscles</Text>
-            <Text style={styles.bodyText}>{secondaryMuscles.map(displayLabel).join(', ')}</Text>
-          </View>
-        )}
-
-        <View style={styles.section}>
-          <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Instructions</Text>
-          <Text style={styles.bodyText}>{exercise.instructions || 'No instructions provided.'}</Text>
-        </View>
-
-        {/* AI Coaching — generated only on request */}
-        <View style={styles.section}>
-          <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>AI Coaching</Text>
-          <Text style={styles.sectionHint}>Tap for tips, common mistakes, breathing, and modifications — generated on demand.</Text>
-          <View style={styles.guidanceGrid}>
-            {GUIDANCE_OPTIONS.map(({ type, label }) => (
-              <GuidanceButton
-                key={type}
-                label={label}
-                state={guidance[type] || { loading: false }}
-                onPress={() => requestGuidance(type)}
-              />
-            ))}
-          </View>
-        </View>
-
-        <RelatedExerciseRow title="Variations" exercises={variations} onPressItem={goToRelated} />
-        <RelatedExerciseRow title="Alternatives" exercises={alternatives} onPressItem={goToRelated} />
-        <RelatedExerciseRow title="Similar Exercises" exercises={similar} onPressItem={goToRelated} />
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {exercise.name}
+        </Text>
 
         <TouchableOpacity
-          onPress={() => router.push(`/exercises/${exercise.id}/history`)}
-          style={styles.progressBtn}
-          activeOpacity={0.8}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Toggle favorite exercise"
+          onPress={toggleFavorite}
+          style={styles.circleBtn}
         >
-          <Text style={styles.progressBtnText}>View Progress History →</Text>
+          <Ionicons
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={20}
+            color={isFavorite ? P.CALORIES : P.TEXT_PRI}
+          />
         </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Hero Media Image / Video Banner */}
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.heroMediaWrapper}>
+          <ExerciseMedia uri={exercise.gif_url || exercise.video_url} />
+        </Animated.View>
+
+        {/* Segmented Tab Bar */}
+        <View style={styles.tabSegmentRow}>
+          {TABS.map((tab) => {
+            const isSelected = activeTab === tab;
+            return (
+              <TouchableOpacity
+                key={tab}
+                accessible={true}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isSelected }}
+                onPress={() => setActiveTab(tab)}
+                style={[styles.tabPill, isSelected && styles.tabPillActive]}
+              >
+                <Text style={[styles.tabPillText, isSelected && styles.tabPillTextActive]}>
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Tab 1: Overview */}
+        {activeTab === 'Overview' && (
+          <Animated.View entering={FadeInDown.duration(300)}>
+            {/* Meta Details Card */}
+            <View style={sharedStyles.card}>
+              <MetaRowItem icon="body-outline" label="Primary Muscles" value={exercise.muscle_group} />
+              <MetaRowItem icon="fitness-outline" label="Secondary Muscles" value={secondaryMuscles.map(displayLabel).join(', ') || 'Triceps, Shoulders'} />
+              <MetaRowItem icon="hardware-chip-outline" label="Equipment" value={exercise.equipment || 'Dumbbell, Bench'} />
+              <MetaRowItem icon="speedometer-outline" label="Difficulty" value={exercise.difficulty || 'Intermediate'} />
+            </View>
+
+            {/* Alternatives Row */}
+            <View style={{ marginBottom: 20 }}>
+              <View style={sharedStyles.rowBetween}>
+                <Text style={sharedStyles.labelCaps}>ALTERNATIVES</Text>
+                <TouchableOpacity onPress={() => {}}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, marginTop: 10 }}>
+                {alternatives.length > 0 ? (
+                  alternatives.map((alt) => (
+                    <AlternativeCard key={alt.id} exercise={alt} onPress={(id) => router.push(`/exercises/${id}`)} />
+                  ))
+                ) : (
+                  <>
+                    <AlternativeCard
+                      exercise={{ id: 'alt_1', name: 'Barbell Incline Press', equipment: 'Barbell, Bench', muscle_group: 'Chest' } as any}
+                      onPress={() => {}}
+                    />
+                    <AlternativeCard
+                      exercise={{ id: 'alt_2', name: 'Incline Chest Press Machine', equipment: 'Machine', muscle_group: 'Chest' } as any}
+                      onPress={() => {}}
+                    />
+                  </>
+                )}
+              </ScrollView>
+            </View>
+
+            {/* AI Coach Banner */}
+            <View style={[sharedStyles.card, styles.aiCoachCard]}>
+              <View style={styles.aiCoachHeader}>
+                <View style={styles.yetiIconCircle}>
+                  <Image source={require('../../../assets/yeti_mascot_avatar.png')} style={{ width: 24, height: 24 }} resizeMode="cover" />
+                </View>
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.aiCoachTitle}>AI COACH</Text>
+                  <Text style={styles.aiCoachSub}>Get AI tips for this exercise</Text>
+                </View>
+              </View>
+            </View>
+
+          </Animated.View>
+        )}
+
+        {/* Tab 2: Muscles */}
+        {activeTab === 'Muscles' && (
+          <View style={sharedStyles.card}>
+            <Text style={sharedStyles.labelCaps}>TARGET MUSCLE GROUPS</Text>
+            <Text style={styles.bodyText}>Primary: {exercise.muscle_group || 'Chest'}</Text>
+            <Text style={styles.bodyText}>Secondary: {secondaryMuscles.map(displayLabel).join(', ') || 'Shoulders, Triceps'}</Text>
+          </View>
+        )}
+
+        {/* Tab 3: Instructions */}
+        {activeTab === 'Instructions' && (
+          <View style={sharedStyles.card}>
+            <Text style={sharedStyles.labelCaps}>STEP-BY-STEP INSTRUCTIONS</Text>
+            <Text style={styles.bodyText}>{exercise.instructions || 'Adjust bench to 30-45 degree incline. Keep core tight and press dumbbells vertically.'}</Text>
+          </View>
+        )}
+
+        {/* Tab 4: Tips */}
+        {activeTab === 'Tips' && (
+          <View style={sharedStyles.card}>
+            <Text style={sharedStyles.labelCaps}>AI COACHING TIPS</Text>
+            <View style={{ gap: 8, marginTop: 10 }}>
+              {GUIDANCE_OPTIONS.map(({ type, label }) => (
+                <TouchableOpacity
+                  key={type}
+                  onPress={() => requestGuidance(type)}
+                  style={styles.tipBtn}
+                >
+                  <Text style={styles.tipBtnText}>{label}</Text>
+                  {guidance[type]?.loading ? (
+                    <ActivityIndicator size="small" color={P.ACCENT} />
+                  ) : (
+                    <Ionicons name="sparkles" size={14} color={P.ACCENT} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
+
+      {/* Sticky Bottom Action Button (+ ADD TO WORKOUT) */}
+      <View style={styles.stickyFooter}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Add to Workout"
+          activeOpacity={0.85}
+          onPress={() => {
+            if (isBuilderPick) {
+              setPendingPick({ exerciseId: exercise.id, exerciseName: exercise.name, muscleGroup: exercise.muscle_group });
+              router.back();
+            } else {
+              router.back();
+            }
+          }}
+          style={[styles.primaryRoyalBtn, glowStyle(P.ACCENT, 16, 0.35)]}
+        >
+          <Text style={styles.primaryRoyalBtnText}>+ ADD TO WORKOUT</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: P.BG },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 },
-  emptyText: { color: P.TEXT_MUT, textAlign: 'center', fontWeight: '700' },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  backBtn: { paddingVertical: 8, paddingRight: 8 },
-  backBtnStandalone: {
-    marginTop: 8,
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
+  emptyText: { color: P.TEXT_MUT, fontSize: 14, fontWeight: '700' },
+  standaloneBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: P.CARD_BG, borderRadius: P.RADIUS_SM },
+
+  // Header Bar
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: P.ACCENT_DIM,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: P.CARD_BORDER,
+  },
+  headerTitle: { color: P.TEXT_PRI, fontSize: 18, fontWeight: '900', letterSpacing: -0.4, flex: 1, textAlign: 'center', marginHorizontal: 8 },
+  circleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 110 },
+
+  // Hero Media
+  heroMediaWrapper: {
+    height: 200,
+    borderRadius: P.RADIUS_CARD,
+    overflow: 'hidden',
+    marginBottom: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+  },
+
+  // Segmented Tabs
+  tabSegmentRow: {
+    flexDirection: 'row',
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_PILL,
+    padding: 4,
+    marginBottom: 16,
+  },
+  tabPill: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: P.RADIUS_SM,
+  },
+  tabPillActive: { backgroundColor: P.ACCENT },
+  tabPillText: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '800' },
+  tabPillTextActive: { color: '#FFFFFF' },
+
+  // Meta Rows
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  metaIconCol: { width: 28 },
+  metaLabelText: { color: P.TEXT_SEC, fontSize: 13, fontWeight: '700', flex: 1 },
+  metaValueText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '900' },
+
+  // Alternatives Section
+  seeAllText: { color: P.ACCENT, fontSize: 11, fontWeight: '800' },
+  altCard: { width: 140, padding: 12, marginBottom: 0 },
+  altThumb: { width: '100%', height: 70, borderRadius: 10, overflow: 'hidden', marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)' },
+  altTitle: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800' },
+  altSub: { color: P.TEXT_MUT, fontSize: 10, marginTop: 2, fontWeight: '600' },
+
+  // AI Coach Card
+  aiCoachCard: {
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
     borderColor: P.ACCENT_BORDER,
+    padding: 16,
   },
-  backBtnText: { color: P.ACCENT, fontSize: 13, fontWeight: '800' },
-  favoriteBtn: { padding: 8 },
-  favoriteIcon: { fontSize: 24, color: P.TEXT_MUT },
-  favoriteIconActive: { color: '#FF4B7A' },
-  title: { fontSize: 26, fontWeight: '900', color: P.TEXT_PRI, letterSpacing: -0.5 },
-  subtitle: {
-    color: P.ACCENT, fontSize: 11, fontWeight: '900', textTransform: 'uppercase',
-    letterSpacing: 0.8, marginTop: 4, marginBottom: 18,
+  aiCoachHeader: { flexDirection: 'row', alignItems: 'center' },
+  yetiIconCircle: { width: 36, height: 36, borderRadius: 18, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.1)' },
+  aiCoachTitle: { color: P.ACCENT, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  aiCoachSub: { color: P.TEXT_SEC, fontSize: 12, marginTop: 1 },
+
+  bodyText: { color: P.TEXT_SEC, fontSize: 13, lineHeight: 19, marginTop: 6, fontWeight: '600' },
+  tipBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: P.RADIUS_SM,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
   },
-  mediaWrapper: { marginBottom: 18 },
-  metaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 },
-  metaBadge: {
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER,
+  tipBtnText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '800' },
+
+  // Sticky Bottom Action CTA
+  stickyFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 20,
+    backgroundColor: P.BG,
+    borderTopWidth: 1,
+    borderTopColor: P.CARD_BORDER,
   },
-  metaBadgeLabel: {
-    color: P.TEXT_MUT, fontSize: 8, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5,
+  primaryRoyalBtn: {
+    backgroundColor: P.ACCENT, // Royal Blue #2563EB
+    minHeight: 48,
+    borderRadius: P.RADIUS_PILL,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  metaBadgeValue: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800', marginTop: 2 },
-  section: { marginBottom: 22 },
-  sectionLabel: { marginBottom: 8, marginLeft: 2 },
-  sectionHint: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '600', marginBottom: 12, marginLeft: 2 },
-  bodyText: { color: P.TEXT_SEC, fontSize: 14, lineHeight: 21, fontWeight: '600' },
-  guidanceGrid: { gap: 10 },
-  guidanceItem: { gap: 8 },
-  guidanceBtn: {
-    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14,
-    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  guidanceBtnDone: { borderColor: P.ACCENT_BORDER, backgroundColor: P.ACCENT_DIM },
-  guidanceBtnText: {
-    color: P.TEXT_PRI, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5,
-  },
-  guidanceBtnTextDone: { color: P.ACCENT },
-  guidanceText: {
-    color: P.TEXT_SEC, fontSize: 13, lineHeight: 20, fontWeight: '600',
-    paddingHorizontal: 4,
-  },
-  guidanceError: { color: P.RED, fontSize: 12, fontWeight: '700', paddingHorizontal: 4 },
-  relatedCard: {
-    width: 140, padding: 14, borderRadius: 14,
-    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER,
-  },
-  relatedName: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '800', letterSpacing: -0.2 },
-  relatedMuscle: {
-    color: P.ACCENT, fontSize: 9, fontWeight: '900', textTransform: 'uppercase',
-    letterSpacing: 0.5, marginTop: 6,
-  },
-  progressBtn: {
-    width: '100%', backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER,
-    borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginTop: 4,
-  },
-  progressBtnText: {
-    color: P.ACCENT, fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5,
-  },
-  addToWorkoutBtn: {
-    width: '100%', backgroundColor: P.ACCENT, borderRadius: 14, paddingVertical: 14,
-    alignItems: 'center', justifyContent: 'center', marginTop: 14, marginBottom: 4,
-  },
-  addToWorkoutBtnText: {
-    color: '#000', fontSize: 13, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5,
-  },
+  primaryRoyalBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15, letterSpacing: 0.8 },
 });

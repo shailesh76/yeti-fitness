@@ -28,6 +28,9 @@ export default function ChallengesListScreen() {
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             onPress={() => router.back()} 
             style={styles.backBtn}
             activeOpacity={0.8}
@@ -54,6 +57,9 @@ export default function ChallengesListScreen() {
               There are currently no community challenges available. Check back later to join new events.
             </Text>
             <TouchableOpacity 
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Return to home screen"
               onPress={() => router.back()}
               style={[styles.emptyBtn, glowStyle(P.ACCENT, 12, 0.45)]}
               activeOpacity={0.85}
@@ -67,10 +73,14 @@ export default function ChallengesListScreen() {
               {challenges.map((challenge, idx) => (
                 <TouchableOpacity 
                   key={challenge.id} 
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${challenge.name} challenge details`}
                   onPress={() => router.push(`/challenges/${challenge.id}`)}
                   style={[sharedStyles.card, styles.challengeCard]}
                   activeOpacity={0.85}
                 >
+
                   <View style={styles.cardHeader}>
                     <View style={{ flex: 1, pr: 16 } as any}>
                       <Text style={styles.challengeName}>{challenge.name}</Text>
@@ -144,15 +154,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 22,
     backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   title: {
     fontSize: 22,
     fontWeight: '900',

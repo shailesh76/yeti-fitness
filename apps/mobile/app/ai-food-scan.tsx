@@ -7,6 +7,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useFoodStore, Food } from '../store/useFoodStore';
 import Animated, { FadeIn, FadeInDown, useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
+import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
 const MEAL_TYPES = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'] as const;
 
@@ -27,15 +29,12 @@ export default function AiFoodScanScreen() {
   const [showCamera, setShowCamera] = useState(Platform.OS !== 'web');
   const [imageUri, setImageUri] = useState<string | null>(null);
   
-  // States during analysis
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedMeal, setSelectedMeal] = useState<'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK'>('BREAKFAST');
   
-  // Result Editing State
   const [detectedItems, setDetectedItems] = useState<Omit<Food, 'id'>[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  // Scanning laser animation
   const laserY = useSharedValue(-120);
   React.useEffect(() => {
     if (analyzing) {
@@ -53,9 +52,11 @@ export default function AiFoodScanScreen() {
 
   if (!cameraPermission) {
     return (
-      <View className="flex-1 bg-[#0a0d0a] justify-center items-center">
-        <ActivityIndicator size="large" color="#39FF6A" />
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={P.ACCENT} />
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -120,14 +121,12 @@ export default function AiFoodScanScreen() {
       if (Platform.OS === 'web') {
         base64Data = await getBase64FromUri(uri);
       } else {
-        // Compress image to max 1024 width on a native thread
         const manipulated = await manipulateAsync(
           uri,
           [{ resize: { width: 1024 } }],
           { compress: 0.7, format: SaveFormat.JPEG }
         );
         
-        // Convert to base64 using fetch + FileReader for reliability on native devices
         const response = await fetch(manipulated.uri);
         const blob = await response.blob();
         base64Data = await new Promise<string>((resolve, reject) => {
@@ -180,7 +179,6 @@ export default function AiFoodScanScreen() {
     if (detectedItems.length === 0) return;
 
     for (const item of detectedItems) {
-      // Create local food database entry
       const addedFood = await addFood({
         name: item.name,
         brand: item.brand || 'AI Estimate',
@@ -191,7 +189,6 @@ export default function AiFoodScanScreen() {
         serving_size: item.serving_size,
       });
 
-      // Log meal to today's diary
       await logMeal({
         food_id: addedFood.id,
         meal_type: selectedMeal,
@@ -219,7 +216,7 @@ export default function AiFoodScanScreen() {
       const item = { ...updated[index] };
 
       if (field === 'calories') {
-        item.calories = parseInt(value) || 0;
+        item.calories = parseInt(value, 10) || 0;
       } else if (field === 'protein') {
         item.protein = parseFloat(value) || 0;
       } else if (field === 'carbs') {
@@ -243,35 +240,39 @@ export default function AiFoodScanScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#0a0d0a]">
+    <SafeAreaView style={styles.safeArea}>
       {/* Header */}
-      <View className="px-6 pt-5 pb-5 flex-row items-center border-b border-white/[0.04] bg-[#0a0d0a] z-10">
+      <View style={styles.header}>
         <TouchableOpacity 
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
           onPress={handleBack} 
-          className="mr-4 p-2.5 bg-white/[0.04] border border-[#39FF6A]/20 rounded-full"
+          style={styles.backBtn}
         >
-          <Text className="text-[#39FF6A] font-black">←</Text>
+          <Text style={styles.backBtnText}>‹</Text>
         </TouchableOpacity>
-        <View className="flex-1">
-          <Text className="text-2xl font-black text-white tracking-tight">AI Food Tracker</Text>
-          <Text className="text-[11px] text-gray-500 font-bold uppercase tracking-wider mt-0.5">Secure Image Telemetry</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>AI Food Tracker</Text>
+          <Text style={styles.headerSub}>Secure Image Telemetry</Text>
         </View>
       </View>
 
-      {/* Target Meal Type Selector (Before Capture/Show results) */}
+      {/* Target Meal Type Selector */}
       {showCamera && (
-        <View className="bg-[#0a0d0a] py-3 px-4 flex-row gap-2 border-b border-white/[0.04] z-10">
+        <View style={styles.mealSelectorRow}>
           {MEAL_TYPES.map((meal) => {
             const isSelected = selectedMeal === meal;
             return (
               <TouchableOpacity
                 key={meal}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={`Target meal ${meal}`}
                 onPress={() => setSelectedMeal(meal)}
-                className={`flex-1 py-2 rounded-xl border items-center justify-center ${
-                  isSelected ? 'bg-[#39FF6A]/10 border-[#39FF6A]' : 'bg-black/40 border-white/[0.04]'
-                }`}
+                style={[styles.mealChip, isSelected && styles.mealChipSelected]}
               >
-                <Text className={`font-black text-[9px] uppercase tracking-wider ${isSelected ? 'text-[#39FF6A]' : 'text-gray-500'}`}>
+                <Text style={[styles.mealChipText, isSelected && { color: P.ACCENT }]}>
                   {meal}
                 </Text>
               </TouchableOpacity>
@@ -281,249 +282,318 @@ export default function AiFoodScanScreen() {
       )}
 
       {showCamera ? (
-        /* Camera Viewfinder Mode */
         !cameraPermission.granted ? (
-          <View className="flex-1 justify-center items-center px-6">
-            <Text className="text-white text-lg font-black tracking-tight mb-2">Camera Permission Required</Text>
-            <Text className="text-gray-500 text-sm text-center mb-6 font-semibold">We need access to your camera to snap meal photos.</Text>
+          <View style={styles.centered}>
+            <Text style={styles.permTitle}>Camera Permission Required</Text>
+            <Text style={styles.permSub}>We need access to your camera to snap meal photos.</Text>
             <TouchableOpacity 
-              className="bg-[#39FF6A] px-8 py-4 rounded-2xl shadow-lg shadow-[#39FF6A]/20"
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Grant Camera Permission"
+              style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.3)]}
               onPress={requestCameraPermission}
             >
-              <Text className="text-[#000000] font-black text-base uppercase tracking-wider">Grant Camera</Text>
+              <Text style={styles.primaryBtnText}>Grant Camera</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <View className="flex-1 relative bg-black">
+          <View style={styles.cameraWrapper}>
             <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
-            
-            {/* Viewfinder Corner Overlays */}
-            <View className="absolute inset-x-12 inset-y-36 border border-white/10 rounded-[40px] items-center justify-center">
-              <Text className="text-white/40 text-xs font-black uppercase tracking-widest text-center px-4">
-                Frame your plate here
-              </Text>
+            <View style={styles.viewfinderFrame}>
+              <Text style={styles.viewfinderText}>Frame your plate here</Text>
             </View>
-
-            {/* Bottom Camera Action Row */}
-            <View className="absolute bottom-10 left-0 right-0 px-8 flex-row justify-between items-center">
+            <View style={styles.cameraActionRow}>
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Upload photo from photo library"
                 onPress={handlePickImage}
-                className="w-14 h-14 bg-black/60 border border-white/10 rounded-full justify-center items-center"
+                style={styles.camIconBtn}
               >
-                <Text className="text-white text-lg">🖼️</Text>
+                <Ionicons name="images-outline" size={22} color={P.TEXT_PRI} />
               </TouchableOpacity>
 
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Snap photo of meal"
                 onPress={handleCapture}
-                className="w-20 h-20 bg-white rounded-full border-4 border-black/40 justify-center items-center shadow-2xl"
+                style={styles.shutterOuterBtn}
               >
-                <View className="w-14 h-14 bg-[#39FF6A] rounded-full" />
+                <View style={styles.shutterInnerBtn} />
               </TouchableOpacity>
 
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Close camera"
                 onPress={() => setShowCamera(false)}
-                className="w-14 h-14 bg-black/60 border border-white/10 rounded-full justify-center items-center"
+                style={styles.camIconBtn}
               >
-                <Text className="text-white text-sm font-black">✕</Text>
+                <Ionicons name="close" size={22} color={P.TEXT_PRI} />
               </TouchableOpacity>
             </View>
           </View>
         )
       ) : (
-        /* Image Preview / Processing & Results Editor */
-        <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-6 pt-6 w-full max-w-2xl self-center">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {!imageUri ? (
-            /* Web upload box or select files option */
-            <View className="flex-1 justify-center items-center py-12 bg-[#0a0d0a]">
+            <View style={styles.uploadContainer}>
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Upload food image from device"
                 onPress={handlePickImage}
-                className="w-full max-w-md bg-[#1c1b1b] border-2 border-dashed border-white/[0.08] p-10 rounded-3xl items-center gap-4"
+                style={styles.uploadCard}
               >
-                <Text className="text-4xl">📤</Text>
-                <Text className="text-white text-base font-black tracking-tight">Upload Food Image</Text>
-                <Text className="text-gray-500 text-xs text-center font-semibold px-4">
+                <Ionicons name="cloud-upload-outline" size={40} color={P.ACCENT} />
+                <Text style={styles.uploadTitle}>Upload Food Image</Text>
+                <Text style={styles.uploadSub}>
                   Select a photo of your meal from your computer to analyze the macros.
                 </Text>
-                <View className="bg-[#39FF6A]/10 border border-[#39FF6A]/20 px-6 py-3 rounded-xl mt-2">
-                  <Text className="text-[#39FF6A] font-black text-xs uppercase tracking-wider">Choose File</Text>
+                <View style={styles.uploadPill}>
+                  <Text style={styles.uploadPillText}>Choose File</Text>
                 </View>
               </TouchableOpacity>
               
               <TouchableOpacity 
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Use camera"
                 onPress={() => setShowCamera(true)}
-                className="mt-6"
+                style={{ marginTop: 20 }}
               >
-                <Text className="text-gray-500 hover:text-white text-xs font-black uppercase tracking-wider">Or Use Webcam 📷</Text>
+                <Text style={styles.webcamText}>Or Use Camera 📷</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <>
-              <View className="relative w-full h-64 bg-black/40 rounded-3xl overflow-hidden mb-6 border border-white/[0.04] justify-center items-center">
-                <Image source={{ uri: imageUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                
-                {/* Scanning visual laser line effect */}
+              <View style={styles.imagePreviewWrapper}>
+                <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="cover" />
                 {analyzing && (
                   <>
-                    <View className="absolute inset-0 bg-black/30" />
-                    <Animated.View style={laserStyle} className="absolute left-0 right-0 h-1 bg-[#39FF6A] shadow-lg shadow-[#39FF6A]" />
+                    <View style={styles.scanOverlay} />
+                    <Animated.View style={[styles.laserLine, laserStyle]} />
                   </>
                 )}
               </View>
 
               {analyzing ? (
-                <View className="py-8 justify-center items-center">
-                  <ActivityIndicator size="large" color="#39FF6A" />
-                  <Text className="text-white text-base font-black tracking-tight mt-4">Analyzing Food Image</Text>
-                  <Text className="text-gray-500 text-xs mt-1 font-semibold">Running secure AI Vision telemetry...</Text>
+                <View style={styles.analyzingBox}>
+                  <ActivityIndicator size="large" color={P.ACCENT} />
+                  <Text style={styles.analyzingTitle}>Analyzing Food Image</Text>
+                  <Text style={styles.analyzingSub}>Running secure AI Vision telemetry...</Text>
                 </View>
               ) : (
-            /* Results editor */
-            <Animated.View entering={FadeIn.duration(400)}>
-              <View className="flex-row justify-between items-center mb-4">
-                <Text className="text-gray-500 text-xs font-bold uppercase tracking-wider">Identified Items</Text>
-                <Text className="text-[#39FF6A] text-xs font-bold uppercase tracking-wider">Target: {selectedMeal}</Text>
-              </View>
-
-              {detectedItems.length === 0 ? (
-                <View className="bg-[#1c1b1b] p-8 rounded-3xl border border-white/[0.04] items-center">
-                  <Text className="text-gray-500 text-center font-bold mb-4">Failed to detect any food.</Text>
-                  <TouchableOpacity 
-                    className="bg-[#39FF6A]/10 border border-[#39FF6A]/20 px-6 py-3 rounded-xl"
-                    onPress={() => { setShowCamera(true); setImageUri(null); }}
-                  >
-                    <Text className="text-[#39FF6A] font-black text-xs uppercase tracking-wider">Try Again</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View className="mb-10 gap-4">
-                  {detectedItems.map((item, index) => {
-                    const isEditing = editingIndex === index;
-                    return (
-                      <View key={index} className="bg-[#1c1b1b] p-5 rounded-3xl border border-white/[0.04] relative overflow-hidden">
-                        <View className="absolute top-0 left-0 right-0 h-[2px] bg-white/[0.02]" />
-                        
-                        {isEditing ? (
-                          /* Expanded inputs card */
-                          <View className="gap-4">
-                            <View className="flex-row justify-between items-center">
-                              <TextInput
-                                className="bg-black/40 text-white px-3 py-2 rounded-lg border border-white/[0.04] text-base font-black flex-1 mr-2"
-                                value={item.name}
-                                onChangeText={(val) => updateItemField(index, 'name', val)}
-                              />
-                              <TouchableOpacity onPress={() => setEditingIndex(null)} className="p-1 bg-[#39FF6A]/10 border border-[#39FF6A]/20 rounded-lg">
-                                <Text className="text-[#39FF6A] text-xs font-bold px-2 py-1">Done</Text>
-                              </TouchableOpacity>
-                            </View>
-
-                            <View className="flex-row gap-2">
-                              <View className="flex-1">
-                                <Text className="text-gray-500 text-[9px] font-black uppercase tracking-wider mb-1">Calories</Text>
-                                <TextInput
-                                  className="bg-black/40 text-white text-center py-2 rounded-lg border border-white/[0.04] font-bold"
-                                  keyboardType="numeric"
-                                  value={String(item.calories)}
-                                  onChangeText={(val) => updateItemField(index, 'calories', val)}
-                                />
-                              </View>
-                              <View className="flex-1">
-                                <Text className="text-gray-500 text-[9px] font-black uppercase tracking-wider mb-1">Protein (g)</Text>
-                                <TextInput
-                                  className="bg-black/40 text-white text-center py-2 rounded-lg border border-white/[0.04] font-bold"
-                                  keyboardType="numeric"
-                                  value={String(item.protein)}
-                                  onChangeText={(val) => updateItemField(index, 'protein', val)}
-                                />
-                              </View>
-                              <View className="flex-1">
-                                <Text className="text-gray-500 text-[9px] font-black uppercase tracking-wider mb-1">Carbs (g)</Text>
-                                <TextInput
-                                  className="bg-black/40 text-white text-center py-2 rounded-lg border border-white/[0.04] font-bold"
-                                  keyboardType="numeric"
-                                  value={String(item.carbs)}
-                                  onChangeText={(val) => updateItemField(index, 'carbs', val)}
-                                />
-                              </View>
-                              <View className="flex-1">
-                                <Text className="text-gray-500 text-[9px] font-black uppercase tracking-wider mb-1">Fat (g)</Text>
-                                <TextInput
-                                  className="bg-black/40 text-white text-center py-2 rounded-lg border border-white/[0.04] font-bold"
-                                  keyboardType="numeric"
-                                  value={String(item.fat)}
-                                  onChangeText={(val) => updateItemField(index, 'fat', val)}
-                                />
-                              </View>
-                            </View>
-
-                            <View className="flex-row justify-between items-center">
-                              <TextInput
-                                className="bg-black/40 text-white px-3 py-2 rounded-lg border border-white/[0.04] text-xs font-semibold w-32"
-                                placeholder="Serving Size"
-                                value={item.serving_size}
-                                onChangeText={(val) => updateItemField(index, 'serving_size', val)}
-                              />
-                              <TouchableOpacity onPress={() => handleDeleteItem(index)}>
-                                <Text className="text-red-400 font-bold text-xs uppercase tracking-wider">Delete Item</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        ) : (
-                          /* Compact visual view */
-                          <View className="flex-row justify-between items-center">
-                            <View className="flex-1 pr-2">
-                              <Text className="text-white text-base font-black tracking-tight">{item.name}</Text>
-                              <Text className="text-gray-550 text-[10px] font-bold uppercase mt-0.5">
-                                Serving: {item.serving_size} • {item.calories} kcal
-                              </Text>
-                              <Text className="text-[#39FF6A] text-[9px] font-black uppercase tracking-wider mt-1">
-                                P: {item.protein}g • C: {item.carbs}g • F: {item.fat}g
-                              </Text>
-                            </View>
-                            
-                            <View className="flex-row gap-2">
-                              <TouchableOpacity 
-                                onPress={() => setEditingIndex(index)}
-                                className="bg-[#1C1C1F] border border-white/[0.04] px-3.5 py-2 rounded-xl"
-                              >
-                                <Text className="text-white font-black text-xs uppercase tracking-wider">Edit</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity 
-                                onPress={() => handleDeleteItem(index)}
-                                className="bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl justify-center"
-                              >
-                                <Text className="text-red-400 font-bold text-xs">✕</Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        )}
-                      </View>
-                    );
-                  })}
-
-                  {/* Actions Row */}
-                  <View className="flex-row gap-4 mt-4">
-                    <TouchableOpacity 
-                      className="flex-1 bg-white/[0.02] border border-white/[0.08] py-4 rounded-xl items-center justify-center"
-                      onPress={() => { setShowCamera(Platform.OS !== 'web'); setImageUri(null); setDetectedItems([]); }}
-                    >
-                      <Text className="text-white font-black text-xs uppercase tracking-wider">Retake</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity 
-                      className="flex-1 bg-[#39FF6A] py-4 rounded-xl items-center justify-center shadow-lg shadow-[#39FF6A]/20"
-                      onPress={handleSaveAll}
-                    >
-                      <Text className="text-[#000000] font-black text-xs uppercase tracking-wider">Confirm All</Text>
-                    </TouchableOpacity>
+                <Animated.View entering={FadeIn.duration(400)}>
+                  <View style={sharedStyles.rowBetween}>
+                    <Text style={sharedStyles.labelCaps}>Identified Items</Text>
+                    <Text style={[sharedStyles.labelCaps, { color: P.ACCENT }]}>Target: {selectedMeal}</Text>
                   </View>
-                </View>
+
+                  {detectedItems.length === 0 ? (
+                    <View style={[sharedStyles.card, styles.emptyResultCard]}>
+                      <Text style={styles.emptyResultText}>Failed to detect any food.</Text>
+                      <TouchableOpacity 
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Try photo scan again"
+                        style={[styles.primaryBtn, { minHeight: 44, marginTop: 12 }]}
+                        onPress={() => { setShowCamera(true); setImageUri(null); }}
+                      >
+                        <Text style={styles.primaryBtnText}>Try Again</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={{ marginBottom: 40, gap: 12, marginTop: 12 }}>
+                      {detectedItems.map((item, index) => {
+                        const isEditing = editingIndex === index;
+                        return (
+                          <View key={index} style={[sharedStyles.card, { marginBottom: 0 }]}>
+                            {isEditing ? (
+                              <View style={{ gap: 10 }}>
+                                <View style={sharedStyles.rowBetween}>
+                                  <TextInput
+                                    style={styles.editInputName}
+                                    value={item.name}
+                                    onChangeText={(val) => updateItemField(index, 'name', val)}
+                                    selectTextOnFocus
+                                  />
+                                  <TouchableOpacity 
+                                    onPress={() => setEditingIndex(null)}
+                                    style={styles.doneBtn}
+                                  >
+                                    <Text style={styles.doneBtnText}>Done</Text>
+                                  </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.macroInputsRow}>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={styles.macroInputLabel}>Calories</Text>
+                                    <TextInput
+                                      style={styles.editInputNum}
+                                      keyboardType="number-pad"
+                                      value={String(item.calories)}
+                                      onChangeText={(val) => updateItemField(index, 'calories', val)}
+                                    />
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={styles.macroInputLabel}>Protein (g)</Text>
+                                    <TextInput
+                                      style={styles.editInputNum}
+                                      keyboardType="decimal-pad"
+                                      value={String(item.protein)}
+                                      onChangeText={(val) => updateItemField(index, 'protein', val)}
+                                    />
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={styles.macroInputLabel}>Carbs (g)</Text>
+                                    <TextInput
+                                      style={styles.editInputNum}
+                                      keyboardType="decimal-pad"
+                                      value={String(item.carbs)}
+                                      onChangeText={(val) => updateItemField(index, 'carbs', val)}
+                                    />
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={styles.macroInputLabel}>Fat (g)</Text>
+                                    <TextInput
+                                      style={styles.editInputNum}
+                                      keyboardType="decimal-pad"
+                                      value={String(item.fat)}
+                                      onChangeText={(val) => updateItemField(index, 'fat', val)}
+                                    />
+                                  </View>
+                                </View>
+
+                                <View style={sharedStyles.rowBetween}>
+                                  <TextInput
+                                    style={styles.editInputServing}
+                                    placeholder="Serving Size"
+                                    placeholderTextColor={P.TEXT_MUT}
+                                    value={item.serving_size}
+                                    onChangeText={(val) => updateItemField(index, 'serving_size', val)}
+                                  />
+                                  <TouchableOpacity onPress={() => handleDeleteItem(index)}>
+                                    <Text style={styles.deleteLinkText}>Delete Item</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            ) : (
+                              <View style={sharedStyles.rowBetween}>
+                                <View style={{ flex: 1, paddingRight: 8 }}>
+                                  <Text style={styles.itemName}>{item.name}</Text>
+                                  <Text style={styles.itemMeta}>
+                                    Serving: {item.serving_size} • {item.calories} kcal
+                                  </Text>
+                                  <Text style={styles.itemMacros}>
+                                    P: {item.protein}g • C: {item.carbs}g • F: {item.fat}g
+                                  </Text>
+                                </View>
+                                
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                  <TouchableOpacity 
+                                    onPress={() => setEditingIndex(index)}
+                                    style={styles.itemEditBtn}
+                                  >
+                                    <Text style={styles.itemEditBtnText}>Edit</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity 
+                                    onPress={() => handleDeleteItem(index)}
+                                    style={styles.itemDelBtn}
+                                  >
+                                    <Ionicons name="close" size={14} color={P.RED} />
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
+
+                      {/* Actions Row */}
+                      <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                        <TouchableOpacity 
+                          style={styles.retakeBtn}
+                          onPress={() => { setShowCamera(Platform.OS !== 'web'); setImageUri(null); setDetectedItems([]); }}
+                        >
+                          <Text style={styles.retakeBtnText}>Retake</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                          style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.3)]}
+                          onPress={handleSaveAll}
+                        >
+                          <Text style={styles.primaryBtnText}>Confirm All</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </Animated.View>
               )}
-            </Animated.View>
+            </>
           )}
-          </>
-        )}
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: P.BG },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: P.CARD_BORDER },
+  backBtn: { width: 44, height: 44, minHeight: 44, borderRadius: 22, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  backBtnText: { color: P.ACCENT, fontSize: 20, fontWeight: '800' },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: P.TEXT_PRI, letterSpacing: -0.5 },
+  headerSub: { fontSize: 11, color: P.TEXT_MUT, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
+  mealSelectorRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: P.CARD_BORDER },
+  mealChip: { flex: 1, minHeight: 44, paddingVertical: 8, borderRadius: 12, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, alignItems: 'center', justifyContent: 'center' },
+  mealChipSelected: { backgroundColor: P.ACCENT_DIM, borderColor: P.ACCENT_BORDER },
+  mealChipText: { fontSize: 10, fontWeight: '800', color: P.TEXT_MUT, textTransform: 'uppercase', letterSpacing: 0.5 },
+  permTitle: { fontSize: 18, fontWeight: '900', color: P.TEXT_PRI, textAlign: 'center' },
+  permSub: { fontSize: 13, color: P.TEXT_SEC, textAlign: 'center', marginTop: 8, marginBottom: 20 },
+  primaryBtn: { flex: 1, backgroundColor: P.ACCENT, borderRadius: P.RADIUS_PILL, minHeight: 52, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnText: { color: '#0B0B0F', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  cameraWrapper: { flex: 1, backgroundColor: '#000', position: 'relative' },
+  viewfinderFrame: { position: 'absolute', top: '25%', left: 40, right: 40, height: 260, borderRadius: 30, borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  viewfinderText: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  cameraActionRow: { position: 'absolute', bottom: 30, left: 30, right: 30, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  camIconBtn: { width: 52, height: 52, minHeight: 44, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: P.CARD_BORDER, alignItems: 'center', justifyContent: 'center' },
+  shutterOuterBtn: { width: 76, height: 76, borderRadius: 38, backgroundColor: P.TEXT_PRI, alignItems: 'center', justifyContent: 'center' },
+  shutterInnerBtn: { width: 58, height: 58, borderRadius: 29, backgroundColor: P.ACCENT },
+  uploadContainer: { paddingVertical: 40, alignItems: 'center' },
+  uploadCard: { width: '100%', maxWidth: 380, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: P.RADIUS_CARD, padding: 32, alignItems: 'center', gap: 12 },
+  uploadTitle: { fontSize: 18, fontWeight: '900', color: P.TEXT_PRI },
+  uploadSub: { fontSize: 12, color: P.TEXT_MUT, textAlign: 'center', lineHeight: 18 },
+  uploadPill: { backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER, borderRadius: P.RADIUS_PILL, paddingHorizontal: 20, paddingVertical: 10, marginTop: 8 },
+  uploadPillText: { color: P.ACCENT, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  webcamText: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
+  imagePreviewWrapper: { width: '100%', height: 240, borderRadius: P.RADIUS_CARD, overflow: 'hidden', marginBottom: 20, backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, position: 'relative' },
+  previewImage: { width: '100%', height: '100%' },
+  scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
+  laserLine: { position: 'absolute', left: 0, right: 0, height: 3, backgroundColor: P.ACCENT },
+  analyzingBox: { paddingVertical: 32, alignItems: 'center' },
+  analyzingTitle: { color: P.TEXT_PRI, fontSize: 16, fontWeight: '900', marginTop: 12 },
+  analyzingSub: { color: P.TEXT_MUT, fontSize: 12, marginTop: 4 },
+  emptyResultCard: { alignItems: 'center', padding: 24 },
+  emptyResultText: { color: P.TEXT_MUT, fontSize: 13, fontWeight: '700' },
+  editInputName: { flex: 1, backgroundColor: P.BG, color: P.TEXT_PRI, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: P.CARD_BORDER, fontSize: 15, fontWeight: '800', marginRight: 8 },
+  doneBtn: { backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER, paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, justifyContent: 'center', borderRadius: 10 },
+  doneBtnText: { color: P.ACCENT, fontSize: 12, fontWeight: '900' },
+  macroInputsRow: { flexDirection: 'row', gap: 8, marginVertical: 8 },
+  macroInputLabel: { fontSize: 9, color: P.TEXT_MUT, fontWeight: '800', textTransform: 'uppercase', marginBottom: 4 },
+  editInputNum: { backgroundColor: P.BG, color: P.TEXT_PRI, textAlign: 'center', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: P.CARD_BORDER, fontSize: 13, fontWeight: '800' },
+  editInputServing: { width: 140, backgroundColor: P.BG, color: P.TEXT_PRI, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: P.CARD_BORDER, fontSize: 12, fontWeight: '600' },
+  deleteLinkText: { color: P.RED, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
+  itemName: { fontSize: 15, fontWeight: '900', color: P.TEXT_PRI },
+  itemMeta: { fontSize: 11, color: P.TEXT_MUT, fontWeight: '700', marginTop: 2 },
+  itemMacros: { fontSize: 11, color: P.ACCENT, fontWeight: '900', marginTop: 4 },
+  itemEditBtn: { paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, justifyContent: 'center', backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: 10 },
+  itemEditBtnText: { color: P.TEXT_PRI, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  itemDelBtn: { width: 44, height: 44, minHeight: 44, borderRadius: 10, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)', alignItems: 'center', justifyContent: 'center' },
+  retakeBtn: { flex: 1, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: P.RADIUS_PILL, minHeight: 52, alignItems: 'center', justifyContent: 'center' },
+  retakeBtnText: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+});
+

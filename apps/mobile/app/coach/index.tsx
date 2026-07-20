@@ -244,6 +244,10 @@ export default function CoachHubScreen() {
       <View style={styles.header}>
         <View style={styles.segmentContainer}>
           <TouchableOpacity
+            accessible={true}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === 'ai' }}
+            accessibilityLabel="Switch to AI Coach chat"
             style={[styles.segmentBtn, activeTab === 'ai' && styles.segmentBtnActive]}
             onPress={() => setActiveTab('ai')}
           >
@@ -252,6 +256,10 @@ export default function CoachHubScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            accessible={true}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === 'human' }}
+            accessibilityLabel="Switch to Human Coach chat"
             style={[styles.segmentBtn, activeTab === 'human' && styles.segmentBtnActive]}
             onPress={() => setActiveTab('human')}
           >
@@ -261,7 +269,13 @@ export default function CoachHubScreen() {
         </View>
 
         {activeTab === 'ai' && (
-          <TouchableOpacity onPress={handleResetAI} style={styles.resetBtn}>
+          <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Reset AI Coach chat conversation"
+            onPress={handleResetAI} 
+            style={styles.resetBtn}
+          >
             <Ionicons name="refresh" size={18} color={P.TEXT_SEC} />
           </TouchableOpacity>
         )}
@@ -316,6 +330,9 @@ export default function CoachHubScreen() {
                 maxLength={500}
               />
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Send message to AI Coach"
                 style={[styles.sendButton, (!aiInputText.trim() || aiLoading) && styles.sendButtonDisabled]}
                 onPress={handleSendAI}
                 disabled={!aiInputText.trim() || aiLoading}
@@ -371,6 +388,9 @@ export default function CoachHubScreen() {
                     editable={isOnline}
                   />
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Send message to ${coachProfile.name}`}
                     style={[styles.sendButton, (!humanInputText.trim() || !isOnline) && styles.sendButtonDisabled]}
                     onPress={handleSendHuman}
                     disabled={!humanInputText.trim() || !isOnline}
@@ -401,10 +421,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: P.CARD_BG,
     padding: 4,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
     width: '80%',
+    minHeight: 44,
   },
   segmentBtn: {
     flex: 1,
@@ -412,8 +433,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 6,
-    borderRadius: 6,
+    minHeight: 44,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   segmentBtnActive: {
     backgroundColor: P.ACCENT,
@@ -421,15 +443,19 @@ const styles = StyleSheet.create({
   segmentText: {
     color: P.TEXT_SEC,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   segmentTextActive: {
     color: P.BG,
   },
   resetBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 22,
     backgroundColor: P.CARD_BG,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
@@ -450,19 +476,20 @@ const styles = StyleSheet.create({
   userWrapper: { justifyContent: 'flex-end' },
   aiWrapper: { justifyContent: 'flex-start' },
   avatarDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: P.ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  avatarText: { color: P.BG, fontSize: 12, fontWeight: '900' },
+  avatarText: { color: P.BG, fontSize: 13, fontWeight: '900' },
   bubble: {
     maxWidth: '80%',
-    padding: 12,
-    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
   },
   userBubble: {
     backgroundColor: P.ACCENT,
@@ -477,11 +504,12 @@ const styles = StyleSheet.create({
   bubbleText: {
     color: P.TEXT_PRI,
     fontSize: 14,
-    lineHeight: 18,
+    lineHeight: 20,
+    fontWeight: '500',
   },
   userBubbleText: {
     color: P.BG,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   typingBubble: {
     paddingHorizontal: 20,
@@ -493,7 +521,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: P.CARD_BORDER,
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     backgroundColor: P.BG,
   },
   input: {
@@ -501,9 +529,10 @@ const styles = StyleSheet.create({
     backgroundColor: P.CARD_BG,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    minHeight: 44,
     color: P.TEXT_PRI,
     fontSize: 14,
     maxHeight: 100,
@@ -514,7 +543,9 @@ const styles = StyleSheet.create({
   sendButton: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 14,
     backgroundColor: P.ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
@@ -525,14 +556,16 @@ const styles = StyleSheet.create({
     borderColor: P.CARD_BORDER,
   },
   offlineBar: {
-    backgroundColor: '#EF4444',
-    paddingVertical: 6,
+    backgroundColor: P.RED,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   offlineText: {
     color: '#FFF',
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   emptyState: {
     flex: 1,
@@ -551,11 +584,14 @@ const styles = StyleSheet.create({
     color: P.TEXT_SEC,
     fontSize: 13,
     marginTop: 12,
+    fontWeight: '600',
   },
   emptyTextSub: {
     color: P.TEXT_MUT,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,
+    fontWeight: '500',
   },
 });
+

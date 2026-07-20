@@ -111,6 +111,9 @@ export default function ChallengeDetailScreen() {
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <TouchableOpacity 
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
               onPress={() => router.back()} 
               style={styles.backBtn}
               activeOpacity={0.8}
@@ -134,6 +137,9 @@ export default function ChallengeDetailScreen() {
 
           {/* Invite Button */}
           <TouchableOpacity 
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Invite a friend to challenge"
             onPress={handleShare}
             disabled={isSharing || !challenge}
             style={styles.inviteBtn}
@@ -143,6 +149,7 @@ export default function ChallengeDetailScreen() {
             <Text style={styles.inviteBtnText}>Invite a Friend</Text>
           </TouchableOpacity>
         </View>
+
 
         {/* Leaderboard List */}
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1, backgroundColor: P.BG }}>
@@ -246,9 +253,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    minHeight: 44,
+    minWidth: 44,
+    borderRadius: 22,
     backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT_BORDER,
@@ -287,11 +296,13 @@ const styles = StyleSheet.create({
     borderColor: P.CARD_BORDER,
     borderRadius: 14,
     paddingVertical: 12,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
+
   inviteBtnText: {
     color: '#FFF',
     fontSize: 12,

@@ -351,6 +351,7 @@ const styles = StyleSheet.create({
     color: P.TEXT_PRI,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    minHeight: 48,
     borderRadius: 14,
     fontSize: 15,
     fontWeight: '600',
@@ -373,6 +374,8 @@ const styles = StyleSheet.create({
   recentPill: {
     paddingHorizontal: 14,
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
@@ -387,6 +390,8 @@ const styles = StyleSheet.create({
   chipBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
@@ -443,6 +448,7 @@ const styles = StyleSheet.create({
   },
   cardTrigger: {
     padding: 18,
+    minHeight: 64,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -462,7 +468,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   favoriteBtn: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   favoriteIcon: {
     fontSize: 18,
@@ -477,3 +485,4 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
+
