@@ -4,6 +4,12 @@ on:
   push:
     branches: [main, beta-v1]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: "Android ABIs for the debug APK (comma-separated)"
+        required: false
+        default: "arm64-v8a"
 
 jobs:
   build-and-test:
@@ -59,3 +65,84 @@ jobs:
       - name: Build coach-dashboard
         working-directory: apps/coach-dashboard
         run: npx next build
+
+  # Android debug build runs on Linux, where the Windows MAX_PATH limit that
+  # blocks local native builds does not exist. pnpm's default isolated layout
+  # nests modules under .pnpm/<peer-qualified-name>/node_modules/, pushing
+  # AGP's generated prefab_command.bat past the JDK's ~260-char ProcessBuilder
+  # limit on Windows. On Linux there is no such limit, so this builds against
+  # the unmodified isolated layout — no hoisting, no path workarounds.
+  #
+  # Kept as a separate job rather than extra steps in build-and-test so the
+  # ~20-40 min native build runs in parallel and never delays lint/typecheck/
+  # test feedback. `needs` avoids spending runner minutes on broken code.
+  android-debug-build:
+    needs: build-and-test
+    # Not run on every PR: a full native build per PR is expensive. Pushes to
+    # the long-lived branches and manual dispatch only.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/beta-v1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      # Pinned to the versions the project actually resolves, as reported by
+      # the expo-root-project plugin (compileSdk/targetSdk 36, buildTools
+      # 36.0.0, ndk 27.1.12297006) plus the CMake that AGP pins (3.22.1).
+      # Gradle will auto-provision anything else a module requests.
+      - name: Install pinned Android SDK components
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006" \
+            "cmake;3.22.1"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # android/ is generated output and is not committed, so it is created
+      # here. GitHub Actions sets CI=true, which makes Expo CLI non-interactive.
+      - name: Expo prebuild (Android)
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+      # Debug builds are signed with the debug.keystore that prebuild generates,
+      # so no signing secrets are required. reactNativeArchitectures is passed
+      # as an invocation flag; gradle.properties is left untouched.
+      - name: Build debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=${{ github.event.inputs.abis || 'arm64-v8a' }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: yeti-android-debug-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
