@@ -61,7 +61,9 @@
           "healthUpdatePermission": "Allow Yeti to log fitness data to your Apple Health."
         }
       ],
-      "react-native-health-connect"
+      "react-native-health-connect",
+      "expo-font",
+      "expo-sharing"
     ],
     "extra": {
       "router": {},

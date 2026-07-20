@@ -214,7 +214,7 @@ export default function WorkoutSessionScreen() {
 
   const timer = useTimerStore();
   const { eventRepository } = useRepositories();
-  const tickRef = useRef<ReturnType<typeof setInterval>>();
+  const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const [finishing, setFinishing] = useState(false);
 
   // Global elapsed timer tick
