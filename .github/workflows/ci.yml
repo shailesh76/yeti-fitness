@@ -150,10 +150,34 @@ jobs:
       # as an invocation flag; gradle.properties is left untouched.
       - name: Build debug APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=${{ github.event.inputs.abis || 'arm64-v8a' }}
+        run: ./gradlew assembleDebug --no-daemon --stacktrace --info -PreactNativeArchitectures=${{ github.event.inputs.abis || 'arm64-v8a' }}
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+      # Diagnostics only. The Gradle failure annotation is just "exit code 1",
+      # and this native build cannot be reproduced locally on Windows (MAX_PATH
+      # is the reason it runs here), so collect the reports and CMake/CXX logs
+      # that explain the failure. Restricted to logs/reports/metadata - no object
+      # files or .so output.
+      - name: Upload Gradle and CMake diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            apps/mobile/android/**/build/reports/**
+            apps/mobile/android/**/.cxx/**/*.log
+            apps/mobile/android/**/.cxx/**/*.json
+            apps/mobile/android/**/.cxx/**/logs/**
+            node_modules/.pnpm/**/android/build/reports/**
+            node_modules/.pnpm/**/android/.cxx/**/*.log
+            node_modules/.pnpm/**/android/.cxx/**/*.json
+            node_modules/.pnpm/**/android/.cxx/**/logs/**
+            **/CMakeFiles/CMakeOutput.log
+            **/CMakeFiles/CMakeError.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
