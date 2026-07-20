@@ -64,9 +64,21 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
 
+      # next build prerenders /dashboard/subscription, whose module scope calls
+      # createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, ...) with no
+      # fallback, so @supabase/ssr throws at build time when these are unset:
+      #   "@supabase/ssr: Your project's URL and API key are required to create
+      #    a Supabase client!"
+      # Locally this is supplied by the gitignored apps/coach-dashboard/.env.local.
       - name: Build coach-dashboard
         working-directory: apps/coach-dashboard
         run: npx next build
+        # Sourced from the EXPO_PUBLIC_* secrets: same Supabase project, so one
+        # pair of secrets serves both apps. Only the env var names differ, since
+        # Next.js requires the NEXT_PUBLIC_ prefix to expose them to the client.
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
 
   # Android debug build runs on Linux, where the Windows MAX_PATH limit that
   # blocks local native builds does not exist. pnpm's default isolated layout
