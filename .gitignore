@@ -43,8 +43,13 @@ yarn-error.*
 .turbo/
 
 # generated native folders
+# The /ios and /android patterns are root-anchored and so never matched the
+# real app at apps/mobile. Expo prebuild regenerates these from app.json on
+# every CI run, so they are build output, not source.
 /ios
 /android
+apps/*/ios/
+apps/*/android/
 
 .vercel
 scratch/
