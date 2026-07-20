@@ -9,7 +9,7 @@ on:
       abis:
         description: "Android ABIs for the debug APK (comma-separated)"
         required: false
-        default: "arm64-v8a"
+        default: "arm64-v8a,x86_64"
 
 jobs:
   build-and-test:
