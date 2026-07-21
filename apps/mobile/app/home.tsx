@@ -91,6 +91,7 @@ const BiometricRing = memo(({
     </View>
   );
 });
+BiometricRing.displayName = 'BiometricRing';
 
 // ─── 1. Header & Greeting Bar ───────────────────────────────────────────
 const HeaderAndGreeting = memo(({
@@ -153,6 +154,7 @@ const HeaderAndGreeting = memo(({
     </View>
   );
 });
+HeaderAndGreeting.displayName = 'HeaderAndGreeting';
 
 // ─── 2. AI Motivational Hero Banner ───────────────────────────────────────
 const MotivationalBanner = memo(({ onPressAsk }: { onPressAsk: () => void }) => {
@@ -167,7 +169,7 @@ const MotivationalBanner = memo(({ onPressAsk }: { onPressAsk: () => void }) => 
     >
       <View style={{ flex: 1, paddingRight: 12 }}>
         <Text style={styles.heroBannerTitle}>Keep pushing forward!</Text>
-        <Text style={styles.heroBannerSub}>You're stronger than yesterday.</Text>
+        <Text style={styles.heroBannerSub}>You&apos;re stronger than yesterday.</Text>
       </View>
       <View style={styles.mascotAvatarWrapper}>
         <Image
@@ -179,6 +181,7 @@ const MotivationalBanner = memo(({ onPressAsk }: { onPressAsk: () => void }) => 
     </TouchableOpacity>
   );
 });
+MotivationalBanner.displayName = 'MotivationalBanner';
 
 // ─── 3. Today's Plan Card (Master Reference) ──────────────────────────────────
 const TodaysPlanCard = memo(({
@@ -195,7 +198,7 @@ const TodaysPlanCard = memo(({
   return (
     <View style={[sharedStyles.card, styles.planCard]}>
       <View style={sharedStyles.rowBetween}>
-        <Text style={sharedStyles.labelCaps}>TODAY'S PLAN</Text>
+        <Text style={sharedStyles.labelCaps}>TODAY&apos;S PLAN</Text>
         <Ionicons name="ellipsis-horizontal" size={18} color={P.TEXT_MUT} />
       </View>
 
@@ -244,6 +247,7 @@ const TodaysPlanCard = memo(({
     </View>
   );
 });
+TodaysPlanCard.displayName = 'TodaysPlanCard';
 
 // ─── 4. Daily Progress 4-Ring Widget ──────────────────────────────────────────
 const DailyProgressWidget = memo(({
@@ -328,6 +332,7 @@ const DailyProgressWidget = memo(({
     </View>
   );
 });
+DailyProgressWidget.displayName = 'DailyProgressWidget';
 
 // ─── 5. Nutrition Summary Bar Card ──────────────────────────────────────────
 const NutritionSummaryCard = memo(({
@@ -367,6 +372,7 @@ const NutritionSummaryCard = memo(({
     </View>
   );
 });
+NutritionSummaryCard.displayName = 'NutritionSummaryCard';
 
 // ─── 6. Yeti Readiness Score Hero ────────────────────────────────────────────
 const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previousScore: number }) => {
@@ -419,6 +425,7 @@ const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previ
     </View>
   );
 });
+YetiReadinessCard.displayName = 'YetiReadinessCard';
 
 // ─── 7. Quick Actions Component ──────────────────────────────────────────────
 const QuickActionsGrid = memo(({
@@ -460,6 +467,7 @@ const QuickActionsGrid = memo(({
     </View>
   );
 });
+QuickActionsGrid.displayName = 'QuickActionsGrid';
 
 // ─── Main HomeScreen Master Component ─────────────────────────────────────────
 export default function HomeScreen() {

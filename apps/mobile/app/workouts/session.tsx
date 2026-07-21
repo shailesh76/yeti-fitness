@@ -82,6 +82,7 @@ const SessionHeader = memo(({
     </View>
   );
 });
+SessionHeader.displayName = 'SessionHeader';
 
 // ─── 2. Timer & Rest Ring Top Cards ──────────────────────────────────────────
 const TimerHeaderRow = memo(() => {
@@ -157,6 +158,7 @@ const TimerHeaderRow = memo(() => {
     </View>
   );
 });
+TimerHeaderRow.displayName = 'TimerHeaderRow';
 
 // ─── 3. Set Row Component (Master Reference Royal Blue Highlight) ─────────────
 
@@ -409,6 +411,7 @@ const UpNextCard = memo(({ nextExerciseName = "Chest Press Machine" }: { nextExe
     </View>
   );
 });
+UpNextCard.displayName = 'UpNextCard';
 
 // ─── Main WorkoutSessionScreen Component ─────────────────────────────────────
 
