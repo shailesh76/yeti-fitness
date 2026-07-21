@@ -16,7 +16,7 @@ const tabs = [
   { id: 'workout',   label: 'Workout',   path: '/workouts' },
   { id: 'nutrition', label: 'Nutrition', path: '/food-diary' },
   { id: 'progress',  label: 'Progress',  path: '/analytics' },
-  { id: 'coach',     label: 'Coach',     path: '/coach' },
+  { id: 'more',      label: 'Profile',   path: '/profile' },
 ] as const;
 
 export default function AppShell({ activeTab, children }: AppShellProps) {
