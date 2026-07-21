@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, Switch, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/useAuthStore';
 import { supabase } from '../lib/supabase';
 import { useRepositories } from '../hooks/useRepositories';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import AppShell from '../components/AppShell';
 import { requestWearablePermissions } from '../services/wearableService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,16 +19,78 @@ const GOALS = [
   { id: 'MAINTAIN', label: 'Maintain', desc: 'Balanced fuel for consistency' },
 ] as const;
 
+const GOAL_LABEL: Record<string, string> = {
+  BUILD_MUSCLE: 'Build Muscle',
+  LOSE_FAT: 'Lose Fat',
+  MAINTAIN: 'Maintain',
+};
+
+// A single settings row — leading icon tile, title, optional value/subtitle,
+// and a trailing chevron or custom accessory. Matches the redesign's
+// grouped-list aesthetic while keeping every underlying action intact.
+function SettingsRow({
+  icon,
+  iconColor = P.ACCENT,
+  title,
+  value,
+  subtitle,
+  onPress,
+  accessory,
+  accessibilityLabel,
+  danger = false,
+  first = false,
+  last = false,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor?: string;
+  title: string;
+  value?: string;
+  subtitle?: string;
+  onPress?: () => void;
+  accessory?: React.ReactNode;
+  accessibilityLabel?: string;
+  danger?: boolean;
+  first?: boolean;
+  last?: boolean;
+}) {
+  const Container: any = onPress ? TouchableOpacity : View;
+  return (
+    <Container
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessible={true}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={accessibilityLabel || title}
+      style={[
+        styles.row,
+        first && styles.rowFirst,
+        last && styles.rowLast,
+      ]}
+    >
+      <View style={[styles.rowIconTile, { backgroundColor: iconColor + '1f', borderColor: iconColor + '33' }]}>
+        <Ionicons name={icon} size={17} color={danger ? P.RED : iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.rowTitle, danger && { color: P.RED }]} numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text style={styles.rowSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+      </View>
+      {value ? <Text style={styles.rowValue} numberOfLines={1}>{value}</Text> : null}
+      {accessory !== undefined ? accessory : (onPress ? <Ionicons name="chevron-forward" size={16} color={P.TEXT_MUT} /> : null)}
+    </Container>
+  );
+}
+
 export default function MoreScreen() {
   const router = useRouter();
   const session = useAuthStore((state) => state.session);
   const setSession = useAuthStore((state) => state.setSession);
   const { userRepository } = useRepositories();
-  
+
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [wearablesConnected, setWearablesConnected] = useState(false);
+  const [goalsExpanded, setGoalsExpanded] = useState(false);
 
   const notifStore = useNotificationStore();
 
@@ -131,10 +194,14 @@ export default function MoreScreen() {
     }
   };
 
+  const displayName = profile?.full_name || 'Dude Athlete';
+  const initial = (displayName || session?.user?.email || 'A').trim().charAt(0).toUpperCase();
+  const currentGoal = profile?.goal ? GOAL_LABEL[profile.goal] : undefined;
+
   if (loading) {
     return (
       <AppShell activeTab="more">
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={[styles.safeArea, { justifyContent: 'center' }]}>
           <ActivityIndicator size="large" color={P.ACCENT} />
         </SafeAreaView>
       </AppShell>
@@ -143,47 +210,56 @@ export default function MoreScreen() {
 
   return (
     <AppShell activeTab="more">
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.container}>
-          
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}>
-            <Animated.View entering={FadeIn.duration(400)} style={{ pb: 12 } as any}>
-              
-              {/* Profile Card Header */}
-              <View style={sharedStyles.cardGlow}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarEmoji}>👤</Text>
-                </View>
-                <Text style={styles.profileName}>
-                  {profile?.full_name || 'Dude Athlete'}
-                </Text>
-                <Text style={styles.profileEmail}>
-                  {session?.user?.email}
-                </Text>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scroll}
+        >
+          {/* ── Profile header ─────────────────────────────────────── */}
+          <Animated.View entering={FadeIn.duration(400)} style={[sharedStyles.cardGlow, styles.headerCard]}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarInitial}>{initial}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.profileName} numberOfLines={1}>{displayName}</Text>
+              <Text style={styles.profileEmail} numberOfLines={1}>{session?.user?.email}</Text>
+              <View style={styles.badge}>
+                <Ionicons name="barbell" size={10} color={P.ACCENT} />
+                <Text style={styles.badgeText}>{currentGoal ? currentGoal.toUpperCase() : 'ATHLETE'}</Text>
               </View>
+            </View>
+          </Animated.View>
 
-              {/* Stats Row */}
-              <View style={styles.statsRow}>
-                <View style={[styles.statTile, sharedStyles.card]}>
-                  <Text style={styles.statLabel}>Height</Text>
-                  <Text style={styles.statValue}>{profile?.height_cm || '--'} <Text style={styles.statUnit}>cm</Text></Text>
-                </View>
-                <View style={[styles.statTile, sharedStyles.card]}>
-                  <Text style={styles.statLabel}>Weight</Text>
-                  <Text style={styles.statValue}>{profile?.weight_kg || '--'} <Text style={styles.statUnit}>kg</Text></Text>
-                </View>
-                {profile?.body_fat_percent && (
-                  <View style={[styles.statTile, sharedStyles.card]}>
-                    <Text style={styles.statLabel}>Body Fat</Text>
-                    <Text style={styles.statValue}>{profile?.body_fat_percent} <Text style={styles.statUnit}>%</Text></Text>
-                  </View>
-                )}
-              </View>
+          {/* ── Body stats ─────────────────────────────────────────── */}
+          <Animated.View entering={FadeInDown.delay(60).duration(400)} style={styles.statsRow}>
+            <View style={[styles.statTile, sharedStyles.card]}>
+              <Text style={styles.statLabel}>HEIGHT</Text>
+              <Text style={styles.statValue}>{profile?.height_cm || '--'} <Text style={styles.statUnit}>cm</Text></Text>
+            </View>
+            <View style={[styles.statTile, sharedStyles.card]}>
+              <Text style={styles.statLabel}>WEIGHT</Text>
+              <Text style={styles.statValue}>{profile?.weight_kg || '--'} <Text style={styles.statUnit}>kg</Text></Text>
+            </View>
+            <View style={[styles.statTile, sharedStyles.card]}>
+              <Text style={styles.statLabel}>BODY FAT</Text>
+              <Text style={styles.statValue}>{profile?.body_fat_percent || '--'} <Text style={styles.statUnit}>%</Text></Text>
+            </View>
+          </Animated.View>
 
-
-              {/* Goal Selection */}
-
-              <View style={styles.cardGroup}>
+          {/* ── Account ────────────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>ACCOUNT</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              first
+              icon="flag"
+              title="Goals"
+              value={goalsExpanded ? undefined : (currentGoal || 'Not set')}
+              accessibilityLabel="Change fitness goal"
+              onPress={() => setGoalsExpanded((v) => !v)}
+              accessory={<Ionicons name={goalsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={P.TEXT_MUT} />}
+            />
+            {goalsExpanded && (
+              <View style={styles.goalPanel}>
                 {GOALS.map((g) => {
                   const isSelected = profile?.goal === g.id;
                   return (
@@ -195,224 +271,205 @@ export default function MoreScreen() {
                       accessibilityLabel={`Set fitness goal to ${g.label}: ${g.desc}`}
                       onPress={() => handleUpdateGoal(g.id)}
                       disabled={updating}
-                      style={[
-                        styles.goalBtn,
-                        isSelected ? styles.goalBtnSelected : null
-                      ]}
+                      style={[styles.goalBtn, isSelected && styles.goalBtnSelected]}
                       activeOpacity={0.8}
                     >
                       <View style={{ flex: 1, paddingRight: 16 }}>
-                        <Text style={[
-                          styles.goalLabel,
-                          isSelected ? styles.goalLabelSelected : null
-                        ]}>
-                          {g.label}
-                        </Text>
+                        <Text style={[styles.goalLabel, isSelected && styles.goalLabelSelected]}>{g.label}</Text>
                         <Text style={styles.goalDesc}>{g.desc}</Text>
                       </View>
-                      {isSelected && (
-                        <Text style={styles.checkmark}>✓</Text>
-                      )}
+                      {isSelected && <Ionicons name="checkmark-circle" size={20} color={P.ACCENT} />}
                     </TouchableOpacity>
                   );
                 })}
               </View>
+            )}
+            <SettingsRow
+              icon="person"
+              title="Personal Information"
+              subtitle="Name, age & basics"
+              onPress={() => router.push('/onboarding/basic-info')}
+            />
+            <SettingsRow
+              last
+              icon="body"
+              title="Measurements"
+              subtitle="Height, weight & body metrics"
+              onPress={() => router.push('/onboarding/body-metrics')}
+            />
+          </View>
 
-              {/* Other Options */}
-              <Text style={[sharedStyles.labelCaps, styles.sectionHeader]}>Options</Text>
-              <View style={styles.cardGroup}>
-                <TouchableOpacity 
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel={wearablesConnected ? "Disconnect background wearables sync" : "Enable background wearables sync"}
-                  onPress={wearablesConnected ? handleDisableWearables : handleEnableWearables}
-                  style={[
-                    styles.optionBtn,
-                    wearablesConnected ? [styles.optionBtnConnected, glowStyle(P.ACCENT, 10, 0.25)] : null
-                  ]}
-                  activeOpacity={0.8}
-                >
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={[
-                      styles.optionTitle,
-                      wearablesConnected ? styles.optionTitleConnected : null
-                    ]}>
-                      {wearablesConnected ? "Sync Wearables: Connected ✓" : "Sync Wearables"}
-                    </Text>
-                    <Text style={styles.optionSubtitle}>
-                      {wearablesConnected ? "Tap to disconnect wearable data" : "Enable background metrics & steps"}
-                    </Text>
-                  </View>
-                  <Text style={styles.optionIcon}>{wearablesConnected ? "⚡" : "🔌"}</Text>
-                </TouchableOpacity>
+          {/* ── Integrations ───────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>INTEGRATIONS</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              first
+              last
+              icon="fitness"
+              iconColor={wearablesConnected ? P.SUCCESS : P.ACCENT}
+              title="Sync Wearables"
+              subtitle={wearablesConnected ? 'Connected — Apple Health & Google Fit' : 'Apple Health & Google Fit'}
+              accessibilityLabel={wearablesConnected ? 'Disconnect background wearables sync' : 'Enable background wearables sync'}
+              onPress={wearablesConnected ? handleDisableWearables : handleEnableWearables}
+              accessory={
+                <View style={[styles.pill, wearablesConnected && styles.pillOn]}>
+                  <Text style={[styles.pillText, wearablesConnected && styles.pillTextOn]}>
+                    {wearablesConnected ? 'ON' : 'CONNECT'}
+                  </Text>
+                </View>
+              }
+            />
+          </View>
 
-                <TouchableOpacity 
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open Social Challenges & Leaderboards"
-                  onPress={() => router.push('/challenges')}
-                  style={styles.optionBtn}
-                  activeOpacity={0.8}
-                >
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={styles.optionTitle}>🏆 Social Challenges</Text>
-                    <Text style={styles.optionSubtitle}>View leaderboards & step challenges</Text>
-                  </View>
-                  <Text style={styles.optionIcon}>→</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  accessible={true}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open System Diagnostics"
-                  onPress={() => router.push('/settings/diagnostics')}
-                  style={styles.optionBtn}
-                  activeOpacity={0.8}
-                >
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={styles.optionTitle}>⚡ System Diagnostics</Text>
-                    <Text style={styles.optionSubtitle}>View app details, sync state & entitlements</Text>
-                  </View>
-                  <Text style={styles.optionIcon}>→</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Notification Preferences */}
-              <Text style={[sharedStyles.labelCaps, styles.sectionHeader]}>Notifications</Text>
-              <View style={styles.cardGroup}>
-                <View style={styles.switchRow}>
-                  <View style={{ flex: 1, paddingRight: 16 }}>
-                    <Text style={styles.optionTitle}>Workout Reminders</Text>
-                    <Text style={styles.optionSubtitle}>Get reminded on training days</Text>
-                  </View>
-                  <Switch 
+          {/* ── Notifications ──────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>NOTIFICATIONS</Text>
+          <View style={styles.group}>
+            {([
+              ['workoutReminders', 'Workout Reminders', 'Get reminded on training days'],
+              ['coachMessages', 'Coach Messages', 'Updates from your assigned coach'],
+              ['challengeUpdates', 'Challenge Updates', 'Rank changes and invites'],
+            ] as const).map(([key, title, subtitle], i, arr) => (
+              <SettingsRow
+                key={key}
+                first={i === 0}
+                last={i === arr.length - 1}
+                icon={key === 'workoutReminders' ? 'alarm' : key === 'coachMessages' ? 'chatbubble-ellipses' : 'trophy'}
+                title={title}
+                subtitle={subtitle}
+                accessory={
+                  <Switch
                     accessible={true}
                     accessibilityRole="switch"
-                    accessibilityLabel="Toggle Workout Reminders"
-                    value={notifStore.workoutReminders} 
-                    onValueChange={(val) => notifStore.setPreference('workoutReminders', val)}
+                    accessibilityLabel={`Toggle ${title}`}
+                    value={notifStore[key]}
+                    onValueChange={(val) => notifStore.setPreference(key, val)}
                     trackColor={{ false: '#222', true: P.ACCENT }}
-                    thumbColor={Platform.OS === 'ios' ? '#FFFFFF' : (notifStore.workoutReminders ? P.ACCENT : '#888888')}
+                    thumbColor={Platform.OS === 'ios' ? '#FFFFFF' : (notifStore[key] ? P.ACCENT : '#888888')}
                   />
-                </View>
+                }
+              />
+            ))}
+          </View>
 
-                <View style={styles.switchRow}>
-                  <View style={{ flex: 1, paddingRight: 16 }}>
-                    <Text style={styles.optionTitle}>Coach Messages</Text>
-                    <Text style={styles.optionSubtitle}>Updates from your assigned coach</Text>
-                  </View>
-                  <Switch 
-                    accessible={true}
-                    accessibilityRole="switch"
-                    accessibilityLabel="Toggle Coach Messages"
-                    value={notifStore.coachMessages} 
-                    onValueChange={(val) => notifStore.setPreference('coachMessages', val)}
-                    trackColor={{ false: '#222', true: P.ACCENT }}
-                    thumbColor={Platform.OS === 'ios' ? '#FFFFFF' : (notifStore.coachMessages ? P.ACCENT : '#888888')}
-                  />
-                </View>
+          {/* ── More ───────────────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>MORE</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              first
+              icon="trophy"
+              iconColor={P.WARNING}
+              title="Social Challenges"
+              subtitle="Leaderboards & step challenges"
+              onPress={() => router.push('/challenges')}
+            />
+            <SettingsRow
+              icon="pulse"
+              title="System Diagnostics"
+              subtitle="App details, sync state & entitlements"
+              onPress={() => router.push('/settings/diagnostics')}
+            />
+            <SettingsRow
+              last
+              icon="help-buoy"
+              title="Help & Support"
+              subtitle="Send feedback & get help"
+              onPress={() => router.push('/settings/feedback')}
+            />
+          </View>
 
-                <View style={styles.switchRow}>
-                  <View style={{ flex: 1, paddingRight: 16 }}>
-                    <Text style={styles.optionTitle}>Challenge Updates</Text>
-                    <Text style={styles.optionSubtitle}>Rank changes and invites</Text>
-                  </View>
-                  <Switch 
-                    accessible={true}
-                    accessibilityRole="switch"
-                    accessibilityLabel="Toggle Challenge Updates"
-                    value={notifStore.challengeUpdates} 
-                    onValueChange={(val) => notifStore.setPreference('challengeUpdates', val)}
-                    trackColor={{ false: '#222', true: P.ACCENT }}
-                    thumbColor={Platform.OS === 'ios' ? '#FFFFFF' : (notifStore.challengeUpdates ? P.ACCENT : '#888888')}
-                  />
-                </View>
-              </View>
+          {/* ── Log out ────────────────────────────────────────────── */}
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Log out of Yeti Fitness account"
+            onPress={handleSignOut}
+            style={styles.logoutBtn}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="log-out-outline" size={16} color={P.RED} />
+            <Text style={styles.logoutBtnText}>Log Out</Text>
+          </TouchableOpacity>
 
-              {/* Log Out */}
-              <TouchableOpacity 
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Log out of Yeti Fitness account"
-                onPress={handleSignOut}
-                style={styles.logoutBtn}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.logoutBtnText}>Log Out</Text>
-              </TouchableOpacity>
-              
-              {/* Bottom padding for tab bar */}
-              <View style={{ height: 120 }} />
-
-            </Animated.View>
-          </ScrollView>
-        </View>
+          <View style={{ height: 120 }} />
+        </ScrollView>
       </SafeAreaView>
     </AppShell>
   );
 }
 
-
-
-
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: P.BG,
-    justifyContent: 'center',
+  safeArea: { flex: 1, backgroundColor: P.BG },
+  scroll: { paddingHorizontal: 20, paddingTop: 12 },
+
+  headerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
-  container: {
-    flex: 1,
-    width: '100%',
-    maxW: 640,
-    alignSelf: 'center',
-  } as any,
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
-    alignSelf: 'center',
+    ...glowStyle(P.ACCENT, 12, 0.3),
   },
-  avatarEmoji: {
+  avatarInitial: {
     fontSize: 24,
+    fontWeight: '900',
+    color: P.ACCENT,
   },
   profileName: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '900',
     color: P.TEXT_PRI,
-    textAlign: 'center',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
   profileEmail: {
     fontSize: 12,
     fontWeight: '600',
     color: P.TEXT_MUT,
-    textAlign: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: P.ACCENT_DIM,
+    borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: P.ACCENT,
+    letterSpacing: 0.6,
+  },
+
   statsRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-    marginBottom: 28,
+    gap: 10,
+    marginTop: 14,
+    marginBottom: 8,
   },
   statTile: {
     flex: 1,
     paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
   },
   statLabel: {
     fontSize: 8,
     fontWeight: '800',
     color: P.TEXT_MUT,
-    textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 4,
   },
@@ -427,105 +484,126 @@ const styles = StyleSheet.create({
     color: P.TEXT_MUT,
     fontWeight: '700',
   },
+
   sectionHeader: {
-    marginBottom: 12,
+    fontSize: 11,
+    fontWeight: '800',
+    color: P.TEXT_MUT,
+    letterSpacing: 0.8,
+    marginTop: 22,
+    marginBottom: 10,
     marginLeft: 4,
   },
-  cardGroup: {
-    gap: 10,
-    marginBottom: 28,
-  },
-  goalBtn: {
-    padding: 16,
-    borderRadius: 16,
+  group: {
+    backgroundColor: P.CARD_BG,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
-    backgroundColor: P.CARD_BG,
+    borderRadius: P.RADIUS_CARD,
+    overflow: 'hidden',
+  },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderTopWidth: 1,
+    borderTopColor: P.CARD_BORDER + '80',
+  },
+  rowFirst: { borderTopWidth: 0 },
+  rowLast: {},
+  rowIconTile: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: P.TEXT_PRI,
+  },
+  rowSubtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: P.TEXT_SEC,
+    marginTop: 2,
+  },
+  rowValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: P.TEXT_SEC,
+    marginRight: 6,
+  },
+
+  goalPanel: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  goalBtn: {
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    backgroundColor: P.BG,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   goalBtnSelected: {
     borderColor: P.ACCENT,
     backgroundColor: P.ACCENT_DIM,
   },
   goalLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: P.TEXT_PRI,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  goalLabelSelected: {
-    color: P.ACCENT,
-  },
-  goalDesc: {
-    fontSize: 11,
-    color: P.TEXT_SEC,
-    marginTop: 4,
-  },
-  checkmark: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: P.ACCENT,
-  },
-  optionBtn: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: P.CARD_BORDER,
-    backgroundColor: P.CARD_BG,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  optionBtnConnected: {
-    borderColor: P.ACCENT_BORDER,
-    backgroundColor: P.ACCENT_DIM,
-  },
-  optionTitle: {
     fontSize: 13,
     fontWeight: '800',
     color: P.TEXT_PRI,
   },
-  optionTitleConnected: {
-    color: P.ACCENT,
-  },
-  optionSubtitle: {
+  goalLabelSelected: { color: P.ACCENT },
+  goalDesc: {
     fontSize: 11,
     color: P.TEXT_SEC,
-    marginTop: 4,
+    marginTop: 3,
   },
-  optionIcon: {
-    fontSize: 14,
-    color: P.TEXT_MUT,
-  },
-  switchRow: {
-    padding: 16,
-    borderRadius: 16,
+
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: P.CARD_BORDER,
-    backgroundColor: P.CARD_BG,
+    borderColor: P.ACCENT_BORDER,
+    backgroundColor: P.ACCENT_DIM,
+  },
+  pillOn: {
+    borderColor: (P.SUCCESS || P.ACCENT) + '55',
+    backgroundColor: (P.SUCCESS || P.ACCENT) + '1f',
+  },
+  pillText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: P.ACCENT,
+    letterSpacing: 0.5,
+  },
+  pillTextOn: { color: P.SUCCESS || P.ACCENT },
+
+  logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  logoutBtn: {
-    width: '100%',
-    backgroundColor: 'rgba(239, 68, 68, 0.02)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.15)',
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    gap: 8,
+    marginTop: 24,
+    backgroundColor: 'rgba(255,69,58,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,69,58,0.2)',
+    borderRadius: P.RADIUS_CARD,
+    paddingVertical: 15,
   },
   logoutBtnText: {
     color: P.RED,
     fontSize: 13,
     fontWeight: '800',
-    textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
 });
