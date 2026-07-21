@@ -7,16 +7,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
 interface AppShellProps {
-  activeTab: 'home' | 'workout' | 'nutrition' | 'progress' | 'more';
+  activeTab: 'home' | 'workout' | 'nutrition' | 'progress' | 'coach' | 'more';
   children: React.ReactNode;
 }
 
 const tabs = [
-  { id: 'home',      label: 'Logger',    path: '/home' },
-  { id: 'nutrition', label: 'Calories',  path: '/food-diary' },
-  { id: 'progress',  label: 'Analytics', path: '/analytics' },
-  { id: 'workout',   label: 'Library',   path: '/workouts' },
-  { id: 'more',      label: 'Profile',   path: '/profile' },
+  { id: 'home',      label: 'Home',      path: '/home' },
+  { id: 'workout',   label: 'Workout',   path: '/workouts' },
+  { id: 'nutrition', label: 'Nutrition', path: '/food-diary' },
+  { id: 'progress',  label: 'Progress',  path: '/analytics' },
+  { id: 'coach',     label: 'Coach',     path: '/coach' },
 ] as const;
 
 export default function AppShell({ activeTab, children }: AppShellProps) {
@@ -52,12 +52,14 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
     switch (id) {
       case 'home':
         return isFocused ? 'home' : 'home-outline';
-      case 'nutrition':
-        return isFocused ? 'nutrition' : 'nutrition-outline';
-      case 'progress':
-        return isFocused ? 'analytics' : 'analytics-outline';
       case 'workout':
         return isFocused ? 'barbell' : 'barbell-outline';
+      case 'nutrition':
+        return isFocused ? 'restaurant' : 'restaurant-outline';
+      case 'progress':
+        return isFocused ? 'analytics' : 'analytics-outline';
+      case 'coach':
+        return isFocused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline';
       case 'more':
         return isFocused ? 'person' : 'person-outline';
       default:

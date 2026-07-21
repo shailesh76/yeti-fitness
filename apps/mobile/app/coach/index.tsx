@@ -21,6 +21,8 @@ import { supabase } from '../../lib/supabase';
 import { P } from '../../constants/premiumTheme';
 import { EVENTS } from '../../constants/analyticsEvents';
 
+import AppShell from '../../components/AppShell';
+
 type ActiveTab = 'ai' | 'human';
 
 interface Message {
@@ -244,171 +246,182 @@ export default function CoachHubScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Segmented Header */}
-      <View style={styles.header}>
-        <View style={styles.segmentContainer}>
-          <TouchableOpacity
-            accessible={true}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'ai' }}
-            accessibilityLabel="Switch to AI Coach chat"
-            style={[styles.segmentBtn, activeTab === 'ai' && styles.segmentBtnActive]}
-            onPress={() => setActiveTab('ai')}
-          >
-            <Ionicons name="sparkles" size={14} color={activeTab === 'ai' ? P.BG : P.TEXT_SEC} />
-            <Text style={[styles.segmentText, activeTab === 'ai' && styles.segmentTextActive]}>AI Coach</Text>
-          </TouchableOpacity>
+    <AppShell activeTab="coach">
+      <SafeAreaView style={styles.safeArea}>
+        {/* Segmented Header */}
+        <View style={styles.header}>
+          <View style={styles.segmentContainer}>
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeTab === 'ai' }}
+              accessibilityLabel="Switch to AI Coach chat"
+              style={[styles.segmentBtn, activeTab === 'ai' && styles.segmentBtnActive]}
+              onPress={() => setActiveTab('ai')}
+            >
+              <Ionicons name="sparkles" size={14} color={activeTab === 'ai' ? P.BG : P.TEXT_SEC} />
+              <Text style={[styles.segmentText, activeTab === 'ai' && styles.segmentTextActive]}>AI Coach</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            accessible={true}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === 'human' }}
-            accessibilityLabel="Switch to Human Coach chat"
-            style={[styles.segmentBtn, activeTab === 'human' && styles.segmentBtnActive]}
-            onPress={() => setActiveTab('human')}
-          >
-            <Ionicons name="people" size={14} color={activeTab === 'human' ? P.BG : P.TEXT_SEC} />
-            <Text style={[styles.segmentText, activeTab === 'human' && styles.segmentTextActive]}>Human Coach</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeTab === 'human' }}
+              accessibilityLabel="Switch to Human Coach chat"
+              style={[styles.segmentBtn, activeTab === 'human' && styles.segmentBtnActive]}
+              onPress={() => setActiveTab('human')}
+            >
+              <Ionicons name="people" size={14} color={activeTab === 'human' ? P.BG : P.TEXT_SEC} />
+              <Text style={[styles.segmentText, activeTab === 'human' && styles.segmentTextActive]}>Human Coach</Text>
+            </TouchableOpacity>
+          </View>
 
-        {activeTab === 'ai' && (
-          <TouchableOpacity 
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Reset AI Coach chat conversation"
-            onPress={handleResetAI} 
-            style={styles.resetBtn}
-          >
-            <Ionicons name="refresh" size={18} color={P.TEXT_SEC} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Connection warning bar for human chat */}
-      {activeTab === 'human' && !isOnline && (
-        <View style={styles.offlineBar}>
-          <Text style={styles.offlineText}>You are offline. Reconnect to send messages.</Text>
-        </View>
-      )}
-
-      {/* Tab AI Coach */}
-      {activeTab === 'ai' && (
-        <View style={{ flex: 1 }}>
-          <FlatList
-            ref={aiFlatListRef}
-            data={aiMessages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderAIMessage}
-            contentContainerStyle={styles.chatList}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <ActivityIndicator color={P.ACCENT} />
-                <Text style={styles.emptyText}>Loading your training context...</Text>
-              </View>
-            }
-            ListFooterComponent={
-              aiLoading ? (
-                <View style={[styles.bubbleWrapper, styles.aiWrapper]}>
-                  <View style={styles.avatarDot}>
-                    <Text style={styles.avatarText}>Y</Text>
-                  </View>
-                  <View style={[styles.bubble, styles.aiBubble, styles.typingBubble]}>
-                    <ActivityIndicator size="small" color={P.ACCENT} />
-                  </View>
-                </View>
-              ) : null
-            }
-          />
-
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.input}
-                value={aiInputText}
-                onChangeText={setAiInputText}
-                placeholder="Ask about training, nutrition, recovery..."
-                placeholderTextColor={P.TEXT_MUT}
-                multiline
-                maxLength={500}
-              />
-              <TouchableOpacity
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Send message to AI Coach"
-                style={[styles.sendButton, (!aiInputText.trim() || aiLoading) && styles.sendButtonDisabled]}
-                onPress={handleSendAI}
-                disabled={!aiInputText.trim() || aiLoading}
-              >
-                <Ionicons name={aiLoading ? 'hourglass' : 'send'} size={18} color={!aiInputText.trim() || aiLoading ? P.TEXT_MUT : P.BG} />
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      )}
-
-      {/* Tab Human Coach */}
-      {activeTab === 'human' && (
-        <View style={{ flex: 1 }}>
-          {humanLoading ? (
-            <View style={styles.emptyState}>
-              <ActivityIndicator color={P.ACCENT} />
-              <Text style={styles.emptyText}>Opening direct chat...</Text>
-            </View>
-          ) : !coachProfile ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="chatbubbles-outline" size={48} color={P.TEXT_MUT} style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyTextTitle}>No Coach Assigned</Text>
-              <Text style={styles.emptyTextSub}>Your coach dashboard detail metrics will sync when you are assigned a human trainer.</Text>
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <FlatList
-                ref={humanFlatListRef}
-                data={humanMessages}
-                keyExtractor={(item) => item.id}
-                renderItem={renderHumanMessage}
-                contentContainerStyle={styles.chatList}
-                showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                  <View style={styles.emptyState}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={32} color={P.TEXT_MUT} style={{ marginBottom: 12 }} />
-                    <Text style={styles.emptyTextSub}>No messages yet. Send a message to say hello to {coachProfile.name}!</Text>
-                  </View>
-                }
-              />
-
-              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={[styles.input, !isOnline && styles.inputDisabled]}
-                    value={humanInputText}
-                    onChangeText={setHumanInputText}
-                    placeholder={isOnline ? `Message ${coachProfile.name}...` : 'Reconnect to type...'}
-                    placeholderTextColor={P.TEXT_MUT}
-                    multiline
-                    maxLength={500}
-                    editable={isOnline}
-                  />
-                  <TouchableOpacity
-                    accessible={true}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Send message to ${coachProfile.name}`}
-                    style={[styles.sendButton, (!humanInputText.trim() || !isOnline) && styles.sendButtonDisabled]}
-                    onPress={handleSendHuman}
-                    disabled={!humanInputText.trim() || !isOnline}
-                  >
-                    <Ionicons name="send" size={18} color={!humanInputText.trim() || !isOnline ? P.TEXT_MUT : P.BG} />
-                  </TouchableOpacity>
-                </View>
-              </KeyboardAvoidingView>
-            </View>
+          {activeTab === 'ai' && (
+            <TouchableOpacity 
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Reset AI Coach chat conversation"
+              onPress={handleResetAI} 
+              style={styles.resetBtn}
+            >
+              <Ionicons name="refresh" size={18} color={P.TEXT_SEC} />
+            </TouchableOpacity>
           )}
         </View>
-      )}
-    </SafeAreaView>
+
+        {/* Connection warning bar for human chat */}
+        {activeTab === 'human' && !isOnline && (
+          <View style={styles.offlineBar}>
+            <Text style={styles.offlineText}>You are offline. Reconnect to send messages.</Text>
+          </View>
+        )}
+
+        {/* Tab AI Coach */}
+        {activeTab === 'ai' && (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={aiFlatListRef}
+              data={aiMessages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderAIMessage}
+              contentContainerStyle={styles.chatList}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <ActivityIndicator color={P.ACCENT} />
+                  <Text style={styles.emptyText}>Loading your training context...</Text>
+                </View>
+              }
+              ListFooterComponent={
+                aiLoading ? (
+                  <View style={[styles.bubbleWrapper, styles.aiWrapper]}>
+                    <View style={styles.avatarDot}>
+                      <Image
+                        source={require('../../assets/yeti_mascot_avatar.png')}
+                        style={{ width: '100%', height: '100%', borderRadius: 14 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View style={[styles.bubble, styles.aiBubble, styles.typingBubble]}>
+                      <ActivityIndicator size="small" color={P.ACCENT} />
+                    </View>
+                  </View>
+                ) : null
+              }
+            />
+
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={aiInputText}
+                  onChangeText={setAiInputText}
+                  placeholder="Ask your AI Coach anything..."
+                  placeholderTextColor={P.TEXT_MUT}
+                  multiline
+                  maxLength={500}
+                />
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send AI Coach message"
+                  style={[styles.sendButton, (!aiInputText.trim() || aiLoading) && styles.sendButtonDisabled]}
+                  onPress={handleSendAI}
+                  disabled={!aiInputText.trim() || aiLoading}
+                >
+                  {aiLoading ? (
+                    <ActivityIndicator size="small" color={P.BG} />
+                  ) : (
+                    <Ionicons name="send" size={18} color={!aiInputText.trim() ? P.TEXT_MUT : P.BG} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        )}
+
+        {/* Tab Human Coach */}
+        {activeTab === 'human' && (
+          <View style={{ flex: 1 }}>
+            {humanLoading ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={P.ACCENT} />
+                <Text style={styles.emptyText}>Loading messages...</Text>
+              </View>
+            ) : !coachProfile ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={48} color={P.TEXT_MUT} />
+                <Text style={styles.emptyTextTitle}>No Assigned Coach</Text>
+                <Text style={styles.emptyTextSub}>
+                  When a coach is assigned to your profile, your chat history will appear here.
+                </Text>
+              </View>
+            ) : (
+              <View style={{ flex: 1 }}>
+                <FlatList
+                  ref={humanFlatListRef}
+                  data={humanMessages}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderHumanMessage}
+                  contentContainerStyle={styles.chatList}
+                  showsVerticalScrollIndicator={false}
+                  ListEmptyComponent={
+                    <View style={styles.emptyState}>
+                      <Text style={styles.emptyText}>No messages yet. Send a message to start chatting with {coachProfile.name}.</Text>
+                    </View>
+                  }
+                />
+
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={[styles.input, !isOnline && styles.inputDisabled]}
+                      value={humanInputText}
+                      onChangeText={setHumanInputText}
+                      placeholder={isOnline ? `Message ${coachProfile.name}...` : 'Reconnect to type...'}
+                      placeholderTextColor={P.TEXT_MUT}
+                      multiline
+                      maxLength={500}
+                      editable={isOnline}
+                    />
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Send message to ${coachProfile.name}`}
+                      style={[styles.sendButton, (!humanInputText.trim() || !isOnline) && styles.sendButtonDisabled]}
+                      onPress={handleSendHuman}
+                      disabled={!humanInputText.trim() || !isOnline}
+                    >
+                      <Ionicons name="send" size={18} color={!humanInputText.trim() || !isOnline ? P.TEXT_MUT : P.BG} />
+                    </TouchableOpacity>
+                  </View>
+                </KeyboardAvoidingView>
+              </View>
+            )}
+          </View>
+        )}
+      </SafeAreaView>
+    </AppShell>
   );
 }
 

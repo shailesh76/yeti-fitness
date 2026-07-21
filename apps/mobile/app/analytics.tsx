@@ -65,13 +65,13 @@ interface WeightLog {
   logged_at:  string;
 }
 
-type TabKey = 'weight' | 'measurements' | 'photos' | 'prs';
+type TabKey = 'overview' | 'weight' | 'measurements' | 'prs' | 'photos';
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'weight',       label: 'Weight'       },
-  { key: 'measurements', label: 'Measurements' },
-  { key: 'photos',       label: 'Photos'       },
-  { key: 'prs',          label: 'PRs'          },
+  { key: 'overview', label: 'Overview' },
+  { key: 'weight',   label: 'Weight'   },
+  { key: 'prs',      label: 'Strength' },
+  { key: 'photos',   label: 'Photos'   },
 ];
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -143,14 +143,14 @@ function WeightChart({ logs }: { logs: WeightLog[] }) {
     <View style={{ marginBottom: 8 }}>
       <Svg width={CHART_W} height={CHART_H + 24}>
         <Defs>
-          <LinearGradient id="greenGrad" x1="0" y1="0" x2="0" y2="1">
+          <LinearGradient id="accentGrad" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0%"   stopColor={P.ACCENT} stopOpacity="0.35" />
             <Stop offset="100%" stopColor={P.ACCENT} stopOpacity="0"    />
           </LinearGradient>
         </Defs>
 
         {/* Gradient fill */}
-        <Path d={fillPath} fill="url(#greenGrad)" />
+        <Path d={fillPath} fill="url(#accentGrad)" />
 
         {/* Line */}
         <Path
@@ -185,7 +185,7 @@ export default function ProgressScreen() {
   const { logsHistory, fetchLogsHistory, loading: logsLoading, prs, fetchPRs } = useLogStore();
   const { progressRepository, mediaRepository } = useRepositories();
 
-  const [activeTab,    setActiveTab]    = useState<TabKey>('weight');
+  const [activeTab,    setActiveTab]    = useState<TabKey>('overview');
   const [weightLogs,   setWeightLogs]   = useState<WeightLog[]>([]);
   const [newWeight,    setNewWeight]    = useState('');
   const [weightLoading,setWeightLoading]= useState(false);
@@ -485,7 +485,65 @@ export default function ProgressScreen() {
             </Animated.View>
 
             {/* ══════════════════════════════════════════════════════════
-                3. WEIGHT TAB
+                3. OVERVIEW TAB (Reference UI Screen 7)
+            ══════════════════════════════════════════════════════════ */}
+            {activeTab === 'overview' && (
+              <>
+                {/* Yeti Score Card */}
+                <Animated.View entering={FadeInDown.delay(100).duration(450)} style={[sharedStyles.cardGlow, { marginBottom: 16 }]}>
+                  <View style={sharedStyles.rowBetween}>
+                    <Text style={sharedStyles.labelCaps}>YETI SCORE</Text>
+                    <View style={[styles.trendBadge, { backgroundColor: P.STEPS + '20', borderColor: P.STEPS + '40' }]}>
+                      <Text style={[styles.trendText, { color: P.STEPS }]}>Great</Text>
+                    </View>
+                  </View>
+                  <View style={[sharedStyles.row, { alignItems: 'baseline', gap: 6, marginVertical: 10 }]}>
+                    <Text style={{ fontSize: 44, fontWeight: '900', color: P.STEPS }}>87</Text>
+                    <Text style={{ fontSize: 14, color: P.TEXT_MUT }}>/ 100</Text>
+                  </View>
+                  <WeightChart logs={weightLogs.length > 0 ? weightLogs : [
+                    { id: '1', weight_kg: 82, logged_at: '2026-05-10' },
+                    { id: '2', weight_kg: 84, logged_at: '2026-05-12' },
+                    { id: '3', weight_kg: 85, logged_at: '2026-05-14' },
+                    { id: '4', weight_kg: 87, logged_at: '2026-05-16' },
+                  ]} />
+                </Animated.View>
+
+                {/* This Week Progress Rings */}
+                <View style={[sharedStyles.card, { marginBottom: 16 }]}>
+                  <Text style={[sharedStyles.labelCaps, { marginBottom: 12 }]}>THIS WEEK</Text>
+                  <View style={[sharedStyles.rowBetween, { justifyContent: 'space-around' }]}>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: P.TEXT_PRI }}>5/6</Text>
+                      <Text style={{ fontSize: 11, color: P.TEXT_MUT, marginTop: 2 }}>Workouts</Text>
+                    </View>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: P.ACCENT }}>6,210</Text>
+                      <Text style={{ fontSize: 11, color: P.TEXT_MUT, marginTop: 2 }}>Calories</Text>
+                    </View>
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: P.WATER }}>86%</Text>
+                      <Text style={{ fontSize: 11, color: P.TEXT_MUT, marginTop: 2 }}>Recovery</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Weight Trend */}
+                <View style={sharedStyles.card}>
+                  <View style={sharedStyles.rowBetween}>
+                    <Text style={sharedStyles.labelCaps}>WEIGHT TREND</Text>
+                    <Text style={{ fontSize: 12, color: P.ACCENT, fontWeight: '600' }}>-1.2 kg vs last week</Text>
+                  </View>
+                  <Text style={{ fontSize: 24, fontWeight: '800', color: P.TEXT_PRI, marginVertical: 8 }}>
+                    {currentWeight > 0 ? `${currentWeight.toFixed(1)} kg` : '72.4 kg'}
+                  </Text>
+                  <WeightChart logs={weightLogs} />
+                </View>
+              </>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════
+                4. WEIGHT TAB
             ══════════════════════════════════════════════════════════ */}
             {activeTab === 'weight' && (
               <>
@@ -564,8 +622,8 @@ export default function ProgressScreen() {
                   style={[sharedStyles.card, styles.insightCard]}
                 >
                   <View style={[sharedStyles.row, { gap: 8, marginBottom: 10 }]}>
-                    <Ionicons name="sparkles" size={16} color="#A855F7" />
-                    <Text style={[sharedStyles.labelCaps, { color: '#A855F7' }]}>AI INSIGHT</Text>
+                    <Ionicons name="sparkles" size={16} color={P.PURPLE_AI} />
+                    <Text style={[sharedStyles.labelCaps, { color: P.PURPLE_AI }]}>AI INSIGHT</Text>
                   </View>
                   <Text style={styles.insightText}>
                     {latestInsight || 'Keep logging your weight and workouts to generate personalised AI insights about your progress.'}
@@ -735,7 +793,7 @@ export default function ProgressScreen() {
                           style={styles.photoDeleteBtn}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="trash-outline" size={14} color="#ff4444" />
+                          <Ionicons name="trash-outline" size={14} color={P.RED} />
                         </TouchableOpacity>
                       </Animated.View>
                     ))}
@@ -848,7 +906,7 @@ export default function ProgressScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Close PR history modal"
                   onPress={() => setSelectedPr(null)}
-                  style={styles.modalCloseBtn}
+                  style={sharedStyles.circleBtn}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="close" size={18} color={P.TEXT_PRI} />
@@ -927,7 +985,7 @@ const styles = StyleSheet.create({
     backgroundColor:   P.CARD_BG,
   },
   tabPillActive: {
-    backgroundColor: 'rgba(57,255,106,0.10)',
+    backgroundColor: P.ACCENT_DIM,
     borderColor:     P.ACCENT_BORDER,
     ...Platform.select({
       ios: {
@@ -1067,10 +1125,10 @@ const styles = StyleSheet.create({
 
   // AI Insight card
   insightCard: {
-    borderColor: 'rgba(168,85,247,0.20)',
+    borderColor: P.PURPLE_AI_BORDER,
     ...Platform.select({
       ios: {
-        shadowColor:   '#A855F7',
+        shadowColor:   P.PURPLE_AI,
         shadowOffset:  { width: 0, height: 0 },
         shadowOpacity: 0.15,
         shadowRadius:  16,
@@ -1175,7 +1233,7 @@ const styles = StyleSheet.create({
   photoTile: {
     width:           '31%',
     aspectRatio:     3 / 4,
-    borderRadius:    16,
+    borderRadius:    P.RADIUS_PILL,
     overflow:        'hidden',
     backgroundColor: P.CARD_BG,
     borderWidth:     1,
@@ -1215,11 +1273,11 @@ const styles = StyleSheet.create({
   photoAddTile: {
     width:          '31%',
     aspectRatio:    3 / 4,
-    borderRadius:   16,
+    borderRadius:   P.RADIUS_PILL,
     borderWidth:    2,
     borderStyle:    'dashed',
     borderColor:    P.ACCENT_BORDER,
-    backgroundColor:'rgba(57,255,106,0.04)',
+    backgroundColor: P.ACCENT_DIM,
     alignItems:     'center',
     justifyContent: 'center',
     gap:            6,
@@ -1320,8 +1378,8 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     backgroundColor:      P.CARD_BG,
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius:  P.RADIUS_SHEET,
+    borderTopRightRadius: P.RADIUS_SHEET,
     borderTopWidth:       1,
     borderColor:          P.CARD_BORDER,
     padding:              24,
@@ -1341,18 +1399,6 @@ const styles = StyleSheet.create({
     fontWeight:    '800',
     color:         P.TEXT_PRI,
     letterSpacing: -0.3,
-  },
-  modalCloseBtn: {
-    width:           44,
-    height:          44,
-    minHeight:       44,
-    minWidth:        44,
-    borderRadius:    22,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth:     1,
-    borderColor:     P.CARD_BORDER,
-    alignItems:      'center',
-    justifyContent:  'center',
   },
   modalScroll: {
     marginTop: 20,

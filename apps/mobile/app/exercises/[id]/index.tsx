@@ -331,8 +331,19 @@ export default function ExerciseDetailScreen() {
         )}
       </ScrollView>
 
-      {/* Sticky Bottom Action Button (+ ADD TO WORKOUT) */}
-      <View style={styles.stickyFooter}>
+      {/* Sticky Bottom Action Buttons (Reference UI Screen 3) */}
+      <View style={[styles.stickyFooter, { flexDirection: 'row', gap: 12 }]}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Ask AI Coach about this exercise"
+          activeOpacity={0.8}
+          onPress={() => router.push('/coach')}
+          style={[styles.standaloneBtn, { flex: 1, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginTop: 0, backgroundColor: 'rgba(255, 255, 255, 0.08)', borderWidth: 1, borderColor: P.CARD_BORDER }]}
+        >
+          <Text style={{ color: P.TEXT_PRI, fontWeight: '700', fontSize: 13 }}>AI COACH</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           accessible={true}
           accessibilityRole="button"
@@ -346,9 +357,9 @@ export default function ExerciseDetailScreen() {
               router.back();
             }
           }}
-          style={[styles.primaryRoyalBtn, glowStyle(P.ACCENT, 16, 0.35)]}
+          style={[styles.primaryRoyalBtn, glowStyle(P.ACCENT, 16, 0.35), { flex: 1.6, height: 48, marginTop: 0 }]}
         >
-          <Text style={styles.primaryRoyalBtnText}>+ ADD TO WORKOUT</Text>
+          <Text style={styles.primaryRoyalBtnText}>ADD TO WORKOUT</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
