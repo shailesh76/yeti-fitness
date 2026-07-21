@@ -59,9 +59,15 @@ export const P = {
   // Dark Monolithic Surfaces (Master Reference)
   BG:             '#0B0B0F', // Main screen background
   CARD_BG:        '#12141C', // Dark Graphite card surface
+  CARD_BG_ELEVATED: '#1C222C', // Elevated card surface (modals, sheets, nested cards)
   CARD_GLASS:     'rgba(18, 20, 28, 0.75)', // Soft glass surface
   CARD_BORDER:    'rgba(255, 255, 255, 0.07)', // Ultra-subtle 1px border
   CARD_BORDER_HI: 'rgba(255, 255, 255, 0.14)',
+  DIVIDER:        'rgba(255, 255, 255, 0.06)', // Hairline separator between list rows
+
+  // AI / Coach accent (kept distinct from the primary blue CTA accent —
+  // design rule: never more than 2 accent colors visible on one screen)
+  PURPLE_AI: '#8B5CF6',
 
   // Typography Palette
   TEXT_PRI: '#FFFFFF', // High contrast white
@@ -69,11 +75,43 @@ export const P = {
   TEXT_MUT: '#64748B', // Muted slate / caption
   TEXT_SUB: '#475569', // Sub-caption / track line
 
-  // Sizing Tokens
-  RADIUS_CARD: 22,
-  RADIUS_PILL: 16,
-  RADIUS_SM:   12,
-  RADIUS_FULL: 9999,
+  // Sizing Tokens — radius is per component type, not one global value
+  RADIUS_CARD:   22, // Cards, ChartCard
+  RADIUS_BUTTON: 20, // PrimaryButton / SecondaryButton
+  RADIUS_INPUT:  18, // Text inputs, SearchBar
+  RADIUS_SHEET:  32, // BottomSheet
+  RADIUS_MODAL:  28, // Modal
+  RADIUS_PILL:   16,
+  RADIUS_SM:     12,
+  RADIUS_FULL:   9999,
+
+  // Fixed component heights referenced across screens
+  BUTTON_HEIGHT_LG: 56, // PrimaryButton (large, pill)
+
+  // 8-point spacing scale
+  SPACE_MARGIN:      24, // Screen-edge margins
+  SPACE_CARD:        20, // Card padding
+  SPACE_SECTION_GAP: 28, // Gap between major sections
+  SPACE_INSIDE_CARD: 16, // Gap between elements inside a card
+} as const;
+
+// ─── Typography Scale ─────────────────────────────────────────────────────────
+// SF Pro Display sizes/weights per the design system. Compose into a Text
+// style alongside color, e.g. { ...TYPE.screenTitle, color: P.TEXT_PRI }.
+export const TYPE = {
+  heading:     { fontSize: 32, fontWeight: '700' as const },
+  screenTitle: { fontSize: 28, fontWeight: '700' as const },
+  section:     { fontSize: 22, fontWeight: '600' as const },
+  cardTitle:   { fontSize: 18, fontWeight: '600' as const },
+  body:        { fontSize: 16, fontWeight: '400' as const },
+  caption:     { fontSize: 13, fontWeight: '500' as const },
+} as const;
+
+// ─── Glass Effect Tokens ──────────────────────────────────────────────────────
+export const GLASS = {
+  background: 'rgba(255, 255, 255, 0.04)',
+  border:     'rgba(255, 255, 255, 0.07)', // same value as P.CARD_BORDER
+  blurAmount: 20, // backdrop blur radius (BlurView intensity uses its own 0-100 scale)
 } as const;
 
 
