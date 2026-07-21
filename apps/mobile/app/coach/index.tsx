@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -205,7 +206,11 @@ export default function CoachHubScreen() {
       >
         {!isUser && (
           <View style={styles.avatarDot}>
-            <Text style={styles.avatarText}>Y</Text>
+            <Image
+              source={require('../../assets/yeti_mascot_avatar.png')}
+              style={{ width: '100%', height: '100%', borderRadius: 14 }}
+              resizeMode="cover"
+            />
           </View>
         )}
         <View style={[styles.bubble, isUser ? styles.userBubble : styles.aiBubble]}>

@@ -334,16 +334,34 @@ const DailyProgressWidget = memo(({
 });
 DailyProgressWidget.displayName = 'DailyProgressWidget';
 
-// ─── 5. Nutrition Summary Bar Card ──────────────────────────────────────────
+// ─── 5. Nutrition Summary Bar Card (Reference UI Screen 1) ──────────────────
 const NutritionSummaryCard = memo(({
-  calories,
-  targetCalories,
+  calories = 1980,
+  targetCalories = 2600,
+  protein = 152,
+  targetProtein = 170,
+  carbs = 205,
+  targetCarbs = 280,
+  fat = 62,
+  targetFat = 80,
 }: {
-  calories: number;
-  targetCalories: number;
+  calories?: number;
+  targetCalories?: number;
+  protein?: number;
+  targetProtein?: number;
+  carbs?: number;
+  targetCarbs?: number;
+  fat?: number;
+  targetFat?: number;
 }) => {
   const router = useRouter();
-  const pct = Math.min(calories / (targetCalories || 2000), 1);
+  const remaining = Math.max(0, targetCalories - calories);
+  const ringSize = 72;
+  const strokeWidth = 6;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clampedProgress = Math.min(Math.max(calories / (targetCalories || 2600), 0), 1);
+  const strokeDashoffset = circumference * (1 - clampedProgress);
 
   return (
     <View style={sharedStyles.card}>
@@ -359,15 +377,83 @@ const NutritionSummaryCard = memo(({
         </TouchableOpacity>
       </View>
 
-      <View style={[sharedStyles.rowBetween, { marginTop: 12 }]}>
-        <Text style={styles.nutriLabelText}>Calories</Text>
-        <Text style={styles.nutriValText}>
-          {calories} / {targetCalories} kcal
-        </Text>
+      {/* Consumed / Goal Ring / Remaining Header Row */}
+      <View style={[sharedStyles.rowBetween, { marginTop: 14, marginBottom: 16, alignItems: 'center' }]}>
+        <View style={{ alignItems: 'flex-start', minWidth: 70 }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', color: P.TEXT_PRI }}>{calories.toLocaleString()}</Text>
+          <Text style={{ fontSize: 12, color: P.TEXT_MUT, marginTop: 2 }}>Consumed</Text>
+        </View>
+
+        {/* Center Goal Ring */}
+        <View style={{ width: ringSize, height: ringSize, alignItems: 'center', justifyContent: 'center' }}>
+          <Svg width={ringSize} height={ringSize}>
+            <Circle
+              cx={ringSize / 2}
+              cy={ringSize / 2}
+              r={radius}
+              stroke="rgba(255, 255, 255, 0.08)"
+              strokeWidth={strokeWidth}
+              fill="none"
+            />
+            <Circle
+              cx={ringSize / 2}
+              cy={ringSize / 2}
+              r={radius}
+              stroke={P.ACCENT_BRIGHT}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${circumference} ${circumference}`}
+              strokeDashoffset={strokeDashoffset}
+              strokeLinecap="round"
+              fill="none"
+              transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+            />
+          </Svg>
+          <View style={{ position: 'absolute', alignItems: 'center' }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: P.TEXT_PRI }}>{targetCalories.toLocaleString()}</Text>
+            <Text style={{ fontSize: 9, color: P.TEXT_MUT }}>Goal</Text>
+          </View>
+        </View>
+
+        <View style={{ alignItems: 'flex-end', minWidth: 70 }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', color: P.TEXT_PRI }}>{remaining.toLocaleString()}</Text>
+          <Text style={{ fontSize: 12, color: P.TEXT_MUT, marginTop: 2 }}>Remaining</Text>
+        </View>
       </View>
 
-      <View style={styles.nutriBarTrack}>
-        <View style={[styles.nutriBarFill, { width: `${pct * 100}%` }]} />
+      {/* 3 Macro Bars Row */}
+      <View style={{ gap: 8 }}>
+        {/* Protein */}
+        <View>
+          <View style={sharedStyles.rowBetween}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Protein</Text>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{protein} / {targetProtein}g</Text>
+          </View>
+          <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
+            <View style={[styles.nutriBarFill, { width: `${Math.min((protein / targetProtein) * 100, 100)}%`, backgroundColor: P.PROTEIN }]} />
+          </View>
+        </View>
+
+        {/* Carbs */}
+        <View>
+          <View style={sharedStyles.rowBetween}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Carbs</Text>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{carbs} / {targetCarbs}g</Text>
+          </View>
+          <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
+            <View style={[styles.nutriBarFill, { width: `${Math.min((carbs / targetCarbs) * 100, 100)}%`, backgroundColor: P.WARNING }]} />
+          </View>
+        </View>
+
+        {/* Fat */}
+        <View>
+          <View style={sharedStyles.rowBetween}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Fat</Text>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{fat} / {targetFat}g</Text>
+          </View>
+          <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
+            <View style={[styles.nutriBarFill, { width: `${Math.min((fat / targetFat) * 100, 100)}%`, backgroundColor: P.CALORIES }]} />
+          </View>
+        </View>
       </View>
     </View>
   );
