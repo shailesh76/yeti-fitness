@@ -56,9 +56,9 @@ export const P = {
   AMBER_DIM:     'rgba(255, 214, 10, 0.12)',
   AMBER_BORDER:  'rgba(255, 214, 10, 0.30)',
 
-  // Dark Monolithic Surfaces (Master Reference)
-  BG:             '#0B0B0F', // Main screen background
-  CARD_BG:        '#12141C', // Dark Graphite card surface
+  // Dark Monolithic Surfaces — exact v1.0 spec values
+  BG:             '#090B10', // Main screen background
+  CARD_BG:        '#161B22', // Card surface
   CARD_BG_ELEVATED: '#1C222C', // Elevated card surface (modals, sheets, nested cards)
   CARD_GLASS:     'rgba(18, 20, 28, 0.75)', // Soft glass surface
   CARD_BORDER:    'rgba(255, 255, 255, 0.07)', // Ultra-subtle 1px border
