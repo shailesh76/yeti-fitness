@@ -289,21 +289,26 @@ export default function ExercisesScreen() {
                       <View key={ex.id} style={[sharedStyles.card, styles.exerciseCard]}>
                         <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
 
-                        <TouchableOpacity
-                          accessible={true}
-                          accessibilityRole="button"
-                          accessibilityLabel={`View ${ex.name}, ${ex.muscle_group || 'Full Body'}`}
-                          onPress={() => router.push(`/exercises/${ex.id}${builderPickSuffix}`)}
-                          style={styles.cardTrigger}
-                          activeOpacity={0.8}
-                        >
-                          <View style={{ flex: 1, paddingRight: 8 }}>
+                        {/* Plain View, not TouchableOpacity: it previously wrapped the
+                            favorite button, which on web renders accessibilityRole="button"
+                            as a real <button> - nesting one <button> inside another is
+                            invalid HTML and threw a hydration error. The navigable area
+                            and the favorite button are now independent sibling touchables. */}
+                        <View style={styles.cardTrigger}>
+                          <TouchableOpacity
+                            accessible={true}
+                            accessibilityRole="button"
+                            accessibilityLabel={`View ${ex.name}, ${ex.muscle_group || 'Full Body'}`}
+                            onPress={() => router.push(`/exercises/${ex.id}${builderPickSuffix}`)}
+                            style={{ flex: 1, paddingRight: 8 }}
+                            activeOpacity={0.8}
+                          >
                             <Text style={styles.exerciseName}>{ex.name}</Text>
                             <Text style={styles.muscleText}>
                               {ex.muscle_group || 'Full Body'}
                               {ex.equipment ? `  ·  ${displayLabel(ex.equipment)}` : ''}
                             </Text>
-                          </View>
+                          </TouchableOpacity>
                           {userId && (
                             <TouchableOpacity
                               accessible={true}
@@ -319,8 +324,8 @@ export default function ExercisesScreen() {
                               </Text>
                             </TouchableOpacity>
                           )}
-                          <Text style={styles.arrowIcon}>›</Text>
-                        </TouchableOpacity>
+                          <Text style={styles.arrowIcon} pointerEvents="none">›</Text>
+                        </View>
                       </View>
                     );
                   })}
