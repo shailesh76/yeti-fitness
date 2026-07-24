@@ -28,6 +28,7 @@ import AppShell from '../components/AppShell';
 import { database, isNativeDbAvailable } from '../database';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { useHydrationStore } from '../store/useHydrationStore';
+import { fetchDailyTelemetry } from '../services/wearableService';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 
 const { width } = Dimensions.get('window');
@@ -96,12 +97,10 @@ BiometricRing.displayName = 'BiometricRing';
 // ─── 1. Header & Greeting Bar ───────────────────────────────────────────
 const HeaderAndGreeting = memo(({
   fullName,
-  streakDays = 12,
   onPressProfile,
   onPressCoach,
 }: {
   fullName: string;
-  streakDays?: number;
   onPressProfile: () => void;
   onPressCoach: () => void;
 }) => {
@@ -111,46 +110,43 @@ const HeaderAndGreeting = memo(({
   else if (currentHour >= 17) greeting = 'Good evening';
 
   const firstName = fullName.split(' ')[0] || 'Athlete';
+  const initial = firstName.charAt(0).toUpperCase();
 
   return (
-    <View style={{ marginBottom: 20 }}>
-      {/* Top Brand & Bell Bar */}
-      <View style={styles.topBrandRow}>
-        <View style={styles.yetiBadgeContainer}>
-          <Text style={styles.yetiBadgeText}>YETI</Text>
+    <View style={[sharedStyles.rowBetween, { marginBottom: 20 }]}>
+      <TouchableOpacity
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel="Open profile"
+        activeOpacity={0.8}
+        onPress={onPressProfile}
+        style={sharedStyles.row}
+      >
+        <View style={styles.avatarCircle}>
+          <Text style={styles.avatarInitial}>{initial}</Text>
         </View>
-
-        <View style={styles.headerRightGroup}>
-          <TouchableOpacity
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Open AI Coach"
-            activeOpacity={0.7}
-            onPress={() => {
-              if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onPressCoach();
-            }}
-            style={styles.bellBtn}
-          >
-            <Ionicons name="notifications-outline" size={20} color={P.TEXT_PRI} />
-            <View style={styles.notificationDot} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Greeting & Streak Row */}
-      <View style={sharedStyles.rowBetween}>
-        <View style={{ flex: 1 }}>
+        <View style={{ marginLeft: 12 }}>
           <Text style={styles.greetingTitle}>
-            {greeting}, {firstName} 🖐
+            {greeting}, {firstName} 👋
           </Text>
+          <Text style={styles.greetingSub}>Let&apos;s crush your goals today!</Text>
         </View>
+      </TouchableOpacity>
 
-        <View style={styles.streakBadge}>
-          <Ionicons name="flame" size={16} color={P.WARNING} />
-          <Text style={styles.streakText}>STREAK {streakDays} days</Text>
-        </View>
-      </View>
+      <TouchableOpacity
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel="Open AI Coach"
+        activeOpacity={0.7}
+        onPress={() => {
+          if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onPressCoach();
+        }}
+        style={styles.bellBtn}
+      >
+        <Ionicons name="notifications-outline" size={20} color={P.TEXT_PRI} />
+        <View style={styles.notificationDot} />
+      </TouchableOpacity>
     </View>
   );
 });
@@ -274,7 +270,7 @@ const DailyProgressWidget = memo(({
   const cPct = Math.min(calories / (targetCalories || 2000), 1);
   const pPct = Math.min(protein / (targetProtein || 150), 1);
   const wPct = Math.min(waterMl / (targetWaterMl || 2500), 1);
-  const sPct = Math.min((steps || 8247) / targetSteps, 1);
+  const sPct = Math.min((steps || 0) / targetSteps, 1);
 
   return (
     <View style={sharedStyles.card}>
@@ -299,7 +295,7 @@ const DailyProgressWidget = memo(({
           color={P.CALORIES}
           iconName="flame"
           valueText={`${calories}`}
-          labelText="1,980 / 2,500"
+          labelText={`${calories.toLocaleString()} / ${(targetCalories || 2000).toLocaleString()}`}
         />
         <BiometricRing
           size={60}
@@ -308,7 +304,7 @@ const DailyProgressWidget = memo(({
           color={P.PROTEIN}
           iconName="restaurant"
           valueText={`${protein}g`}
-          labelText="152g / 170g"
+          labelText={`${protein}g / ${targetProtein || 150}g`}
         />
         <BiometricRing
           size={60}
@@ -317,7 +313,7 @@ const DailyProgressWidget = memo(({
           color={P.WATER}
           iconName="water"
           valueText={`${(waterMl / 1000).toFixed(1)}L`}
-          labelText="2.1L / 3.0L"
+          labelText={`${(waterMl / 1000).toFixed(1)}L / ${((targetWaterMl || 2500) / 1000).toFixed(1)}L`}
         />
         <BiometricRing
           size={60}
@@ -325,7 +321,7 @@ const DailyProgressWidget = memo(({
           progress={sPct}
           color={P.STEPS}
           iconName="footsteps"
-          valueText={`${steps || 8247}`}
+          valueText={`${steps || 0}`}
           labelText="8,247 / 10k"
         />
       </View>
@@ -465,47 +461,85 @@ const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previ
   const diff = score - previousScore;
   const isPositive = diff >= 0;
 
-  let readinessLabel = 'OPTIMAL RECOVERY';
+  let readinessLabel = 'Fully Ready';
+  let readinessSub = "You're primed to perform!";
   let readinessColor: string = P.STEPS;
   if (score < 60) {
-    readinessLabel = 'REST RECOMMENDED';
+    readinessLabel = 'Recovery Needed';
+    readinessSub = 'Consider an easier session today.';
     readinessColor = P.CALORIES;
   } else if (score < 80) {
-    readinessLabel = 'MODERATE READINESS';
+    readinessLabel = 'Getting There';
+    readinessSub = 'Moderate intensity recommended.';
     readinessColor = P.PROTEIN;
   }
 
+  // Small ring accent sharing the BiometricRing drawing logic at a compact size
+  const ringSize = 44;
+  const strokeWidth = 4;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clampedProgress = Math.min(Math.max(score / 100, 0), 1);
+  const strokeDashoffset = circumference * (1 - clampedProgress);
+
   return (
-    <View style={sharedStyles.cardGlow}>
-      <View style={sharedStyles.rowBetween}>
-        <Text style={sharedStyles.labelCaps}>YETI READINESS SCORE</Text>
-        <View style={[styles.badgePill, { borderColor: readinessColor + '40', backgroundColor: readinessColor + '15' }]}>
-          <Text style={[styles.badgeText, { color: readinessColor }]}>{readinessLabel}</Text>
+    <View style={[sharedStyles.cardGlow, styles.readinessCard]}>
+      <View style={styles.readinessMascotTile}>
+        <Image
+          source={require('../assets/yeti_mascot_avatar.png')}
+          style={styles.readinessMascotImg}
+          resizeMode="cover"
+        />
+      </View>
+
+      <View style={{ flex: 1, marginLeft: 14 }}>
+        <View style={sharedStyles.row}>
+          <Text style={sharedStyles.labelCaps}>YETI READINESS</Text>
+          <Ionicons name="information-circle-outline" size={13} color={P.TEXT_MUT} style={{ marginLeft: 4 }} />
+        </View>
+        <View style={[sharedStyles.row, { marginTop: 4 }]}>
+          <Text style={styles.readinessPercent}>{score}%</Text>
+          <Text style={[styles.readinessStatus, { color: readinessColor }]}>{readinessLabel}</Text>
+        </View>
+        <Text style={styles.readinessSub}>{readinessSub}</Text>
+
+        <View style={styles.deltaRow}>
+          <Ionicons
+            name={isPositive ? 'trending-up' : 'trending-down'}
+            size={13}
+            color={isPositive ? P.STEPS : P.CALORIES}
+          />
+          <Text style={[styles.deltaText, { color: isPositive ? P.STEPS : P.CALORIES }]}>
+            {isPositive ? '+' : ''}{diff} pts this week
+          </Text>
         </View>
       </View>
 
-      <View style={styles.scoreRowContainer}>
-        <View style={styles.scoreCircleBadge}>
-          <Text style={styles.scoreNumberText}>{score}</Text>
-          <Text style={styles.scoreMaxText}>/100</Text>
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 16 }}>
-          <Text style={styles.scoreDetailHeader}>Strain vs. Recovery</Text>
-          <Text style={styles.scoreDetailSub}>
-            Computed via workout completion, nutrition logging, and check-in consistency over 14 days.
-          </Text>
-
-          <View style={styles.deltaRow}>
-            <Ionicons
-              name={isPositive ? 'trending-up' : 'trending-down'}
-              size={16}
-              color={isPositive ? P.STEPS : P.CALORIES}
-            />
-            <Text style={[styles.deltaText, { color: isPositive ? P.STEPS : P.CALORIES }]}>
-              {isPositive ? '+' : ''}{diff} pts from last week
-            </Text>
-          </View>
+      <View style={{ width: ringSize, height: ringSize, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={ringSize} height={ringSize}>
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke="rgba(255, 255, 255, 0.08)"
+            strokeWidth={strokeWidth}
+            fill="none"
+          />
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke={readinessColor}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="none"
+            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+          />
+        </Svg>
+        <View style={{ position: 'absolute' }}>
+          <Ionicons name="pulse" size={18} color={readinessColor} />
         </View>
       </View>
     </View>
@@ -520,9 +554,14 @@ const QuickActionsGrid = memo(({
   onNavigate: (route: string) => void;
 }) => {
   const actions = [
+    // Reference's primary 4 (same order/labels), each wired to the screen where
+    // that existing capability actually lives.
     { label: 'Log Workout', icon: 'barbell-outline', route: '/workouts', color: P.ACCENT },
-    { label: 'Scan Food', icon: 'camera-outline', route: '/ai-food-scan', color: P.WATER },
-    { label: 'Log Nutrition', icon: 'nutrition-outline', route: '/food-diary', color: P.PROTEIN },
+    { label: 'Add Meal', icon: 'restaurant-outline', route: '/food-diary', color: P.PROTEIN },
+    { label: 'Track Weight', icon: 'scale-outline', route: '/analytics', color: P.WATER },
+    { label: 'Log Water', icon: 'water-outline', route: '/food-diary', color: P.WATER },
+    // Existing shortcuts preserved as an additional row in the same style.
+    { label: 'Scan Food', icon: 'camera-outline', route: '/ai-food-scan', color: P.ACCENT_BRIGHT },
     { label: 'Progress Check', icon: 'analytics-outline', route: '/analytics', color: P.ACCENT_BRIGHT },
   ];
 
@@ -546,7 +585,7 @@ const QuickActionsGrid = memo(({
             <View style={[styles.actionIconBg, { backgroundColor: act.color + '15', borderColor: act.color + '30' }]}>
               <Ionicons name={act.icon as any} size={22} color={act.color} />
             </View>
-            <Text style={styles.actionTileLabel}>{act.label}</Text>
+            <Text style={styles.actionTileLabel} numberOfLines={1}>{act.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -573,9 +612,16 @@ export default function HomeScreen() {
   const [targetMacros, setTargetMacros] = useState({ calories: 2500, protein: 170, carbs: 280, fat: 80 });
   const [todayWorkout, setTodayWorkout] = useState<string | null>('Push Day');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [waterMl, setWaterMl] = useState(0);
+  const [steps, setSteps] = useState(0);
+
+  const waterGoal = useHydrationStore((s) => s.waterGoal);
+  const getWaterForDate = useHydrationStore((s) => s.getWaterForDate);
+  const loadHydrationGoal = useHydrationStore((s) => s.loadGoal);
 
   useEffect(() => {
     sync();
+    loadHydrationGoal();
   }, []);
 
   const loadData = useCallback(async () => {
@@ -601,6 +647,12 @@ export default function HomeScreen() {
       if (todayMacros && todayMacros.calories > 0) {
         setConsumedMacros(todayMacros);
       }
+
+      const loggedWater = await getWaterForDate(new Date().toDateString());
+      setWaterMl(loggedWater);
+
+      const telemetry = await fetchDailyTelemetry();
+      setSteps(telemetry.steps);
 
       if (isNativeDbAvailable && database) {
         const activeSessions = (await database
@@ -658,7 +710,6 @@ export default function HomeScreen() {
           <Animated.View entering={FadeInDown.duration(400).delay(40)}>
             <HeaderAndGreeting
               fullName={athleteName}
-              streakDays={12}
               onPressProfile={() => router.push('/profile')}
               onPressCoach={() => router.push('/coach')}
             />
@@ -689,9 +740,9 @@ export default function HomeScreen() {
               targetCalories={targetMacros.calories}
               protein={consumedMacros.protein}
               targetProtein={targetMacros.protein}
-              waterMl={2100}
-              targetWaterMl={3000}
-              steps={8247}
+              waterMl={waterMl}
+              targetWaterMl={waterGoal}
+              steps={steps}
               targetSteps={10000}
             />
           </Animated.View>
@@ -723,32 +774,19 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: P.BG },
 
-  // Header & Brand Bar
-  topBrandRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  yetiBadgeContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  // Header & Greeting
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: P.RADIUS_PILL,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  yetiBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 2,
-  },
-  headerRightGroup: {
-    flexDirection: 'row',
+    borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'center',
   },
+  avatarInitial: { color: P.ACCENT, fontSize: 17, fontWeight: '900' },
+  greetingSub: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '600', marginTop: 2 },
   bellBtn: {
     width: 44,
     height: 44,
@@ -769,19 +807,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: P.ACCENT,
   },
-  greetingTitle: { color: P.TEXT_PRI, fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
-  streakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 159, 10, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 159, 10, 0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: P.RADIUS_FULL,
-  },
-  streakText: { color: P.WARNING, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  greetingTitle: { color: P.TEXT_PRI, fontSize: 19, fontWeight: '900', letterSpacing: -0.4 },
 
   // Hero Banner
   heroBannerCard: {
@@ -873,52 +899,46 @@ const styles = StyleSheet.create({
     borderRadius: 99,
   },
 
-  // Score Card
-  badgePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: P.RADIUS_FULL,
+  // Yeti Readiness Card
+  readinessCard: { flexDirection: 'row', alignItems: 'center' },
+  readinessMascotTile: {
+    width: 64,
+    height: 72,
+    borderRadius: P.RADIUS_PILL,
+    overflow: 'hidden',
     borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+    backgroundColor: P.ACCENT_DIM,
   },
-  badgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  scoreRowContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
-  scoreCircleBadge: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 4,
-    borderColor: P.ACCENT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scoreNumberText: { color: P.TEXT_PRI, fontSize: 24, fontWeight: '900' },
-  scoreMaxText: { color: P.TEXT_MUT, fontSize: 9, fontWeight: '700' },
-  scoreDetailHeader: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '700' },
-  scoreDetailSub: { color: P.TEXT_SEC, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  readinessMascotImg: { width: '100%', height: '100%' },
+  readinessPercent: { color: P.TEXT_PRI, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
+  readinessStatus: { fontSize: 13, fontWeight: '800', marginLeft: 8 },
+  readinessSub: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '600', marginTop: 2 },
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
   deltaText: { fontSize: 11, fontWeight: '800' },
 
-  // Quick Actions Grid
+  // Quick Actions Grid — icon centered above label, matching the reference's
+  // vertical tile layout (not the previous icon-left/label-right row).
   actionGridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionGridTile: {
     width: (width - 50) / 2,
-    minHeight: 56,
+    minHeight: 88,
     backgroundColor: P.CARD_BG,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
     borderRadius: P.RADIUS_CARD,
     padding: 14,
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   actionIconBg: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: P.RADIUS_SM,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginBottom: 8,
   },
-  actionTileLabel: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '700', flex: 1 },
+  actionTileLabel: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '700', textAlign: 'center' },
 });
