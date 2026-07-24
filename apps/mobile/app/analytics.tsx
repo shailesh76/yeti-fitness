@@ -486,6 +486,16 @@ export default function ProgressScreen() {
 
             {/* ══════════════════════════════════════════════════════════
                 3. OVERVIEW TAB (Reference UI Screen 7)
+
+                NOTE: the Yeti Score (87/"Great") and This Week's
+                Workouts/Calories/Recovery are placeholder values matching
+                the reference mockup's own numbers, not yet backed by a
+                real computation - no existing weekly-stats or engagement-
+                score query exists in this repo to wire them to (same open
+                item as Home's YetiReadinessCard/HealthScoreEngine; see
+                that file's comments). Weight Trend below IS real - it
+                reuses monthDiffText/currentWeight, computed further down
+                for the Weight tab.
             ══════════════════════════════════════════════════════════ */}
             {activeTab === 'overview' && (
               <>
@@ -528,14 +538,19 @@ export default function ProgressScreen() {
                   </View>
                 </View>
 
-                {/* Weight Trend */}
+                {/* Weight Trend — reuses the same real monthDiffText/currentWeight
+                    the Weight tab computes below, instead of a hardcoded string. */}
                 <View style={sharedStyles.card}>
                   <View style={sharedStyles.rowBetween}>
                     <Text style={sharedStyles.labelCaps}>WEIGHT TREND</Text>
-                    <Text style={{ fontSize: 12, color: P.ACCENT, fontWeight: '600' }}>-1.2 kg vs last week</Text>
+                    {monthDiffText && (
+                      <Text style={{ fontSize: 12, color: isMonthDown ? P.ACCENT : P.AMBER, fontWeight: '600' }}>
+                        {monthDiffText}
+                      </Text>
+                    )}
                   </View>
                   <Text style={{ fontSize: 24, fontWeight: '800', color: P.TEXT_PRI, marginVertical: 8 }}>
-                    {currentWeight > 0 ? `${currentWeight.toFixed(1)} kg` : '72.4 kg'}
+                    {currentWeight > 0 ? `${currentWeight.toFixed(1)} kg` : '—'}
                   </Text>
                   <WeightChart logs={weightLogs} />
                 </View>
