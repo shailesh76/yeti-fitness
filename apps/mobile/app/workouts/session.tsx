@@ -1,17 +1,21 @@
 /**
- * WorkoutSessionScreen
+ * WorkoutSessionScreen — Active Workout tracker
  * ─────────────────────────────────────────────────────────────────────────────
- * Production-ready active workout session tracker:
- * - One-handed gym UX aligned to Master Design Reference Screen 2
- * - Royal Blue active set row highlights (#2563EB) & Rest Timer Circular Widget
- * - Extended set controls: Warm-up vs Working set toggles, Add Set, Delete Set
- * - Interactive Rest Timer control bar with +15s / -15s / Skip / Pause
- * - Exercise Replacement & Add Exercise integration
- * - Preserves 100% of existing functionality & stores
+ * Reads the REAL active session from useSessionStore (populated by "Start
+ * Workout" on the Workouts tab). Matches the Active Workout reference layout:
+ * live metrics row, current-exercise card with set table, rest timer, RPE
+ * logger, next-exercise preview, Yeti coach tip, workout-progress list, and a
+ * Lock Screen / End Workout / Add Note action bar.
+ *
+ * Data honesty: Elapsed time, sets/reps/weight/RPE, volume, rest timer, next
+ * exercise, and progress are all real. Calories and heart-rate (BPM) have no
+ * data source in the app (no workout-calorie model; no live wearable feed) and
+ * AGENTS.md forbids fabricating calories — those tiles show "—" until a wearable
+ * feed exists. Intensity is derived from real logged RPE.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -21,724 +25,980 @@ import {
   ScrollView,
   Alert,
   Platform,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 
 import { useSessionStore, ExerciseInSession, SetLog } from '../../store/useSessionStore';
-import { useWorkoutStore } from '../../store/useWorkoutStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTimerStore } from '../../store/useTimerStore';
 import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
 import { useRepositories } from '../../hooks/useRepositories';
 import { EVENTS } from '../../constants/analyticsEvents';
-import { SkeletonLoader } from '../../components/TelemetryComponents';
+import { displayLabel } from '../../utils/exerciseDisplay';
 
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+const MASCOT = require('../../assets/yeti_mascot_avatar.png');
+const RPE_SCALE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+function fmt(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-// ─── 1. Top Navigation & Header ─────────────────────────────────────────────
-const SessionHeader = memo(({
-  title,
-  onBack,
+function rpeDescriptor(rpe: number): string {
+  if (rpe >= 10) return 'Max Effort';
+  if (rpe >= 9) return 'Very Hard';
+  if (rpe >= 7) return 'Hard';
+  if (rpe >= 5) return 'Moderate';
+  if (rpe >= 3) return 'Light';
+  return 'Very Light';
+}
+
+// ── Live metric tile ────────────────────────────────────────────────────────
+const MetricTile = memo(function MetricTile({
+  icon,
+  color,
+  value,
+  label,
 }: {
-  title: string;
-  onBack: () => void;
-}) => {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  value: string;
+  label: string;
+}) {
   return (
-    <View style={styles.headerBar}>
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-        onPress={onBack}
-        style={styles.circleBtn}
-      >
-        <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />
-      </TouchableOpacity>
-
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
-
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel="Notifications"
-        style={styles.circleBtn}
-      >
-        <Ionicons name="notifications-outline" size={20} color={P.TEXT_PRI} />
-      </TouchableOpacity>
+    <View style={styles.metricTile}>
+      <Ionicons name={icon} size={18} color={color} />
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
 });
-SessionHeader.displayName = 'SessionHeader';
 
-// ─── 2. Timer & Rest Ring Top Cards ──────────────────────────────────────────
-const TimerHeaderRow = memo(() => {
-  const elapsedSeconds = useSessionStore((s) => s.elapsedSeconds);
-  const timer = useTimerStore();
-
-  const handleToggleTimer = () => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (timer.isActive) timer.completeTimer();
-    else timer.startTimer(90);
-  };
-
-  const ringSize = 44;
-  const strokeWidth = 4;
-  const radius = (ringSize - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const progress = timer.duration > 0 ? Math.max(0, timer.timeLeft / timer.duration) : 0;
-  const strokeDashoffset = circumference * (1 - progress);
-
-  return (
-    <View style={styles.timerRowContainer}>
-      {/* Elapsed Workout Time Card */}
-      <View style={[sharedStyles.card, styles.timerCard]}>
-        <Text style={styles.timerLabel}>TIME</Text>
-        <Text style={styles.timerDigits}>{formatDuration(elapsedSeconds)}</Text>
-      </View>
-
-      {/* Rest Timer Circular Widget Card */}
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={`Rest Timer: ${timer.timeLeft} seconds remaining. Tap to toggle.`}
-        onPress={handleToggleTimer}
-        style={[sharedStyles.card, styles.restTimerCard, timer.isActive && styles.restTimerCardActive]}
-      >
-        <View style={styles.restTimerInfoCol}>
-          <Text style={[styles.timerLabel, timer.isActive && { color: P.ACCENT }]}>REST TIMER</Text>
-          <Text style={[styles.restTimerDigits, timer.isActive && { color: P.ACCENT }]}>
-            {timer.isActive
-              ? `${Math.floor(timer.timeLeft / 60)}:${String(timer.timeLeft % 60).padStart(2, '0')}`
-              : '00:48'}
-          </Text>
-        </View>
-
-        <View style={styles.restRingWrapper}>
-          <Svg width={ringSize} height={ringSize}>
-            <Circle
-              cx={ringSize / 2}
-              cy={ringSize / 2}
-              r={radius}
-              stroke="rgba(255, 255, 255, 0.08)"
-              strokeWidth={strokeWidth}
-              fill="none"
-            />
-            <Circle
-              cx={ringSize / 2}
-              cy={ringSize / 2}
-              r={radius}
-              stroke={P.ACCENT} // Royal Blue #2563EB
-              strokeWidth={strokeWidth}
-              strokeDasharray={`${circumference} ${circumference}`}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-              fill="none"
-              transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
-            />
-          </Svg>
-          <View style={styles.restRingCenter}>
-            <Ionicons name="time-outline" size={16} color={P.ACCENT} />
-          </View>
-        </View>
-      </TouchableOpacity>
-    </View>
-  );
-});
-TimerHeaderRow.displayName = 'TimerHeaderRow';
-
-// ─── 3. Set Row Component (Master Reference Royal Blue Highlight) ─────────────
-
-interface SetRowProps {
-  set: SetLog;
-  setIndex: number;
-  exerciseIndex: number;
-  isActiveRow: boolean;
-  onUpdate: (exerciseIdx: number, setIdx: number, values: Partial<SetLog>) => void;
-  onComplete: (exerciseIdx: number, setIdx: number) => void;
-  onRemoveSet: (exerciseIdx: number, setIdx: number) => void;
-}
-
+// ── Set table row ───────────────────────────────────────────────────────────
 const SetRow = memo(function SetRow({
   set,
-  setIndex,
-  exerciseIndex,
-  isActiveRow,
-  onUpdate,
-  onComplete,
-  onRemoveSet,
-}: SetRowProps) {
-  const toggleWarmup = () => {
-    if (set.isCompleted) return;
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onUpdate(exerciseIndex, setIndex, { isWarmup: !set.isWarmup });
-  };
-
-  return (
-    <View
-      style={[
-        styles.setRow,
-        isActiveRow && styles.setRowActiveHighlight,
-        set.isCompleted && !isActiveRow && styles.setRowCompleted,
-      ]}
-    >
-      {/* Set Number / Warmup Toggle */}
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={`Set ${set.setNumber}. ${set.isWarmup ? 'Warmup' : 'Working'}.`}
-        activeOpacity={0.7}
-        onPress={toggleWarmup}
-        disabled={set.isCompleted}
-        style={[
-          styles.setNumBadge,
-          isActiveRow && styles.setNumBadgeActive,
-          set.isWarmup && styles.setNumWarmup,
-        ]}
-      >
-        <Text style={[styles.setNumText, isActiveRow && { color: '#FFF' }]}>
-          {set.isWarmup ? 'W' : set.setNumber}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Weight Input */}
-      <TextInput
-        style={[styles.input, isActiveRow && styles.inputActive]}
-        value={set.weightKg > 0 ? String(set.weightKg) : ''}
-        onChangeText={(v) =>
-          onUpdate(exerciseIndex, setIndex, { weightKg: parseFloat(v) || 0 })
-        }
-        placeholder="0"
-        placeholderTextColor={isActiveRow ? 'rgba(255,255,255,0.6)' : P.TEXT_MUT}
-        keyboardType="decimal-pad"
-        returnKeyType="next"
-        editable={!set.isCompleted}
-        selectTextOnFocus
-      />
-
-      {/* Reps Input */}
-      <TextInput
-        style={[styles.input, isActiveRow && styles.inputActive]}
-        value={set.reps > 0 ? String(set.reps) : ''}
-        onChangeText={(v) =>
-          onUpdate(exerciseIndex, setIndex, { reps: parseInt(v, 10) || 0 })
-        }
-        placeholder="0"
-        placeholderTextColor={isActiveRow ? 'rgba(255,255,255,0.6)' : P.TEXT_MUT}
-        keyboardType="number-pad"
-        returnKeyType="next"
-        editable={!set.isCompleted}
-        selectTextOnFocus
-      />
-
-      {/* RPE Input */}
-      <TextInput
-        style={[styles.input, styles.inputNarrow, isActiveRow && styles.inputActive]}
-        value={set.rpe != null ? String(set.rpe) : ''}
-        onChangeText={(v) =>
-          onUpdate(exerciseIndex, setIndex, { rpe: parseFloat(v) || undefined })
-        }
-        placeholder="7"
-        placeholderTextColor={isActiveRow ? 'rgba(255,255,255,0.6)' : P.TEXT_MUT}
-        keyboardType="decimal-pad"
-        editable={!set.isCompleted}
-        selectTextOnFocus
-      />
-
-      {/* Complete Checkbox */}
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: set.isCompleted }}
-        accessibilityLabel={`Complete set ${set.setNumber}`}
-        activeOpacity={0.7}
-        style={[
-          styles.checkbox,
-          isActiveRow && styles.checkboxActiveRow,
-          set.isCompleted && styles.checkboxDone,
-        ]}
-        onPress={() => {
-          if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onComplete(exerciseIndex, setIndex);
-        }}
-      >
-        <Ionicons
-          name="checkmark"
-          size={18}
-          color={set.isCompleted || isActiveRow ? '#FFF' : P.TEXT_MUT}
-        />
-      </TouchableOpacity>
-    </View>
-  );
-});
-
-// ─── 4. Exercise Card Container ──────────────────────────────────────────────
-
-interface ExerciseCardProps {
-  ex: ExerciseInSession;
-  exIndex: number;
-  onUpdate: (exerciseIdx: number, setIdx: number, values: Partial<SetLog>) => void;
-  onComplete: (exerciseIdx: number, setIdx: number) => void;
-  onAddSet: (exerciseIdx: number) => void;
-  onRemoveSet: (exerciseIdx: number, setIdx: number) => void;
-  onReplaceExercise: (exerciseIdx: number) => void;
-}
-
-const ExerciseCard = memo(function ExerciseCard({
-  ex,
   exIndex,
+  setIndex,
+  isActive,
+  restLabel,
+  restActive,
   onUpdate,
-  onComplete,
-  onAddSet,
-  onRemoveSet,
-  onReplaceExercise,
-}: ExerciseCardProps) {
-  const router = useRouter();
-  const completedSets = ex.sets.filter((s) => s.isCompleted).length;
-
+}: {
+  set: SetLog;
+  exIndex: number;
+  setIndex: number;
+  isActive: boolean;
+  restLabel: string;
+  restActive: boolean;
+  onUpdate: (exIdx: number, setIdx: number, v: Partial<SetLog>) => void;
+}) {
   return (
-    <Animated.View entering={FadeInDown.duration(350)} style={[sharedStyles.card, styles.exerciseCard]}>
-      {/* Exercise Title Header */}
-      <View style={styles.cardHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.exerciseName}>{ex.exerciseName}</Text>
-          <Text style={styles.setCounterText}>
-            Set {completedSets + 1} of {ex.sets.length}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Exercise info & details"
-          onPress={() => {
-            if (ex.exerciseId) router.push(`/exercises/${ex.exerciseId}`);
-          }}
-          style={styles.infoCircleBtn}
-        >
-          <Ionicons name="information-circle-outline" size={20} color={P.TEXT_MUT} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Exercise Image Banner */}
-      <View style={styles.mediaBannerContainer}>
-        <Image
-          source={require('../../assets/yeti_mascot_avatar.png')}
-          style={styles.mediaBannerImg}
-          resizeMode="cover"
-        />
-        <View style={styles.mediaBannerOverlay}>
-          <Text style={styles.mediaOverlayTag}>{ex.muscleGroup || 'Chest'}</Text>
+    <View style={[styles.setRow, isActive && styles.setRowActive]}>
+      <View style={styles.colSet}>
+        <View style={[styles.setNumBadge, isActive && styles.setNumBadgeActive, set.isCompleted && styles.setNumBadgeDone]}>
+          <Text style={[styles.setNumText, (isActive || set.isCompleted) && { color: '#FFF' }]}>{set.setNumber}</Text>
         </View>
       </View>
 
+      <TextInput
+        style={[styles.cell, styles.cellInput, isActive && styles.cellInputActive]}
+        value={set.weightKg > 0 ? String(set.weightKg) : ''}
+        onChangeText={(v) => onUpdate(exIndex, setIndex, { weightKg: parseFloat(v) || 0 })}
+        placeholder="—"
+        placeholderTextColor={P.TEXT_MUT}
+        keyboardType="decimal-pad"
+        editable={!set.isCompleted}
+        selectTextOnFocus
+        accessibilityLabel={`Set ${set.setNumber} weight in kilograms`}
+      />
+      <TextInput
+        style={[styles.cell, styles.cellInput, isActive && styles.cellInputActive]}
+        value={set.reps > 0 ? String(set.reps) : ''}
+        onChangeText={(v) => onUpdate(exIndex, setIndex, { reps: parseInt(v, 10) || 0 })}
+        placeholder="—"
+        placeholderTextColor={P.TEXT_MUT}
+        keyboardType="number-pad"
+        editable={!set.isCompleted}
+        selectTextOnFocus
+        accessibilityLabel={`Set ${set.setNumber} reps`}
+      />
+      <TextInput
+        style={[styles.cellInput, styles.colRpe, isActive && styles.cellInputActive]}
+        value={set.rpe != null ? String(set.rpe) : ''}
+        onChangeText={(v) => onUpdate(exIndex, setIndex, { rpe: parseFloat(v) || undefined })}
+        placeholder="—"
+        placeholderTextColor={P.TEXT_MUT}
+        keyboardType="decimal-pad"
+        editable={!set.isCompleted}
+        selectTextOnFocus
+        accessibilityLabel={`Set ${set.setNumber} RPE`}
+      />
 
-      {/* Set Table Headers */}
-      <View style={styles.setHeaderRow}>
-        <Text style={styles.setNumHeader}>SET</Text>
-        <Text style={styles.colLabel}>KG</Text>
-        <Text style={styles.colLabel}>REPS</Text>
-        <Text style={[styles.colLabel, styles.inputNarrow]}>RPE</Text>
-        <Text style={styles.colLabel}>DONE</Text>
-      </View>
-
-      {/* Set Rows */}
-      {ex.sets.map((set, setIdx) => {
-        const isActiveRow = setIdx === completedSets;
-        return (
-          <SetRow
-            key={set.id}
-            set={set}
-            setIndex={setIdx}
-            exerciseIndex={exIndex}
-            isActiveRow={isActiveRow}
-            onUpdate={onUpdate}
-            onComplete={onComplete}
-            onRemoveSet={onRemoveSet}
-          />
-        );
-      })}
-
-      {/* Add Set Button */}
-      <TouchableOpacity
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel="Add another set"
-        onPress={() => onAddSet(exIndex)}
-        style={styles.addSetBtn}
-      >
-        <Ionicons name="add" size={16} color={P.ACCENT} />
-        <Text style={styles.addSetBtnText}>ADD SET</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-});
-
-// ─── 5. Up Next Section ─────────────────────────────────────────────────────
-const UpNextCard = memo(({ nextExerciseName = "Chest Press Machine" }: { nextExerciseName?: string }) => {
-  return (
-    <View style={{ marginBottom: 24 }}>
-      <Text style={[sharedStyles.labelCaps, { marginBottom: 10 }]}>UP NEXT</Text>
-      <View style={[sharedStyles.card, styles.upNextContainer]}>
-        <View style={styles.upNextThumb}>
-          <Image
-            source={require('../../assets/icon.png')}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-          />
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 14 }}>
-          <Text style={styles.upNextTitle}>{nextExerciseName}</Text>
-          <Text style={styles.upNextSub}>Machine · 3 Sets</Text>
-        </View>
-
-        <Ionicons name="chevron-forward" size={18} color={P.TEXT_MUT} />
+      <View style={styles.colStatus}>
+        {set.isCompleted ? (
+          <View style={styles.statusDone}>
+            <Ionicons name="checkmark" size={14} color="#FFF" />
+          </View>
+        ) : isActive && restActive ? (
+          <View style={styles.restPill}>
+            <Ionicons name="time-outline" size={11} color={P.ACCENT} />
+            <Text style={styles.restPillText}>{restLabel}</Text>
+          </View>
+        ) : (
+          <Text style={styles.restMuted}>{restLabel}</Text>
+        )}
       </View>
     </View>
   );
 });
-UpNextCard.displayName = 'UpNextCard';
 
-// ─── Main WorkoutSessionScreen Component ─────────────────────────────────────
+// ── Progress-list row ───────────────────────────────────────────────────────
+const ProgressRow = memo(function ProgressRow({
+  ex,
+  state,
+  onPress,
+}: {
+  ex: ExerciseInSession;
+  state: 'done' | 'current' | 'upcoming';
+  onPress: () => void;
+}) {
+  const doneSets = ex.sets.filter((s) => s.isCompleted).length;
+  return (
+    <TouchableOpacity
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={`${ex.exerciseName}, ${state === 'done' ? 'completed' : state === 'current' ? 'in progress' : 'upcoming'}`}
+      activeOpacity={0.8}
+      onPress={onPress}
+      style={styles.progressRow}
+    >
+      <View style={[
+        styles.progressIcon,
+        state === 'done' && styles.progressIconDone,
+        state === 'current' && styles.progressIconCurrent,
+      ]}>
+        <Ionicons
+          name={state === 'done' ? 'checkmark' : state === 'current' ? 'play' : 'lock-closed'}
+          size={14}
+          color={state === 'upcoming' ? P.TEXT_MUT : '#FFF'}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.progressName} numberOfLines={1}>{ex.exerciseName}</Text>
+        <Text style={styles.progressMeta}>{ex.sets.length} sets × {ex.targetReps} reps</Text>
+      </View>
+      <Text style={[styles.progressStatus, state === 'done' && { color: P.STEPS }]}>
+        {state === 'upcoming' ? 'Upcoming' : `${doneSets} / ${ex.sets.length} sets`}
+      </Text>
+    </TouchableOpacity>
+  );
+});
 
 export default function WorkoutSessionScreen() {
   const router = useRouter();
-  const { workoutId } = useLocalSearchParams<{ workoutId?: string }>();
-  const sessionStore = useSessionStore();
-  const { eventRepository } = useRepositories();
+  const activeSession = useSessionStore((s) => s.activeSession);
+  const elapsedSeconds = useSessionStore((s) => s.elapsedSeconds);
+  const updateSet = useSessionStore((s) => s.updateSet);
+  const completeSet = useSessionStore((s) => s.completeSet);
+  const removeSet = useSessionStore((s) => s.removeSet);
+  const setNotes = useSessionStore((s) => s.setNotes);
+  const finishSession = useSessionStore((s) => s.finishSession);
+  const abandonSession = useSessionStore((s) => s.abandonSession);
+  const resumeSession = useSessionStore((s) => s.resumeSession);
+
+  const timer = useTimerStore();
   const userId = useAuthStore((s) => s.session?.user?.id);
+  const { eventRepository, exerciseRepository } = useRepositories();
 
   const [isFinishing, setIsFinishing] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [heroUri, setHeroUri] = useState<string | undefined>(undefined);
+  const [tip, setTip] = useState<{ loading: boolean; text?: string; error?: string }>({ loading: false });
 
+  // One interval drives both the elapsed clock and the rest countdown.
   useEffect(() => {
-    if (!sessionStore.activeSession && userId) {
-      sessionStore.startSession({
-        userId,
-        sessionName: 'Push Day',
-        exercises: [
-          {
-            exerciseId: 'ex_incline_db_press',
-            exerciseName: 'Incline Dumbbell Press',
-            targetSets: 4,
-            targetReps: '8-10',
-            muscleGroup: 'Chest',
-          },
-          {
-            exerciseId: 'ex_chest_press_machine',
-            exerciseName: 'Chest Press Machine',
-            targetSets: 3,
-            targetReps: '10-12',
-            muscleGroup: 'Chest',
-          },
-        ],
+    const id = setInterval(() => {
+      useSessionStore.getState().tick();
+      useTimerStore.getState().tick();
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Restore a persisted session if we arrived without one in memory.
+  useEffect(() => {
+    if (!useSessionStore.getState().activeSession) resumeSession();
+  }, [resumeSession]);
+
+  const exercises = activeSession?.exercises ?? [];
+
+  // Current exercise = first with an incomplete set; -1 once everything's done.
+  const currentIndex = useMemo(
+    () => exercises.findIndex((ex) => ex.sets.some((s) => !s.isCompleted)),
+    [exercises]
+  );
+  const currentExercise = currentIndex >= 0 ? exercises[currentIndex] : exercises[exercises.length - 1];
+  const activeSetIdx = currentExercise ? currentExercise.sets.findIndex((s) => !s.isCompleted) : -1;
+  const nextExercise = currentIndex >= 0 ? exercises[currentIndex + 1] : undefined;
+
+  const completedExercises = useMemo(
+    () => exercises.filter((ex) => ex.sets.length > 0 && ex.sets.every((s) => s.isCompleted)).length,
+    [exercises]
+  );
+
+  // Real aggregate stats for the metrics row.
+  const { totalVolume, setsDone, avgRpe } = useMemo(() => {
+    let vol = 0;
+    let done = 0;
+    let rpeSum = 0;
+    let rpeCount = 0;
+    exercises.forEach((ex) => ex.sets.forEach((s) => {
+      if (s.isCompleted) {
+        vol += s.weightKg * s.reps;
+        done += 1;
+        if (s.rpe != null) { rpeSum += s.rpe; rpeCount += 1; }
+      }
+    }));
+    return { totalVolume: vol, setsDone: done, avgRpe: rpeCount ? rpeSum / rpeCount : null };
+  }, [exercises]);
+
+  const intensity = avgRpe != null ? `${Math.round(avgRpe * 10)}%` : '—';
+
+  // Fetch real demo media + a coach tip when the current exercise changes.
+  const currentExId = currentExercise?.exerciseId;
+  useEffect(() => {
+    if (!currentExId) { setHeroUri(undefined); return; }
+    let cancelled = false;
+    exerciseRepository.getExerciseById(currentExId).then((ex) => {
+      if (!cancelled) setHeroUri(ex?.gif_url || ex?.thumbnail_url || ex?.video_url || undefined);
+    });
+    setTip({ loading: true });
+    exerciseRepository.getGuidance(currentExId, 'form_explanation')
+      .then((text) => { if (!cancelled) setTip({ loading: false, text }); })
+      .catch((err: any) => {
+        const raw = String(err?.message ?? '');
+        const msg = raw === 'AI_PROVIDER_NOT_CONFIGURED'
+          ? "Coach tips aren't set up yet — an AI provider key is needed on the server."
+          : raw && !/non-2xx|failed to (send|fetch)|network|connection/i.test(raw)
+            ? raw
+            : "Couldn't load a coach tip right now.";
+        if (!cancelled) setTip({ loading: false, error: msg });
       });
-    }
-  }, [userId, sessionStore.activeSession]);
+    return () => { cancelled = true; };
+  }, [currentExId, exerciseRepository]);
 
-  const handlePause = () => {
+  const handleCompleteSet = useCallback(() => {
+    if (currentIndex < 0 || activeSetIdx < 0) return;
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert('Workout Paused', 'Session duration timer is paused. Tap resume when ready.');
-  };
+    completeSet(currentIndex, activeSetIdx, userId || 'guest');
+    // Kick off the rest timer using the set's target rest (default 90s).
+    timer.startTimer(currentExercise?.restSeconds || 90);
+  }, [currentIndex, activeSetIdx, completeSet, userId, currentExercise, timer]);
 
-  const handleEndWorkout = () => {
+  const handleSkipSet = useCallback(() => {
+    if (currentIndex < 0 || activeSetIdx < 0 || !currentExercise) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (currentExercise.sets.length > 1) removeSet(currentIndex, activeSetIdx);
+    else completeSet(currentIndex, activeSetIdx, userId || 'guest');
+  }, [currentIndex, activeSetIdx, currentExercise, removeSet, completeSet, userId]);
+
+  const handleSetRpe = useCallback((rpe: number) => {
+    if (currentIndex < 0 || activeSetIdx < 0) return;
+    updateSet(currentIndex, activeSetIdx, { rpe });
+  }, [currentIndex, activeSetIdx, updateSet]);
+
+  const handleEndWorkout = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      'Finish Workout',
-      'Are you sure you want to end and save this workout session?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'End Workout',
-          style: 'destructive',
-          onPress: async () => {
-            setIsFinishing(true);
-            try {
-              if (userId) {
-                await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
-              }
-              await sessionStore.finishSession();
-              router.replace('/workouts');
-            } catch (e) {
-              Alert.alert('Save Error', 'Failed to save workout session.');
-            } finally {
-              setIsFinishing(false);
-            }
-          },
+    Alert.alert('End Workout', 'Save and finish this workout session?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'End Workout',
+        style: 'destructive',
+        onPress: async () => {
+          setIsFinishing(true);
+          try {
+            if (userId) await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
+            await finishSession();
+            router.replace('/workouts');
+          } catch {
+            Alert.alert('Save Error', 'Failed to save workout session.');
+          } finally {
+            setIsFinishing(false);
+          }
         },
-      ]
-    );
-  };
+      },
+    ]);
+  }, [userId, eventRepository, finishSession, router]);
 
-  const activeSession = sessionStore.activeSession;
-  if (!activeSession || activeSession.exercises.length === 0) {
+  const handleMenu = useCallback(() => {
+    Alert.alert(activeSession?.name || 'Workout', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard Workout',
+        style: 'destructive',
+        onPress: () => { abandonSession(); router.replace('/workouts'); },
+      },
+    ]);
+  }, [activeSession?.name, abandonSession, router]);
+
+  const saveNote = useCallback(() => {
+    setNotes(noteDraft.trim());
+    setNotesOpen(false);
+  }, [noteDraft, setNotes]);
+
+  // ── No active session ─────────────────────────────────────────────────────
+  if (!activeSession) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <View style={{ padding: 20 }}>
-          <SkeletonLoader rows={4} height={90} />
+        <View style={styles.emptyState}>
+          <Ionicons name="barbell-outline" size={44} color={P.TEXT_MUT} />
+          <Text style={styles.emptyTitle}>No active workout</Text>
+          <Text style={styles.emptySub}>Start one from the Workouts tab to begin tracking.</Text>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Go to Workouts"
+            onPress={() => router.replace('/workouts')}
+            style={styles.emptyBtn}
+          >
+            <Text style={styles.emptyBtnText}>Go to Workouts</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  const currentExercise = activeSession.exercises[0];
-  const nextExercise = activeSession.exercises[1]?.exerciseName || 'Chest Press Machine';
+  const totalExercises = exercises.length;
+  const progressPct = totalExercises > 0 ? completedExercises / totalExercises : 0;
+  const restLeft = timer.timeLeft;
+  const restRingPct = timer.duration > 0 ? Math.max(0, restLeft / timer.duration) : 0;
+
+  // Rest ring geometry
+  const ringSize = 72;
+  const ringStroke = 6;
+  const ringR = (ringSize - ringStroke) / 2;
+  const ringC = 2 * Math.PI * ringR;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <SessionHeader
-        title={activeSession.name || 'Push Day'}
-        onBack={() => router.back()}
-      />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          onPress={() => router.back()}
+          style={styles.circleBtn}
+        >
+          <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />
+        </TouchableOpacity>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={styles.headerTitle} numberOfLines={1}>{activeSession.name}</Text>
+          <Text style={styles.headerSub}>Workout in Progress</Text>
+        </View>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Workout options"
+          onPress={handleMenu}
+          style={styles.circleBtn}
+        >
+          <Ionicons name="ellipsis-vertical" size={18} color={P.TEXT_PRI} />
+        </TouchableOpacity>
+      </View>
 
-      <ScrollView contentContainerStyle={sharedStyles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* 1. Timer & Rest Cards Row */}
-        <Animated.View entering={FadeInDown.duration(400).delay(40)}>
-          <TimerHeaderRow />
-        </Animated.View>
-
-        {/* 2. Active Exercise Card */}
-        {currentExercise && (
-          <ExerciseCard
-            ex={currentExercise}
-            exIndex={0}
-            onUpdate={sessionStore.updateSet}
-            onComplete={(exIdx, setIdx) => sessionStore.completeSet(exIdx, setIdx, userId || 'guest')}
-            onAddSet={sessionStore.addSet}
-            onRemoveSet={sessionStore.removeSet}
-            onReplaceExercise={() => {}}
-          />
-        )}
-
-
-        {/* 3. Action Buttons Row (Pause & End Workout) */}
-        <View style={styles.actionDockRow}>
-          <TouchableOpacity
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="Pause workout"
-            activeOpacity={0.8}
-            onPress={handlePause}
-            style={styles.pauseBtn}
-          >
-            <Text style={styles.pauseBtnText}>PAUSE</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel="End workout"
-            activeOpacity={0.85}
-            onPress={handleEndWorkout}
-            disabled={isFinishing}
-            style={[styles.endWorkoutBtn, glowStyle(P.DESTRUCTIVE, 14, 0.4)]}
-          >
-            <Text style={styles.endWorkoutBtnText}>END WORKOUT</Text>
-          </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Live metrics row */}
+        <View style={styles.metricsRow}>
+          <MetricTile icon="stopwatch-outline" color={P.STEPS} value={fmt(elapsedSeconds)} label="ELAPSED" />
+          <MetricTile icon="flame-outline" color={P.CALORIES} value="—" label="CALORIES" />
+          <MetricTile icon="heart-outline" color={P.CALORIES} value="—" label="BPM" />
+          <MetricTile icon="pulse-outline" color={P.ACCENT} value={intensity} label="INTENSITY" />
         </View>
 
-        {/* 4. Up Next Section */}
-        <UpNextCard nextExerciseName={nextExercise} />
+        {totalExercises === 0 ? (
+          <View style={[sharedStyles.card, { alignItems: 'center', paddingVertical: 28 }]}>
+            <Ionicons name="add-circle-outline" size={32} color={P.TEXT_MUT} style={{ marginBottom: 10 }} />
+            <Text style={styles.emptyTitle}>No exercises yet</Text>
+            <Text style={styles.emptySub}>Add exercises from the library to start logging sets.</Text>
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Browse exercise library"
+              onPress={() => router.push('/exercises')}
+              style={styles.emptyBtn}
+            >
+              <Text style={styles.emptyBtnText}>Browse Library</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Current exercise card */}
+            {currentExercise && (
+              <Animated.View entering={FadeInDown.duration(350)} style={[sharedStyles.card, styles.currentCard]}>
+                <View style={styles.currentHeaderRow}>
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={styles.currentLabel}>CURRENT EXERCISE</Text>
+                    <Text style={styles.currentName} numberOfLines={2}>{currentExercise.exerciseName}</Text>
+                    <View style={styles.currentMetaRow}>
+                      <Ionicons name="body-outline" size={13} color={P.ACCENT} />
+                      <Text style={styles.currentMeta}>
+                        {currentExercise.muscleGroup ? displayLabel(currentExercise.muscleGroup) : 'Full Body'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.currentThumb}>
+                    <Image
+                      source={heroUri ? { uri: heroUri } : MASCOT}
+                      style={{ width: '100%', height: '100%' }}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                    <View style={styles.currentThumbBadge}>
+                      <Text style={styles.currentThumbBadgeText}>
+                        {Math.min(currentIndex >= 0 ? currentIndex + 1 : totalExercises, totalExercises)} / {totalExercises}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Set table */}
+                <View style={styles.tableHead}>
+                  <Text style={[styles.headCell, styles.colSet]}>SET</Text>
+                  <Text style={[styles.headCell, styles.cell]}>KG</Text>
+                  <Text style={[styles.headCell, styles.cell]}>REPS</Text>
+                  <Text style={[styles.headCell, styles.colRpe]}>RPE</Text>
+                  <Text style={[styles.headCell, styles.colStatus]}>REST</Text>
+                </View>
+                {currentExercise.sets.map((set, i) => {
+                  const isActive = i === activeSetIdx;
+                  const restSecs = set.restSeconds || currentExercise.restSeconds || 0;
+                  const restLabel = isActive && timer.isActive
+                    ? fmt(restLeft)
+                    : restSecs > 0 ? fmt(restSecs) : '—';
+                  return (
+                    <SetRow
+                      key={set.id}
+                      set={set}
+                      exIndex={currentIndex >= 0 ? currentIndex : exercises.length - 1}
+                      setIndex={i}
+                      isActive={isActive}
+                      restLabel={restLabel}
+                      restActive={timer.isActive}
+                      onUpdate={updateSet}
+                    />
+                  );
+                })}
+
+                {/* Complete / Skip */}
+                {activeSetIdx >= 0 ? (
+                  <View style={styles.setActionRow}>
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Complete set"
+                      activeOpacity={0.85}
+                      onPress={handleCompleteSet}
+                      style={[styles.completeBtn, glowStyle(P.ACCENT, 12, 0.3)]}
+                    >
+                      <Ionicons name="checkmark-circle" size={16} color="#FFF" />
+                      <Text style={styles.completeBtnText}>Complete Set</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Skip set"
+                      activeOpacity={0.85}
+                      onPress={handleSkipSet}
+                      style={styles.skipBtn}
+                    >
+                      <Text style={styles.skipBtnText}>Skip Set</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.exerciseDoneRow}>
+                    <Ionicons name="checkmark-done" size={16} color={P.STEPS} />
+                    <Text style={styles.exerciseDoneText}>All sets complete</Text>
+                  </View>
+                )}
+              </Animated.View>
+            )}
+
+            {/* Rest timer + RPE logger */}
+            <View style={styles.dualRow}>
+              <View style={[sharedStyles.card, styles.restCard]}>
+                <Text style={styles.blockLabel}>REST TIMER</Text>
+                <View style={styles.restRingWrap}>
+                  <Svg width={ringSize} height={ringSize}>
+                    <Circle cx={ringSize / 2} cy={ringSize / 2} r={ringR} stroke="rgba(255,255,255,0.08)" strokeWidth={ringStroke} fill="none" />
+                    <Circle
+                      cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+                      stroke={P.ACCENT} strokeWidth={ringStroke}
+                      strokeDasharray={`${ringC} ${ringC}`}
+                      strokeDashoffset={ringC * (1 - restRingPct)}
+                      strokeLinecap="round" fill="none"
+                      transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                    />
+                  </Svg>
+                  <View style={styles.restRingCenter}>
+                    <Text style={styles.restDigits}>{fmt(timer.isActive || restLeft > 0 ? restLeft : 0)}</Text>
+                  </View>
+                </View>
+                <View style={styles.restControls}>
+                  <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={timer.isActive ? 'Pause rest timer' : 'Resume rest timer'}
+                    onPress={() => (timer.isActive ? timer.pauseTimer() : timer.resumeTimer())}
+                    style={styles.restCtrlBtn}
+                  >
+                    <Ionicons name={timer.isActive ? 'pause' : 'play'} size={16} color={P.ACCENT} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Skip rest"
+                    onPress={() => timer.completeTimer()}
+                    style={styles.restCtrlBtn}
+                  >
+                    <Ionicons name="play-skip-forward" size={16} color={P.ACCENT} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={[sharedStyles.card, styles.rpeCard]}>
+                <Text style={styles.blockLabel}>LOG RPE</Text>
+                <Text style={styles.rpeHint}>
+                  {activeSetIdx >= 0 && currentExercise?.sets[activeSetIdx]?.rpe != null
+                    ? rpeDescriptor(currentExercise.sets[activeSetIdx].rpe as number)
+                    : 'How hard was that set?'}
+                </Text>
+                <View style={styles.rpeGrid}>
+                  {RPE_SCALE.map((n) => {
+                    const selected = activeSetIdx >= 0 && currentExercise?.sets[activeSetIdx]?.rpe === n;
+                    return (
+                      <TouchableOpacity
+                        key={n}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={`Rate perceived exertion ${n}`}
+                        disabled={activeSetIdx < 0}
+                        onPress={() => handleSetRpe(n)}
+                        style={[styles.rpeChip, selected && styles.rpeChipActive, activeSetIdx < 0 && { opacity: 0.4 }]}
+                      >
+                        <Text style={[styles.rpeChipText, selected && { color: '#FFF' }]}>{n}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
+
+            {/* Next exercise */}
+            {nextExercise && (
+              <View style={styles.section}>
+                <Text style={sharedStyles.labelCaps}>NEXT EXERCISE</Text>
+                <View style={[sharedStyles.card, styles.nextCard]}>
+                  <View style={styles.nextThumb}>
+                    <Ionicons name="barbell-outline" size={20} color={P.ACCENT} />
+                  </View>
+                  <View style={{ flex: 1, marginHorizontal: 12 }}>
+                    <Text style={styles.nextName} numberOfLines={1}>{nextExercise.exerciseName}</Text>
+                    <Text style={styles.nextMeta}>{nextExercise.sets.length} sets · {nextExercise.targetReps} reps</Text>
+                  </View>
+                  <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Preview ${nextExercise.exerciseName}`}
+                    onPress={() => nextExercise.exerciseId && router.push(`/exercises/${nextExercise.exerciseId}`)}
+                    style={styles.previewBtn}
+                  >
+                    <Ionicons name="eye-outline" size={14} color={P.ACCENT} />
+                    <Text style={styles.previewBtnText}>Preview</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Yeti coach tip (real AI guidance) */}
+            <View style={[sharedStyles.card, styles.tipCard]}>
+              <Image source={MASCOT} style={styles.tipMascot} contentFit="cover" />
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <Text style={styles.tipLabel}>YETI TIP</Text>
+                {tip.loading ? (
+                  <Text style={styles.tipTextMuted}>Loading a coaching tip…</Text>
+                ) : tip.error ? (
+                  <Text style={styles.tipTextMuted}>{tip.error}</Text>
+                ) : (
+                  <Text style={styles.tipText}>{tip.text}</Text>
+                )}
+              </View>
+            </View>
+
+            {/* Workout progress */}
+            <View style={styles.section}>
+              <View style={[sharedStyles.rowBetween, { marginBottom: 10 }]}>
+                <Text style={sharedStyles.labelCaps}>WORKOUT PROGRESS</Text>
+                <Text style={styles.progressCount}>{completedExercises} of {totalExercises} done</Text>
+              </View>
+              <View style={styles.progressBarTrack}>
+                <View style={[styles.progressBarFill, { width: `${progressPct * 100}%` }]} />
+              </View>
+              <View style={styles.metaSummaryRow}>
+                <Text style={styles.metaSummaryText}>{setsDone} sets completed</Text>
+                <Text style={styles.metaSummaryText}>{totalVolume.toLocaleString()} kg volume</Text>
+              </View>
+              <View style={{ marginTop: 8 }}>
+                {exercises.map((ex, i) => {
+                  const state: 'done' | 'current' | 'upcoming' =
+                    ex.sets.length > 0 && ex.sets.every((s) => s.isCompleted)
+                      ? 'done'
+                      : i === currentIndex
+                        ? 'current'
+                        : 'upcoming';
+                  return (
+                    <ProgressRow
+                      key={`${ex.exerciseId}-${i}`}
+                      ex={ex}
+                      state={state}
+                      onPress={() => ex.exerciseId && router.push(`/exercises/${ex.exerciseId}`)}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Notes (shown when opened, or a summary once set) */}
+            {(notesOpen || activeSession.notes) && (
+              <View style={[sharedStyles.card, styles.notesCard]}>
+                <Text style={sharedStyles.labelCaps}>NOTES</Text>
+                {notesOpen ? (
+                  <>
+                    <TextInput
+                      style={styles.notesInput}
+                      value={noteDraft}
+                      onChangeText={setNoteDraft}
+                      placeholder="How did this workout feel?"
+                      placeholderTextColor={P.TEXT_MUT}
+                      multiline
+                      accessibilityLabel="Workout notes"
+                    />
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Save note"
+                      onPress={saveNote}
+                      style={styles.notesSaveBtn}
+                    >
+                      <Text style={styles.notesSaveText}>Save Note</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Text style={styles.notesText}>{activeSession.notes}</Text>
+                )}
+              </View>
+            )}
+          </>
+        )}
       </ScrollView>
+
+      {/* Bottom action bar */}
+      <View style={styles.actionBar}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Lock screen"
+          onPress={() => setIsLocked(true)}
+          style={styles.barBtn}
+        >
+          <Ionicons name="lock-closed-outline" size={16} color={P.TEXT_PRI} />
+          <Text style={styles.barBtnText}>Lock</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="End workout"
+          disabled={isFinishing}
+          onPress={handleEndWorkout}
+          style={[styles.barBtnPrimary, glowStyle(P.DESTRUCTIVE, 12, 0.35)]}
+        >
+          <Ionicons name="stop-circle-outline" size={16} color="#FFF" />
+          <Text style={styles.barBtnPrimaryText}>End Workout</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Add note"
+          onPress={() => { setNoteDraft(activeSession.notes || ''); setNotesOpen(true); }}
+          style={styles.barBtn}
+        >
+          <Ionicons name="create-outline" size={16} color={P.TEXT_PRI} />
+          <Text style={styles.barBtnText}>Note</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Lock overlay — prevents accidental taps mid-set; tap the button to exit */}
+      {isLocked && (
+        <View style={styles.lockOverlay}>
+          <Ionicons name="lock-closed" size={40} color={P.ACCENT} />
+          <Text style={styles.lockTitle}>Screen Locked</Text>
+          <Text style={styles.lockSub}>{fmt(elapsedSeconds)} elapsed</Text>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Unlock screen"
+            onPress={() => setIsLocked(false)}
+            style={styles.unlockBtn}
+          >
+            <Ionicons name="lock-open-outline" size={16} color="#FFF" />
+            <Text style={styles.unlockBtnText}>Unlock</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
-// ─── Component Styles ─────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: P.BG },
 
-  // Header Bar
-  headerBar: {
+  // Empty state
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  emptyTitle: { color: P.TEXT_PRI, fontSize: 18, fontWeight: '900', marginTop: 8 },
+  emptySub: { color: P.TEXT_MUT, fontSize: 13, textAlign: 'center', marginTop: 2 },
+  emptyBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 12, borderRadius: P.RADIUS_PILL, backgroundColor: P.ACCENT },
+  emptyBtnText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
+
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: P.CARD_BORDER,
   },
-  headerTitle: { color: P.TEXT_PRI, fontSize: 18, fontWeight: '900', letterSpacing: -0.4 },
+  headerTitle: { color: P.TEXT_PRI, fontSize: 17, fontWeight: '900', letterSpacing: -0.3 },
+  headerSub: { color: P.ACCENT, fontSize: 11, fontWeight: '700', marginTop: 1 },
   circleBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: P.CARD_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: P.CARD_BORDER,
+    alignItems: 'center', justifyContent: 'center',
   },
 
-  // Timer Row
-  timerRowContainer: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  timerCard: { flex: 1, padding: 16, marginBottom: 0, justifyContent: 'center' },
-  timerLabel: { color: P.TEXT_MUT, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  timerDigits: { color: P.TEXT_PRI, fontSize: 24, fontWeight: '900', marginTop: 4, letterSpacing: -0.5 },
-  restTimerCard: {
-    flex: 1,
-    padding: 14,
-    marginBottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  restTimerCardActive: { borderColor: P.ACCENT_BORDER, backgroundColor: P.ACCENT_DIM },
-  restTimerInfoCol: { flex: 1 },
-  restTimerDigits: { color: P.TEXT_PRI, fontSize: 22, fontWeight: '900', marginTop: 2 },
-  restRingWrapper: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  restRingCenter: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 110 },
 
-  // Exercise Card
-  exerciseCard: { padding: 20, marginBottom: 16 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  exerciseName: { color: P.TEXT_PRI, fontSize: 20, fontWeight: '900', letterSpacing: -0.4 },
-  setCounterText: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '700', marginTop: 2 },
-  infoCircleBtn: { padding: 4 },
-  mediaBannerContainer: {
-    height: 140,
-    borderRadius: P.RADIUS_SM,
-    overflow: 'hidden',
-    marginBottom: 16,
-    position: 'relative',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-  mediaBannerImg: { width: '100%', height: '100%' },
-  mediaBannerOverlay: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: P.RADIUS_FULL,
-  },
-  mediaOverlayTag: { color: '#FFF', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-
-  // Set Table
-  setHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-    marginBottom: 8,
-  },
-  setNumHeader: { width: 36, color: P.TEXT_MUT, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  colLabel: { flex: 1, color: P.TEXT_MUT, fontSize: 10, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5 },
-
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: P.RADIUS_SM,
-    marginBottom: 6,
-  },
-  setRowActiveHighlight: {
-    backgroundColor: P.ACCENT, // Royal Blue #2563EB active set row!
-  },
-  setRowCompleted: { opacity: 0.6 },
-  setNumBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  setNumBadgeActive: { backgroundColor: 'rgba(255, 255, 255, 0.2)' },
-  setNumWarmup: { backgroundColor: P.AMBER_DIM },
-  setNumText: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800' },
-  input: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    color: P.TEXT_PRI,
-    fontSize: 14,
-    fontWeight: '800',
-    textAlign: 'center',
-    height: 38,
-    borderRadius: 8,
-    marginHorizontal: 4,
-  },
-  inputActive: { backgroundColor: 'rgba(255, 255, 255, 0.2)', color: '#FFFFFF' },
-  inputNarrow: { width: 44, flex: 0 },
-  checkbox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 4,
-  },
-  checkboxActiveRow: { backgroundColor: 'rgba(255, 255, 255, 0.2)' },
-  checkboxDone: { backgroundColor: P.SUCCESS },
-
-  addSetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: P.ACCENT_BORDER,
-    borderRadius: P.RADIUS_SM,
-    backgroundColor: P.ACCENT_DIM,
-  },
-  addSetBtnText: { color: P.ACCENT, fontSize: 11, fontWeight: '800', marginLeft: 4, letterSpacing: 0.8 },
-
-  // Action Buttons Row
-  actionDockRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  pauseBtn: {
+  // Metrics row
+  metricsRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  metricTile: {
     flex: 1,
     backgroundColor: P.CARD_BG,
-    borderWidth: 1,
-    borderColor: P.CARD_BORDER,
-    minHeight: 48,
-    borderRadius: P.RADIUS_PILL,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1, borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_SM,
+    paddingVertical: 12, alignItems: 'center', gap: 4,
   },
-  pauseBtnText: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
-  endWorkoutBtn: {
-    flex: 1,
-    backgroundColor: P.DESTRUCTIVE, // Vibrant Red #FF453A
-    minHeight: 48,
-    borderRadius: P.RADIUS_PILL,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  endWorkoutBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', letterSpacing: 0.8 },
+  metricValue: { color: P.TEXT_PRI, fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
+  metricLabel: { color: P.TEXT_MUT, fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
 
-  // Up Next Card
-  upNextContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    marginBottom: 0,
+  // Current exercise card
+  currentCard: { padding: 16, marginBottom: 16 },
+  currentHeaderRow: { flexDirection: 'row', marginBottom: 14 },
+  currentLabel: { color: P.ACCENT, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  currentName: { color: P.TEXT_PRI, fontSize: 20, fontWeight: '900', letterSpacing: -0.4, marginTop: 4 },
+  currentMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  currentMeta: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '700' },
+  currentThumb: {
+    width: 96, height: 80, borderRadius: P.RADIUS_SM, overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.04)', position: 'relative',
   },
-  upNextThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.03)',
+  currentThumbBadge: {
+    position: 'absolute', top: 6, right: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: P.RADIUS_FULL,
+    paddingHorizontal: 8, paddingVertical: 2,
   },
-  upNextTitle: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
-  upNextSub: { color: P.TEXT_MUT, fontSize: 11, marginTop: 2, fontWeight: '600' },
+  currentThumbBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
+
+  // Set table
+  tableHead: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', marginBottom: 4,
+  },
+  headCell: { color: P.TEXT_MUT, fontSize: 10, fontWeight: '800', letterSpacing: 0.3, textAlign: 'center' },
+  colSet: { width: 28, alignItems: 'center' },
+  colRpe: { width: 46, textAlign: 'center' },
+  colStatus: { width: 50, alignItems: 'center', justifyContent: 'center' },
+  cell: { flex: 1, textAlign: 'center' },
+  setRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 5, paddingHorizontal: 2, borderRadius: P.RADIUS_SM, marginVertical: 2,
+  },
+  setRowActive: { backgroundColor: 'rgba(37,99,235,0.12)' },
+  setNumBadge: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center',
+  },
+  setNumBadgeActive: { backgroundColor: P.ACCENT },
+  setNumBadgeDone: { backgroundColor: P.STEPS },
+  setNumText: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800' },
+  cellInput: {
+    marginHorizontal: 2, height: 40, borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)', color: P.TEXT_PRI,
+    fontSize: 13, fontWeight: '800', textAlign: 'center',
+    borderWidth: 1, borderColor: 'transparent',
+  },
+  cellInputActive: { borderColor: P.ACCENT_BORDER, backgroundColor: 'rgba(37,99,235,0.14)' },
+  statusDone: { width: 26, height: 26, borderRadius: 13, backgroundColor: P.STEPS, alignItems: 'center', justifyContent: 'center' },
+  restPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: P.ACCENT_DIM, borderRadius: P.RADIUS_FULL, paddingHorizontal: 8, paddingVertical: 4,
+  },
+  restPillText: { color: P.ACCENT, fontSize: 11, fontWeight: '800' },
+  restMuted: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '700' },
+
+  setActionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  completeBtn: {
+    flex: 1.6, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: P.ACCENT, borderRadius: P.RADIUS_PILL,
+  },
+  completeBtnText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
+  skipBtn: {
+    flex: 1, height: 46, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: P.RADIUS_PILL,
+  },
+  skipBtnText: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
+  exerciseDoneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10 },
+  exerciseDoneText: { color: P.STEPS, fontSize: 13, fontWeight: '800' },
+
+  // Rest + RPE dual row
+  dualRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  blockLabel: { color: P.TEXT_MUT, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 10 },
+  restCard: { flex: 1, padding: 14, marginBottom: 0, alignItems: 'center' },
+  restRingWrap: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
+  restRingCenter: { position: 'absolute', alignItems: 'center' },
+  restDigits: { color: P.TEXT_PRI, fontSize: 16, fontWeight: '900' },
+  restControls: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  restCtrlBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  rpeCard: { flex: 1.2, padding: 14, marginBottom: 0 },
+  rpeHint: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  rpeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  rpeChip: {
+    width: 30, height: 30, borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: P.CARD_BORDER,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  rpeChipActive: { backgroundColor: P.ACCENT, borderColor: P.ACCENT },
+  rpeChipText: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '800' },
+
+  // Sections
+  section: { marginBottom: 16 },
+
+  // Next exercise
+  nextCard: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 0 },
+  nextThumb: {
+    width: 44, height: 44, borderRadius: P.RADIUS_SM,
+    backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  nextName: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
+  nextMeta: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  previewBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: P.ACCENT_DIM, borderRadius: P.RADIUS_FULL, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  previewBtnText: { color: P.ACCENT, fontSize: 12, fontWeight: '800' },
+
+  // Yeti tip
+  tipCard: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: 14, marginBottom: 16,
+    backgroundColor: P.ACCENT_DIM, borderColor: P.ACCENT_BORDER,
+  },
+  tipMascot: { width: 48, height: 48, borderRadius: 24 },
+  tipLabel: { color: P.ACCENT, fontSize: 11, fontWeight: '900', letterSpacing: 0.5, marginBottom: 4 },
+  tipText: { color: P.TEXT_SEC, fontSize: 13, fontWeight: '600', lineHeight: 19 },
+  tipTextMuted: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '600', fontStyle: 'italic' },
+
+  // Workout progress
+  progressCount: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '700' },
+  progressBarTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 99, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: P.ACCENT, borderRadius: 99 },
+  metaSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  metaSummaryText: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '700' },
+  progressRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_SM, padding: 12, marginTop: 8,
+  },
+  progressIcon: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center',
+  },
+  progressIconDone: { backgroundColor: P.STEPS },
+  progressIconCurrent: { backgroundColor: P.ACCENT },
+  progressName: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
+  progressMeta: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  progressStatus: { color: P.TEXT_SEC, fontSize: 11, fontWeight: '800' },
+
+  // Notes
+  notesCard: { padding: 16, marginBottom: 16 },
+  notesInput: {
+    marginTop: 10, minHeight: 70, borderRadius: P.RADIUS_SM,
+    backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: P.CARD_BORDER,
+    padding: 12, color: P.TEXT_PRI, fontSize: 14, textAlignVertical: 'top',
+  },
+  notesText: { color: P.TEXT_SEC, fontSize: 14, fontWeight: '500', lineHeight: 20, marginTop: 8 },
+  notesSaveBtn: { alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: P.RADIUS_FULL, backgroundColor: P.ACCENT_DIM, borderWidth: 1, borderColor: P.ACCENT_BORDER },
+  notesSaveText: { color: P.ACCENT, fontSize: 12, fontWeight: '800' },
+
+  // Bottom action bar
+  actionBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+    backgroundColor: P.BG, borderTopWidth: 1, borderTopColor: P.CARD_BORDER,
+  },
+  barBtn: {
+    flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER, borderRadius: P.RADIUS_PILL,
+  },
+  barBtnText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '800' },
+  barBtnPrimary: {
+    flex: 1.4, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: P.DESTRUCTIVE, borderRadius: P.RADIUS_PILL,
+  },
+  barBtnPrimaryText: { color: '#FFF', fontSize: 13, fontWeight: '900' },
+
+  // Lock overlay
+  lockOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(9,11,16,0.96)',
+    alignItems: 'center', justifyContent: 'center', gap: 8, zIndex: 50,
+  },
+  lockTitle: { color: P.TEXT_PRI, fontSize: 20, fontWeight: '900', marginTop: 10 },
+  lockSub: { color: P.TEXT_MUT, fontSize: 13, fontWeight: '700' },
+  unlockBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 20,
+    paddingHorizontal: 22, paddingVertical: 13, borderRadius: P.RADIUS_PILL, backgroundColor: P.ACCENT,
+  },
+  unlockBtnText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
 });

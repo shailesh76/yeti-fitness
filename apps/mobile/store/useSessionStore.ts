@@ -42,6 +42,7 @@ export interface ActiveSession {
   assignmentId?: string;
   name: string;
   startedAt: number;
+  notes?: string;
   exercises: ExerciseInSession[];
 }
 
@@ -62,6 +63,9 @@ interface SessionState {
 
   /** Resume an in-progress session from AsyncStorage (e.g. app backgrounded) */
   resumeSession: () => Promise<void>;
+
+  /** Update the session-level notes (saved with the workout on finish) */
+  setNotes: (notes: string) => void;
 
   /** Update a set's values while the athlete is entering data */
   updateSet: (exerciseIdx: number, setIdx: number, values: Partial<SetLog>) => void;
@@ -170,12 +174,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  setNotes: (notes) => {
+    set((state) => {
+      if (!state.activeSession) return state;
+      const session = { ...state.activeSession, notes };
+      AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
+      return { activeSession: session };
+    });
+  },
+
   updateSet: (exerciseIdx, setIdx, values) => {
     set((state) => {
       if (!state.activeSession) return state;
       const exercises = [...state.activeSession.exercises];
       const sets = [...exercises[exerciseIdx].sets];
       sets[setIdx] = { ...sets[setIdx], ...values };
+      // Write the updated sets array back onto its exercise — without this the
+      // new array is orphaned and the change (weight/reps/RPE/completion) is lost.
+      exercises[exerciseIdx] = { ...exercises[exerciseIdx], sets };
       const session = { ...state.activeSession, exercises };
       AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session)).catch(() => {});
       return { activeSession: session };
@@ -335,7 +351,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           session.localId,
           durationSeconds,
           totalVolume,
-          '', // notes
+          session.notes || '',
           suggestionText
         );
       } catch (e) {

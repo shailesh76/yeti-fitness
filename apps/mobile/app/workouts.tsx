@@ -13,6 +13,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useWorkoutStore } from '../store/useWorkoutStore';
 import { useLogStore } from '../store/useLogStore';
+import { useSessionStore } from '../store/useSessionStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useNotificationHistoryStore } from '../store/useNotificationHistoryStore';
 import { useRepositories } from '../hooks/useRepositories';
@@ -53,7 +54,12 @@ export default function WorkoutScreen() {
   const session  = useAuthStore((state) => state.session);
   const userId = session?.user?.id;
   const { workoutPlans, syncWorkoutPlans, loading, ownTemplates, ownTemplatesLoading, fetchOwnTemplates, exercises, fetchExercises } = useWorkoutStore();
-  const { startSession, activeSession, logsHistory, fetchLogsHistory } = useLogStore();
+  // Active-session state lives in useSessionStore (the offline-first, DB-backed
+  // tracker the session screen reads). useLogStore is used only for read-only
+  // workout history here.
+  const startSession = useSessionStore((s) => s.startSession);
+  const activeSession = useSessionStore((s) => s.activeSession);
+  const { logsHistory, fetchLogsHistory } = useLogStore();
   const { unreadCount, fetchNotifications } = useNotificationHistoryStore();
   const { exerciseRepository } = useRepositories();
   const [expandedLogId, setExpandedLogId] = React.useState<string | null>(null);
@@ -105,20 +111,39 @@ export default function WorkoutScreen() {
     }, [session?.user?.id])
   );
 
-  // Redirect if a session is already active
+  // Redirect if a session is already active (returning to Workouts mid-session).
   useEffect(() => {
     if (activeSession) router.replace('/workouts/session');
-  }, [activeSession?.planId]);
+  }, [activeSession?.localId]);
 
+  // Map a plan's exercises into the session store's ExerciseInSession shape and
+  // start a REAL tracked session (the screen no longer seeds demo data).
   const handleStartWorkout = (plan: any) => {
-    if (plan.workout_plan_exercises && plan.workout_plan_exercises.length > 0) {
-      startSession(plan.id, plan.name, plan.workout_plan_exercises);
-      router.push('/workouts/session');
-    }
+    if (!userId) return;
+    const planExercises = plan.workout_plan_exercises || [];
+    if (planExercises.length === 0) return;
+    startSession({
+      userId,
+      sessionName: plan.name,
+      planDayId: plan.plan_day_id,
+      assignmentId: plan.assignment_id,
+      exercises: planExercises.map((pe: any) => ({
+        exerciseId: pe.exercise_id,
+        exerciseName: pe.exercise?.name || 'Exercise',
+        targetSets: pe.sets || 3,
+        targetReps: String(pe.reps ?? '8-10'),
+        targetWeightKg: pe.weight ? parseFloat(pe.weight) : undefined,
+        planExerciseId: pe.id,
+        muscleGroup: pe.exercise?.muscle_group,
+        restSeconds: pe.rest_seconds,
+      })),
+    });
+    router.push('/workouts/session');
   };
 
   const handleStartEmptyWorkout = () => {
-    startSession('quick-workout', 'Quick Log Workout', []);
+    if (!userId) return;
+    startSession({ userId, sessionName: 'Quick Workout', exercises: [] });
     router.push('/workouts/session');
   };
 
