@@ -299,6 +299,22 @@ export default function CoachHubScreen() {
         {/* Tab AI Coach */}
         {activeTab === 'ai' && (
           <View style={{ flex: 1 }}>
+            <View style={styles.aiIdentityRow}>
+              <View style={styles.aiIdentityAvatar}>
+                <Image
+                  source={require('../../assets/yeti_mascot_avatar.png')}
+                  style={{ width: '100%', height: '100%', borderRadius: 18 }}
+                  resizeMode="cover"
+                />
+              </View>
+              <View>
+                <Text style={styles.aiIdentityName}>YETI AI COACH</Text>
+                <View style={styles.aiIdentityStatusRow}>
+                  <View style={styles.aiIdentityDot} />
+                  <Text style={styles.aiIdentityStatus}>Online</Text>
+                </View>
+              </View>
+            </View>
             <FlatList
               ref={aiFlatListRef}
               data={aiMessages}
@@ -479,6 +495,45 @@ const styles = StyleSheet.create({
     borderColor: P.CARD_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  aiIdentityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  aiIdentityAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+    backgroundColor: P.ACCENT_DIM,
+  },
+  aiIdentityName: {
+    color: P.TEXT_PRI,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  aiIdentityStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  aiIdentityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: P.STEPS,
+  },
+  aiIdentityStatus: {
+    color: P.TEXT_MUT,
+    fontSize: 11,
+    fontWeight: '600',
   },
   chatList: {
     padding: 16,
