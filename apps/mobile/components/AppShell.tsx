@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 28 : 12, // Safe area for iPhone
-    backgroundColor: 'rgba(10, 13, 10, 0.75)',
+    backgroundColor: 'rgba(9, 11, 16, 0.75)',
   },
   tabItem: {
     alignItems: 'center',
@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   iconContainer: {
     width: 48,
     height: 48,
-    borderRadius: 16,
+    borderRadius: P.RADIUS_PILL,
     alignItems: 'center',
     justifyContent: 'center',
   },
