@@ -180,7 +180,22 @@ export class ExerciseRepository {
     const { data, error } = await this.supabase.functions.invoke('exercise-guidance', {
       body: { exerciseId, guidanceType },
     });
-    if (error) throw error;
+    if (error) {
+      // supabase-js collapses a non-2xx function response into a generic
+      // FunctionsHttpError whose .message is just "…returned a non-2xx status".
+      // The real reason (AI_PROVIDER_NOT_CONFIGURED, daily-limit, not-found,
+      // provider error) lives in the response body — surface it so callers can
+      // show an accurate message instead of a blanket "couldn't reach" error.
+      let serverMessage: string | undefined;
+      try {
+        const body = await (error as any)?.context?.json?.();
+        serverMessage = body?.error || body?.message;
+      } catch {
+        // Body wasn't JSON / already consumed — fall through to the raw error.
+      }
+      if (serverMessage) throw new Error(serverMessage);
+      throw error;
+    }
     if (!data?.text) throw new Error('AI_PROVIDER_NOT_CONFIGURED');
     return data.text as string;
   }

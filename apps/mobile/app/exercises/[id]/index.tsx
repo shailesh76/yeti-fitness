@@ -137,9 +137,19 @@ export default function ExerciseDetailScreen() {
     exerciseRepository.getGuidance(id, type)
       .then((text) => setGuidance((prev) => ({ ...prev, [type]: { loading: false, text } })))
       .catch((err: any) => {
-        const message = err?.message === 'AI_PROVIDER_NOT_CONFIGURED'
-          ? 'AI coach is not configured right now.'
-          : "Couldn't reach the AI coach — check your connection and try again.";
+        const raw = String(err?.message ?? '');
+        let message: string;
+        if (raw === 'AI_PROVIDER_NOT_CONFIGURED') {
+          // The edge function is reachable but no AI provider key is set on the
+          // backend — a config/ops issue, not a user-side connection problem.
+          message = "AI Coach isn't set up yet — an AI provider key needs to be added on the server.";
+        } else if (raw && !/non-2xx|failed to (send|fetch)|network|connection/i.test(raw)) {
+          // A specific, user-facing reason from the function (daily limit,
+          // temporarily unavailable, exercise not found) — show it verbatim.
+          message = raw;
+        } else {
+          message = "Couldn't reach the AI Coach — check your connection and try again.";
+        }
         setGuidance((prev) => ({ ...prev, [type]: { loading: false, error: message } }));
       });
   }, [id, exerciseRepository]);
