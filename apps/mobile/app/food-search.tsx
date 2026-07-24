@@ -415,7 +415,7 @@ export default function FoodSearchScreen() {
       return (
         <SafeAreaView style={{ flex: 1, backgroundColor: P.BG }}>
           <View style={styles.camHeader}>
-            <TouchableOpacity onPress={() => setCameraMode(null)} style={styles.camBackBtn}>
+            <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Close camera" onPress={() => setCameraMode(null)} style={styles.camBackBtn}>
               <Text style={styles.camBackArrow}>←</Text>
             </TouchableOpacity>
             <Text style={styles.camTitle}>Upload Photo</Text>
@@ -430,7 +430,7 @@ export default function FoodSearchScreen() {
                 </Text>
               </View>
             ) : (
-              <TouchableOpacity onPress={handlePickWebImage} style={styles.uploadBox}>
+              <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Upload a food photo" onPress={handlePickWebImage} style={styles.uploadBox}>
                 <Text style={{ fontSize: 36 }}>📤</Text>
                 <Text style={styles.uploadTitle}>Upload Food Image</Text>
                 <Text style={styles.uploadSub}>Select a photo from your computer to analyze.</Text>
@@ -468,6 +468,9 @@ export default function FoodSearchScreen() {
         <SafeAreaView style={{ position: 'absolute', inset: 0, zIndex: 10 } as any}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8 }}>
             <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Close camera"
               onPress={() => setCameraMode(null)}
               style={styles.nativeCamBack}
             >
@@ -556,11 +559,14 @@ export default function FoodSearchScreen() {
                     Product not found in database
                   </Text>
                   <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity onPress={handleScanAgain} style={styles.scanAgainBtn} activeOpacity={0.8}>
+                    <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Scan again" onPress={handleScanAgain} style={styles.scanAgainBtn} activeOpacity={0.8}>
                       <Ionicons name="refresh" size={13} color={P.ACCENT} />
                       <Text style={styles.scanAgainText}>Scan Again</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Log food manually instead"
                       onPress={() => { setCameraMode(null); setShowCustomForm(true); }}
                       style={styles.scanCustomBtn}
                       activeOpacity={0.8}
@@ -578,6 +584,9 @@ export default function FoodSearchScreen() {
         {cameraMode === 'photo' && (
           <View style={styles.camBottomBar}>
             <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Capture photo"
               onPress={handleCapturePhoto}
               disabled={isProcessing}
               style={styles.captureBtn}
@@ -599,7 +608,7 @@ export default function FoodSearchScreen() {
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.7}>
+          <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Go back" onPress={handleBack} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={18} color={P.ACCENT} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
@@ -619,6 +628,9 @@ export default function FoodSearchScreen() {
             <Animated.View entering={FadeInDown.delay(40).duration(400)} style={styles.captureTilesRow}>
               {/* Snap Photo — primary */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Snap a photo of your food"
                 onPress={() => startCamera('photo')}
                 style={[styles.captureTilePrimary, glowStyle(P.ACCENT, 14, 0.30)]}
                 activeOpacity={0.8}
@@ -631,6 +643,9 @@ export default function FoodSearchScreen() {
 
               {/* Barcode — secondary */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Scan a food barcode"
                 onPress={() => startCamera('barcode')}
                 style={styles.captureTileSecondary}
                 activeOpacity={0.8}
@@ -641,6 +656,9 @@ export default function FoodSearchScreen() {
 
               {/* AI Describe — secondary */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Describe your meal to AI"
                 onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}
                 style={styles.captureTileSecondary}
                 activeOpacity={0.8}
@@ -665,7 +683,7 @@ export default function FoodSearchScreen() {
               {/* ── Results ───────────────────────────────────────────── */}
               <View style={[sharedStyles.rowBetween, { marginBottom: 10 }]}>
                 <Text style={sharedStyles.labelCaps}>Search Results</Text>
-                <TouchableOpacity onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}>
+                <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Describe your meal to AI" onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}>
                   <Text style={styles.customFoodLink}>✨ Describe Meal</Text>
                 </TouchableOpacity>
               </View>
@@ -677,6 +695,9 @@ export default function FoodSearchScreen() {
                   <Ionicons name="search" size={28} color={P.TEXT_MUT} style={{ marginBottom: 10 }} />
                   <Text style={styles.emptyText}>No foods match your search.</Text>
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Describe your meal to AI instead"
                     onPress={() => { setShowCustomForm(true); setCustomFormTab('ai'); }}
                     style={styles.emptyCustomBtn}
                   >
@@ -691,6 +712,9 @@ export default function FoodSearchScreen() {
                       entering={FadeInDown.delay(idx * 40).duration(300)}
                     >
                       <TouchableOpacity
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Log ${food.name}, ${food.calories} calories`}
                         onPress={() => { setSelectedFood(food); setServings('1.0'); }}
                         style={styles.resultCard}
                         activeOpacity={0.8}
@@ -718,7 +742,7 @@ export default function FoodSearchScreen() {
             <Animated.View entering={FadeIn.duration(300)} style={styles.customForm}>
               <View style={[sharedStyles.rowBetween, { marginBottom: 16 }]}>
                 <Text style={styles.customFormTitle}>AI Meal Estimator</Text>
-                <TouchableOpacity onPress={() => setShowCustomForm(false)}>
+                <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Cancel" onPress={() => setShowCustomForm(false)}>
                   <Text style={styles.customFormCancel}>Cancel</Text>
                 </TouchableOpacity>
               </View>
@@ -726,6 +750,10 @@ export default function FoodSearchScreen() {
               {/* Tabs for AI vs Manual */}
               <View style={{ flexDirection: 'row', backgroundColor: P.BG, borderRadius: 10, padding: 3, marginBottom: 20, borderWidth: 1, borderColor: P.CARD_BORDER }}>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: customFormTab === 'ai' }}
+                  accessibilityLabel="Describe meal with AI"
                   onPress={() => setCustomFormTab('ai')}
                   style={{
                     flex: 1,
@@ -740,6 +768,10 @@ export default function FoodSearchScreen() {
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: customFormTab === 'manual' }}
+                  accessibilityLabel="Log food manually"
                   onPress={() => setCustomFormTab('manual')}
                   style={{
                     flex: 1,
@@ -775,6 +807,9 @@ export default function FoodSearchScreen() {
                   </View>
 
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Analyze meal description with AI"
                     style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35), isProcessing && { opacity: 0.7 }]}
                     onPress={handleAnalyzeMealDescription}
                     disabled={isProcessing}
@@ -829,6 +864,9 @@ export default function FoodSearchScreen() {
                   </View>
 
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel="Save food and log it"
                     style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35)]}
                     onPress={handleCreateCustomFood}
                     activeOpacity={0.85}
@@ -850,6 +888,9 @@ export default function FoodSearchScreen() {
                   {draftResult.source === 'photo' ? '📸 Verify Detected Food' : '🏷️ Verify Scanned Product'}
                 </Text>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Discard and close"
                   onPress={() => setDraftResult(null)}
                   style={styles.sheetCloseBtn}
                 >
@@ -914,6 +955,9 @@ export default function FoodSearchScreen() {
               </View>
 
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm and log food"
                 onPress={handleConfirmDraft}
                 style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.35)]}
                 activeOpacity={0.85}
@@ -933,7 +977,7 @@ export default function FoodSearchScreen() {
                   <Text style={styles.sheetTitle}>{selectedFood.name}</Text>
                   <Text style={styles.sheetSub}>{selectedFood.brand}  ·  {selectedFood.serving_size}</Text>
                 </View>
-                <TouchableOpacity onPress={() => setSelectedFood(null)}>
+                <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Close" onPress={() => setSelectedFood(null)}>
                   <Ionicons name="close" size={20} color={P.TEXT_MUT} />
                 </TouchableOpacity>
               </View>
@@ -959,6 +1003,9 @@ export default function FoodSearchScreen() {
 
               <View style={[sharedStyles.row, { gap: 12, paddingTop: 8 }]}>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel"
                   onPress={() => setSelectedFood(null)}
                   style={[styles.ghostBtn, { flex: 1 }]}
                   activeOpacity={0.8}
@@ -966,6 +1013,9 @@ export default function FoodSearchScreen() {
                   <Text style={styles.ghostBtnText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Confirm log"
                   onPress={handleLogFood}
                   style={[styles.primaryBtn, { flex: 1 }, glowStyle(P.ACCENT, 12, 0.35)]}
                   activeOpacity={0.85}
