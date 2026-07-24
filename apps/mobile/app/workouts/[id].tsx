@@ -53,8 +53,11 @@ export default function WorkoutDetailScreen() {
         <View style={{ flex: 1 }}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
-              onPress={() => router.back()} 
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              onPress={() => router.back()}
               style={styles.backBtn}
               activeOpacity={0.8}
             >
@@ -85,7 +88,10 @@ export default function WorkoutDetailScreen() {
                             {idx + 1}. {ex?.name || 'Unknown Exercise'}
                           </Text>
                           {ex && (
-                            <TouchableOpacity 
+                            <TouchableOpacity
+                              accessible={true}
+                              accessibilityRole="button"
+                              accessibilityLabel={`View details for ${ex.name}`}
                               onPress={() => setSelectedExercise(ex)}
                               style={styles.infoBtn}
                             >
@@ -124,6 +130,9 @@ export default function WorkoutDetailScreen() {
 
         {/* Start Button */}
         <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={`Start workout: ${plan.name}`}
           style={[
             styles.startBtn,
             hasExercises ? [styles.startBtnActive, glowStyle(P.ACCENT, 16, 0.4)] : null
