@@ -264,7 +264,7 @@ export class WorkoutRepository {
           days:plan_days(
             id, name, day_number,
             exercises:plan_exercises(
-              id, sets, reps, weight, order_index, exercise:exercises(*)
+              id, sets, reps, weight, superset_group, order_index, exercise:exercises(*)
             )
           )
         )

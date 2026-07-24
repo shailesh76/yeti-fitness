@@ -136,6 +136,7 @@ export default function WorkoutScreen() {
         planExerciseId: pe.id,
         muscleGroup: pe.exercise?.muscle_group,
         restSeconds: pe.rest_seconds,
+        supersetGroup: pe.superset_group ?? undefined,
       })),
     });
     router.push('/workouts/session');

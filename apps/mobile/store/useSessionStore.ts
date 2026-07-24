@@ -31,6 +31,8 @@ export interface ExerciseInSession {
   muscleGroup?: string;
   progressionSuggestion?: string;
   restSeconds?: number;
+  /** Shared label (e.g. "A") linking exercises performed as a superset. */
+  supersetGroup?: string;
   sets: SetLog[];
 }
 

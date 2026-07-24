@@ -32,6 +32,7 @@ export interface WorkoutPlanExercise {
   target_reps?: string;
   target_weight_kg?: number;
   notes?: string;
+  superset_group?: string;
   exercise?: Exercise;
 }
 
@@ -117,6 +118,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
                   weight: ex.weight || '',
                   rest_seconds: 60,
                   order_index: ex.order_index,
+                  superset_group: ex.superset_group ?? undefined,
                   exercise: ex.exercise
                 }))
               });

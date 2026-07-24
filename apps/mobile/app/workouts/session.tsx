@@ -275,6 +275,17 @@ export default function WorkoutSessionScreen() {
 
   const intensity = avgRpe != null ? `${Math.round(avgRpe * 10)}%` : '—';
 
+  // Real superset grouping: exercises sharing the current one's supersetGroup.
+  // Only a genuine group (2+ members) counts — no fabricated A1/A2 pairing.
+  const supersetInfo = useMemo(() => {
+    const g = currentExercise?.supersetGroup;
+    if (!g) return null;
+    const members = exercises.filter((ex) => ex.supersetGroup === g);
+    if (members.length < 2) return null;
+    const pos = members.findIndex((ex) => ex.exerciseId === currentExercise?.exerciseId);
+    return { group: g, members, next: members[(pos + 1) % members.length] };
+  }, [exercises, currentExercise?.exerciseId, currentExercise?.supersetGroup]);
+
   // Fetch real demo media + a coach tip when the current exercise changes.
   const currentExId = currentExercise?.exerciseId;
   useEffect(() => {
@@ -534,6 +545,32 @@ export default function WorkoutSessionScreen() {
                 )}
               </Animated.View>
             )}
+
+            {/* Superset — real grouping only; honest "solo" state otherwise */}
+            <View style={[sharedStyles.card, styles.supersetCard]}>
+              <View style={sharedStyles.rowBetween}>
+                <View style={[sharedStyles.row, { gap: 6 }]}>
+                  <Ionicons name="link" size={14} color={P.ACCENT} />
+                  <Text style={styles.blockLabel}>SUPERSET</Text>
+                </View>
+                {supersetInfo && (
+                  <Text style={styles.supersetTag}>
+                    {supersetInfo.members.map((_, i) => `${supersetInfo.group}${i + 1}`).join(' / ')}
+                  </Text>
+                )}
+              </View>
+              {supersetInfo ? (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={styles.supersetCurrent} numberOfLines={1}>{currentExercise?.exerciseName}</Text>
+                  <View style={[sharedStyles.row, { gap: 5, marginTop: 4 }]}>
+                    <Ionicons name="arrow-forward" size={12} color={P.TEXT_MUT} />
+                    <Text style={styles.supersetNext} numberOfLines={1}>Next: {supersetInfo.next.exerciseName}</Text>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.supersetSolo}>Solo set — not part of a superset.</Text>
+              )}
+            </View>
 
             {/* Rest timer + RPE logger */}
             <View style={styles.dualRow}>
@@ -843,7 +880,7 @@ const styles = StyleSheet.create({
   colSet: { width: 28, alignItems: 'center' },
   colRpe: { width: 46, textAlign: 'center' },
   colStatus: { width: 50, alignItems: 'center', justifyContent: 'center' },
-  cell: { flex: 1, textAlign: 'center' },
+  cell: { flex: 1, minWidth: 0, textAlign: 'center' },
   setRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 5, paddingHorizontal: 2, borderRadius: P.RADIUS_SM, marginVertical: 2,
@@ -884,6 +921,13 @@ const styles = StyleSheet.create({
   skipBtnText: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
   exerciseDoneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10 },
   exerciseDoneText: { color: P.STEPS, fontSize: 13, fontWeight: '800' },
+
+  // Superset
+  supersetCard: { padding: 14, marginBottom: 12 },
+  supersetTag: { color: P.ACCENT, fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  supersetCurrent: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
+  supersetNext: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '600', flex: 1 },
+  supersetSolo: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '600', marginTop: 8 },
 
   // Rest + RPE dual row
   dualRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
