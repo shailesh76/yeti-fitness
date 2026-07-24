@@ -63,6 +63,28 @@ function rpeDescriptor(rpe: number): string {
   return 'Very Light';
 }
 
+// Alert.alert is a no-op on React Native Web, so a native-only confirm would
+// make "End Workout" silently do nothing in the browser. Use window.confirm on
+// web and the native Alert elsewhere.
+function confirmDestructive(title: string, message: string, confirmLabel: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+}
+
+function notify(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
 // ── Live metric tile ────────────────────────────────────────────────────────
 const MetricTile = memo(function MetricTile({
   icon,
@@ -329,44 +351,45 @@ export default function WorkoutSessionScreen() {
     updateSet(currentIndex, activeSetIdx, { rpe });
   }, [currentIndex, activeSetIdx, updateSet]);
 
-  const handleEndWorkout = useCallback(() => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert('End Workout', 'Save and finish this workout session?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'End Workout',
-        style: 'destructive',
-        onPress: async () => {
-          setIsFinishing(true);
-          try {
-            if (userId) await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
-            await finishSession();
-            router.replace('/workouts');
-          } catch {
-            Alert.alert('Save Error', 'Failed to save workout session.');
-          } finally {
-            setIsFinishing(false);
-          }
-        },
-      },
-    ]);
+  const doFinish = useCallback(async () => {
+    setIsFinishing(true);
+    try {
+      if (userId) await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
+      await finishSession();
+      router.replace('/workouts');
+    } catch {
+      notify('Save Error', 'Failed to save workout session.');
+    } finally {
+      setIsFinishing(false);
+    }
   }, [userId, eventRepository, finishSession, router]);
 
+  const handleEndWorkout = useCallback(() => {
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    confirmDestructive('End Workout', 'Save and finish this workout session?', 'End Workout', doFinish);
+  }, [doFinish]);
+
   const handleMenu = useCallback(() => {
-    Alert.alert(activeSession?.name || 'Workout', undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Discard Workout',
-        style: 'destructive',
-        onPress: () => { abandonSession(); router.replace('/workouts'); },
-      },
-    ]);
+    confirmDestructive(
+      activeSession?.name || 'Workout',
+      'Discard this workout without saving?',
+      'Discard Workout',
+      () => { abandonSession(); router.replace('/workouts'); },
+    );
   }, [activeSession?.name, abandonSession, router]);
 
   const saveNote = useCallback(() => {
     setNotes(noteDraft.trim());
     setNotesOpen(false);
   }, [noteDraft, setNotes]);
+
+  // The active-session redirect uses router.replace(), so there may be no
+  // history entry to pop — fall back to the Workouts tab instead of firing an
+  // unhandled GO_BACK.
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/workouts');
+  }, [router]);
 
   // ── No active session ─────────────────────────────────────────────────────
   if (!activeSession) {
@@ -409,7 +432,7 @@ export default function WorkoutSessionScreen() {
           accessible={true}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          onPress={() => router.back()}
+          onPress={handleBack}
           style={styles.circleBtn}
         >
           <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />

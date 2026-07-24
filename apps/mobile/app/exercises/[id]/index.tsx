@@ -178,6 +178,13 @@ export default function ExerciseDetailScreen() {
   // defined it falls back to same-muscle "similar" exercises — both real.
   const altList = alternatives.length > 0 ? alternatives : similar;
 
+  // Guard back navigation — a deep link straight to this screen has no history
+  // to pop, which fires an unhandled GO_BACK. Fall back to the library.
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/exercises');
+  }, [router]);
+
   const toggleRow = useCallback((key: string) => {
     setExpandedRows((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -207,7 +214,7 @@ export default function ExerciseDetailScreen() {
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel="Go back"
-            onPress={() => router.back()}
+            onPress={handleBack}
             style={styles.notFoundBtn}
           >
             <Text style={{ color: P.TEXT_PRI, fontWeight: '800' }}>Go Back</Text>
@@ -249,7 +256,7 @@ export default function ExerciseDetailScreen() {
               accessible={true}
               accessibilityRole="button"
               accessibilityLabel="Go back"
-              onPress={() => router.back()}
+              onPress={handleBack}
               style={styles.heroCircleBtn}
             >
               <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />
