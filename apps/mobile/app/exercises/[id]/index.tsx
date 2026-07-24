@@ -166,7 +166,13 @@ export default function ExerciseDetailScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centered}>
           <Text style={styles.emptyText}>Exercise not found.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.standaloneBtn}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            onPress={() => router.back()}
+            style={styles.standaloneBtn}
+          >
             <Text style={{ color: P.TEXT_PRI, fontWeight: '800' }}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -245,33 +251,22 @@ export default function ExerciseDetailScreen() {
               <MetaRowItem icon="speedometer-outline" label="Difficulty" value={exercise.difficulty || 'Intermediate'} />
             </View>
 
-            {/* Alternatives Row */}
+            {/* Alternatives Row — "See All" removed: alternatives is never
+                paginated/sliced, so the horizontal scroll already shows every
+                alternative there is; a "See All" link had nothing further
+                to reveal. */}
             <View style={{ marginBottom: 20 }}>
-              <View style={sharedStyles.rowBetween}>
-                <Text style={sharedStyles.labelCaps}>ALTERNATIVES</Text>
-                <TouchableOpacity onPress={() => {}}>
-                  <Text style={styles.seeAllText}>See All</Text>
-                </TouchableOpacity>
-              </View>
+              <Text style={sharedStyles.labelCaps}>ALTERNATIVES</Text>
 
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, marginTop: 10 }}>
-                {alternatives.length > 0 ? (
-                  alternatives.map((alt) => (
+              {alternatives.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, marginTop: 10 }}>
+                  {alternatives.map((alt) => (
                     <AlternativeCard key={alt.id} exercise={alt} onPress={(id) => router.push(`/exercises/${id}`)} />
-                  ))
-                ) : (
-                  <>
-                    <AlternativeCard
-                      exercise={{ id: 'alt_1', name: 'Barbell Incline Press', equipment: 'Barbell, Bench', muscle_group: 'Chest' } as any}
-                      onPress={() => {}}
-                    />
-                    <AlternativeCard
-                      exercise={{ id: 'alt_2', name: 'Incline Chest Press Machine', equipment: 'Machine', muscle_group: 'Chest' } as any}
-                      onPress={() => {}}
-                    />
-                  </>
-                )}
-              </ScrollView>
+                  ))}
+                </ScrollView>
+              ) : (
+                <Text style={styles.noAlternativesText}>No alternative exercises listed yet.</Text>
+              )}
             </View>
 
             {/* AI Coach Banner */}
@@ -315,6 +310,9 @@ export default function ExerciseDetailScreen() {
               {GUIDANCE_OPTIONS.map(({ type, label }) => (
                 <TouchableOpacity
                   key={type}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Get AI tip: ${label}`}
                   onPress={() => requestGuidance(type)}
                   style={styles.tipBtn}
                 >
@@ -441,7 +439,7 @@ const styles = StyleSheet.create({
   metaValueText: { color: P.TEXT_PRI, fontSize: 13, fontWeight: '900' },
 
   // Alternatives Section
-  seeAllText: { color: P.ACCENT, fontSize: 11, fontWeight: '800' },
+  noAlternativesText: { color: P.TEXT_MUT, fontSize: 12, fontWeight: '600', marginTop: 10 },
   altCard: { width: 140, padding: 12, marginBottom: 0 },
   altThumb: { width: '100%', height: 70, borderRadius: 10, overflow: 'hidden', marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)' },
   altTitle: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '800' },
