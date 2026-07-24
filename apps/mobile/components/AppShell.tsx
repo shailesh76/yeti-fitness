@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Platform, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,12 +11,15 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
+// Matches the reference's 5-tab bar (Home/Workout/Nutrition/Progress/Coach).
+// Profile has no bottom-tab slot here, same as the reference — it stays fully
+// reachable via the avatar in Home's header (see app/home.tsx), not removed.
 const tabs = [
   { id: 'home',      label: 'Home',      path: '/home' },
   { id: 'workout',   label: 'Workout',   path: '/workouts' },
   { id: 'nutrition', label: 'Nutrition', path: '/food-diary' },
   { id: 'progress',  label: 'Progress',  path: '/analytics' },
-  { id: 'more',      label: 'Profile',   path: '/profile' },
+  { id: 'coach',     label: 'Coach',     path: '/coach' },
 ] as const;
 
 export default function AppShell({ activeTab, children }: AppShellProps) {
@@ -115,11 +118,19 @@ export default function AppShell({ activeTab, children }: AppShellProps) {
                       isFocused && styles.iconContainerActive,
                     ]}
                   >
-                    <Ionicons
-                      name={iconName as any}
-                      size={22}
-                      color={isFocused ? P.ACCENT : P.TEXT_MUT}
-                    />
+                    {tab.id === 'coach' ? (
+                      <Image
+                        source={require('../assets/yeti_mascot_avatar.png')}
+                        style={[styles.coachTabIcon, isFocused && styles.coachTabIconActive]}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Ionicons
+                        name={iconName as any}
+                        size={22}
+                        color={isFocused ? P.ACCENT : P.TEXT_MUT}
+                      />
+                    )}
                   </TouchableOpacity>
                   <View style={styles.labelContainer}>
                     <View style={[
@@ -172,6 +183,17 @@ const styles = StyleSheet.create({
   },
   iconContainerActive: {
     backgroundColor: P.ACCENT_DIM,
+  },
+  coachTabIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    opacity: 0.55,
+  },
+  coachTabIconActive: {
+    opacity: 1,
+    borderWidth: 1.5,
+    borderColor: P.ACCENT,
   },
   labelContainer: {
     marginTop: 4,
