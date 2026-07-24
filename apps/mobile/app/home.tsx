@@ -463,7 +463,7 @@ const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previ
 
   let readinessLabel = 'Fully Ready';
   let readinessSub = "You're primed to perform!";
-  let readinessColor: string = P.STEPS;
+  let readinessColor: string = P.ACCENT;
   if (score < 60) {
     readinessLabel = 'Recovery Needed';
     readinessSub = 'Consider an easier session today.';
@@ -715,9 +715,10 @@ export default function HomeScreen() {
             />
           </Animated.View>
 
-          {/* 2. Hero Motivational Banner */}
+          {/* 2. Yeti Readiness Score Hero — matches reference order (second, right
+              after the header, before Today's Workout) */}
           <Animated.View entering={FadeInDown.duration(400).delay(80)}>
-            <MotivationalBanner onPressAsk={() => router.push('/coach')} />
+            <YetiReadinessCard score={yetiScore} previousScore={prevYetiScore} />
           </Animated.View>
 
           {/* 3. Today's Plan Card */}
@@ -733,8 +734,22 @@ export default function HomeScreen() {
             </Animated.View>
           )}
 
-          {/* 4. Daily Progress 4-Ring Widget */}
+          {/* 4. Nutrition Summary Bar */}
           <Animated.View entering={FadeInDown.duration(400).delay(160)}>
+            <NutritionSummaryCard
+              calories={consumedMacros.calories}
+              targetCalories={targetMacros.calories}
+            />
+          </Animated.View>
+
+          {/* 5. Quick Actions */}
+          <Animated.View entering={FadeInDown.duration(400).delay(200)}>
+            <QuickActionsGrid onNavigate={(route) => router.push(route as any)} />
+          </Animated.View>
+
+          {/* 6. Daily Progress 4-Ring Widget — not in the reference; kept below
+              the reference-matched flow rather than removed (real, wired data). */}
+          <Animated.View entering={FadeInDown.duration(400).delay(240)}>
             <DailyProgressWidget
               calories={consumedMacros.calories}
               targetCalories={targetMacros.calories}
@@ -747,22 +762,10 @@ export default function HomeScreen() {
             />
           </Animated.View>
 
-          {/* 5. Nutrition Summary Bar */}
-          <Animated.View entering={FadeInDown.duration(400).delay(200)}>
-            <NutritionSummaryCard
-              calories={consumedMacros.calories}
-              targetCalories={targetMacros.calories}
-            />
-          </Animated.View>
-
-          {/* 6. Yeti Readiness Score Hero */}
-          <Animated.View entering={FadeInDown.duration(400).delay(240)}>
-            <YetiReadinessCard score={yetiScore} previousScore={prevYetiScore} />
-          </Animated.View>
-
-          {/* 7. Quick Actions */}
+          {/* 7. Hero Motivational Banner — not in the reference; kept as a
+              secondary Coach entry point rather than removed. */}
           <Animated.View entering={FadeInDown.duration(400).delay(280)}>
-            <QuickActionsGrid onNavigate={(route) => router.push(route as any)} />
+            <MotivationalBanner onPressAsk={() => router.push('/coach')} />
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
