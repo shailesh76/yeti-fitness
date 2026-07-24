@@ -419,7 +419,10 @@ export default function AiFoodScanScreen() {
                                     onChangeText={(val) => updateItemField(index, 'name', val)}
                                     selectTextOnFocus
                                   />
-                                  <TouchableOpacity 
+                                  <TouchableOpacity
+                                    accessible={true}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Done editing"
                                     onPress={() => setEditingIndex(null)}
                                     style={styles.doneBtn}
                                   >
@@ -474,7 +477,7 @@ export default function AiFoodScanScreen() {
                                     value={item.serving_size}
                                     onChangeText={(val) => updateItemField(index, 'serving_size', val)}
                                   />
-                                  <TouchableOpacity onPress={() => handleDeleteItem(index)}>
+                                  <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel={`Delete ${item.name}`} onPress={() => handleDeleteItem(index)}>
                                     <Text style={styles.deleteLinkText}>Delete Item</Text>
                                   </TouchableOpacity>
                                 </View>
@@ -492,13 +495,19 @@ export default function AiFoodScanScreen() {
                                 </View>
                                 
                                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                                  <TouchableOpacity 
+                                  <TouchableOpacity
+                                    accessible={true}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Edit ${item.name}`}
                                     onPress={() => setEditingIndex(index)}
                                     style={styles.itemEditBtn}
                                   >
                                     <Text style={styles.itemEditBtnText}>Edit</Text>
                                   </TouchableOpacity>
-                                  <TouchableOpacity 
+                                  <TouchableOpacity
+                                    accessible={true}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Delete ${item.name}`}
                                     onPress={() => handleDeleteItem(index)}
                                     style={styles.itemDelBtn}
                                   >
@@ -513,14 +522,20 @@ export default function AiFoodScanScreen() {
 
                       {/* Actions Row */}
                       <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
-                        <TouchableOpacity 
+                        <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel="Retake photo"
                           style={styles.retakeBtn}
                           onPress={() => { setShowCamera(Platform.OS !== 'web'); setImageUri(null); setDetectedItems([]); }}
                         >
                           <Text style={styles.retakeBtnText}>Retake</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity 
+                        <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel="Confirm and log all detected items"
                           style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.3)]}
                           onPress={handleSaveAll}
                         >
