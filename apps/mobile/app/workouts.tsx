@@ -185,6 +185,9 @@ export default function WorkoutScreen() {
                 <Text style={styles.pageTitle}>Workouts</Text>
               </View>
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Open Exercise Library"
                 onPress={() => router.push('/exercises')}
                 style={sharedStyles.circleBtn}
                 activeOpacity={0.7}
@@ -298,6 +301,9 @@ export default function WorkoutScreen() {
                 {/* Start button */}
                 {featuredPlan && completedPlanDayIdsToday.has(featuredPlan.plan_day_id || '') ? (
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${featuredPlan.name} already completed today`}
                     onPress={() => handleStartWorkout(featuredPlan)}
                     style={[
                       styles.startBtn,
@@ -310,6 +316,9 @@ export default function WorkoutScreen() {
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start workout: ${featuredPlan.name}`}
                     onPress={() => handleStartWorkout(featuredPlan)}
                     style={[styles.startBtn, glowStyle(P.ACCENT, 18, 0.45)]}
                     activeOpacity={0.85}
@@ -326,6 +335,9 @@ export default function WorkoutScreen() {
                       .map((ex: any, idx: number) => (
                         <TouchableOpacity
                           key={ex.id || idx}
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel={`View ${ex.exercise?.name || `exercise ${idx + 1}`}`}
                           style={styles.exerciseRow}
                           onPress={() =>
                             ex.exercise_id && router.push(`/exercises/${ex.exercise_id}`)
@@ -392,6 +404,9 @@ export default function WorkoutScreen() {
                       </View>
                       {completedPlanDayIdsToday.has(plan.plan_day_id || '') ? (
                         <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${plan.name} already completed today`}
                           onPress={() => handleStartWorkout(plan)}
                           style={[styles.programStartBtn, { backgroundColor: '#0a140d', borderColor: '#1b4d22' }]}
                           activeOpacity={0.85}
@@ -400,6 +415,9 @@ export default function WorkoutScreen() {
                         </TouchableOpacity>
                       ) : (
                         <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Start workout: ${plan.name}`}
                           onPress={() => handleStartWorkout(plan)}
                           style={styles.programStartBtn}
                           activeOpacity={0.8}
@@ -416,6 +434,9 @@ export default function WorkoutScreen() {
             {/* ── Quick workout ──────────────────────────────────────────── */}
             <Animated.View entering={FadeInDown.delay(300).duration(400)}>
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Start a quick blank workout"
                 onPress={handleStartEmptyWorkout}
                 style={styles.quickCard}
                 activeOpacity={0.8}
@@ -435,6 +456,9 @@ export default function WorkoutScreen() {
             {/* ── Exercise library link ──────────────────────────────────── */}
             <Animated.View entering={FadeInDown.delay(360).duration(400)}>
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Search the Exercise Library"
                 onPress={() => router.push('/exercises')}
                 style={styles.libraryRow}
                 activeOpacity={0.8}
@@ -451,7 +475,13 @@ export default function WorkoutScreen() {
             <Animated.View entering={FadeInDown.delay(390).duration(400)}>
               <View style={[sharedStyles.rowBetween, { marginTop: 24, marginBottom: 10 }]}>
                 <Text style={sharedStyles.labelCaps}>MY TEMPLATES</Text>
-                <TouchableOpacity onPress={() => router.push('/workouts/create')} activeOpacity={0.8}>
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create a new workout template"
+                  onPress={() => router.push('/workouts/create')}
+                  activeOpacity={0.8}
+                >
                   <Text style={styles.newTemplateText}>+ New</Text>
                 </TouchableOpacity>
               </View>
@@ -459,7 +489,14 @@ export default function WorkoutScreen() {
               {ownTemplatesLoading && ownTemplates.length === 0 ? (
                 <SkeletonLoader rows={1} height={64} />
               ) : ownTemplates.length === 0 ? (
-                <TouchableOpacity onPress={() => router.push('/workouts/create')} style={styles.emptyTemplateCard} activeOpacity={0.8}>
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Build your own workout template"
+                  onPress={() => router.push('/workouts/create')}
+                  style={styles.emptyTemplateCard}
+                  activeOpacity={0.8}
+                >
                   <Ionicons name="add-circle-outline" size={18} color={P.TEXT_MUT} />
                   <Text style={styles.emptyTemplateText}>Build your own workout template</Text>
                 </TouchableOpacity>
@@ -467,6 +504,9 @@ export default function WorkoutScreen() {
                 ownTemplates.map((template) => (
                   <TouchableOpacity
                     key={template.id}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit template: ${template.name}`}
                     onPress={() => router.push(`/workouts/create?planId=${template.id}`)}
                     style={styles.templateCard}
                     activeOpacity={0.8}
@@ -500,6 +540,9 @@ export default function WorkoutScreen() {
                   return (
                     <TouchableOpacity
                       key={log.id || idx}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${log.workout_plans?.name || 'Workout Session'}, ${dateStr}${isExpanded ? ', expanded' : ''}`}
                       activeOpacity={0.85}
                       onPress={() => setExpandedLogId(isExpanded ? null : log.id)}
                       style={[styles.historyCard, { flexDirection: 'column', alignItems: 'stretch' }]}
@@ -591,7 +634,7 @@ const styles = StyleSheet.create({
     gap:            2,
   },
   dayTileToday: {
-    backgroundColor: 'rgba(57,255,106,0.08)',
+    backgroundColor: P.ACCENT_DIM,
     borderWidth:     2,
     borderColor:     P.ACCENT,
     ...Platform.select({
@@ -604,7 +647,7 @@ const styles = StyleSheet.create({
     }),
   },
   dayTileCompleted: {
-    backgroundColor: 'rgba(57,255,106,0.06)',
+    backgroundColor: 'rgba(37, 99, 235, 0.06)',
   },
   dayLabel: {
     fontSize:   9,
@@ -692,7 +735,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 8,
-    backgroundColor: 'rgba(57,255,106,0.10)',
+    backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT + '30',
     alignItems: 'center',
@@ -740,7 +783,7 @@ const styles = StyleSheet.create({
     color: P.TEXT_SEC,
   },
   programStartBtn: {
-    backgroundColor: 'rgba(57,255,106,0.12)',
+    backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT + '44',
     borderRadius: P.RADIUS_FULL,
