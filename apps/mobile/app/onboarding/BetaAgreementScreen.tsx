@@ -120,6 +120,8 @@ export default function BetaAgreementScreen() {
                 onValueChange={() => toggleConsent(consent.key)}
                 trackColor={{ false: '#333', true: P.ACCENT }}
                 thumbColor={agreed[consent.key] ? '#000' : '#888'}
+                accessibilityRole="switch"
+                accessibilityLabel={consent.title}
               />
             </View>
             <Text style={styles.consentText}>{consent.text}</Text>
@@ -140,6 +142,9 @@ export default function BetaAgreementScreen() {
             disabled={!allConsented || saving}
             onPress={handleContinue}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Accept and continue"
+            accessibilityState={{ disabled: !allConsented || saving, busy: saving }}
           >
             {saving ? (
               <ActivityIndicator color="#000" />
@@ -212,7 +217,7 @@ const styles = StyleSheet.create({
   },
   consentBlockActive: {
     borderColor: P.ACCENT,
-    backgroundColor: 'rgba(57,255,106,0.05)',
+    backgroundColor: 'rgba(37,99,235,0.05)',
   },
   consentHeader: {
     flexDirection: 'row',

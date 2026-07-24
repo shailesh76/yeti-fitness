@@ -65,6 +65,9 @@ export default function NotificationRationaleScreen() {
             onPress={handleAllow}
             disabled={loading}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Allow notifications"
+            accessibilityState={{ disabled: loading, busy: loading }}
           >
             {loading ? (
               <ActivityIndicator color="#000000" />
@@ -80,6 +83,8 @@ export default function NotificationRationaleScreen() {
             onPress={handleNotNow}
             disabled={loading}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Not now"
           >
             <Text style={styles.skipBtnText}>
               Not Now

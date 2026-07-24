@@ -147,6 +147,8 @@ export default function ResetPasswordScreen() {
               style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.45)]}
               onPress={() => router.replace('/forgot-password')}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Request new link"
             >
               <Text style={styles.primaryBtnText}>Request New Link</Text>
             </TouchableOpacity>
@@ -164,6 +166,8 @@ export default function ResetPasswordScreen() {
               style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.45)]}
               onPress={() => router.replace('/home')}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Continue to Yeti"
             >
               <Text style={styles.primaryBtnText}>Continue to Yeti</Text>
             </TouchableOpacity>
@@ -224,6 +228,9 @@ export default function ResetPasswordScreen() {
               onPress={handleUpdatePassword}
               disabled={!password || !confirmPassword || loading}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Update password"
+              accessibilityState={{ disabled: !password || !confirmPassword || loading, busy: loading }}
             >
               {loading ? <ActivityIndicator color={P.BG} /> : <Text style={styles.primaryBtnText}>Update Password</Text>}
             </TouchableOpacity>

@@ -277,6 +277,8 @@ export default function AuthScreen() {
           style={styles.forgotPasswordBtn}
           onPress={() => router.push('/forgot-password')}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Forgot password?"
         >
           <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
         </TouchableOpacity>
@@ -293,6 +295,9 @@ export default function AuthScreen() {
             style={styles.resendBtn}
             onPress={handleResendVerification}
             disabled={resending}
+            accessibilityRole="button"
+            accessibilityLabel="Resend verification email"
+            accessibilityState={{ disabled: resending, busy: resending }}
           >
             {resending ? (
               <ActivityIndicator size="small" color={P.ACCENT} />
@@ -308,18 +313,22 @@ export default function AuthScreen() {
           </View>
         ) : (
           <View style={styles.actionContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
               onPress={signInWithEmail}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Log in"
             >
               <Text style={styles.loginBtnText}>Log In</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={styles.signUpBtn}
               onPress={signUpWithEmail}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Sign up"
             >
               <Text style={styles.signUpBtnText}>Sign Up</Text>
             </TouchableOpacity>
@@ -334,6 +343,8 @@ export default function AuthScreen() {
               style={styles.googleBtn}
               onPress={signInWithGoogle}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Continue with Google"
             >
               <Ionicons name="logo-google" size={18} color={P.TEXT_PRI} />
               <Text style={styles.googleBtnText}>Continue with Google</Text>

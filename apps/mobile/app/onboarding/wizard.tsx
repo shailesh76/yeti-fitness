@@ -38,7 +38,14 @@ export default function OnboardingWizard() {
           <TextInput style={styles.input} placeholder="Weight (kg)" placeholderTextColor="#666" keyboardType="numeric" value={weight} onChangeText={setWeight} />
           <View style={{ flexDirection: 'row', gap: 10 }}>
             {['Male', 'Female', 'Other'].map(g => (
-              <TouchableOpacity key={g} style={[styles.choiceBtn, { flex: 1, padding: 12 }, gender === g && styles.choiceActive]} onPress={() => setGender(g)}>
+              <TouchableOpacity
+                key={g}
+                style={[styles.choiceBtn, { flex: 1, padding: 12 }, gender === g && styles.choiceActive]}
+                onPress={() => setGender(g)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: gender === g }}
+                accessibilityLabel={g}
+              >
                 <Text style={[styles.choiceText, { textAlign: 'center' }, gender === g && styles.choiceTextActive]}>{g}</Text>
               </TouchableOpacity>
             ))}
@@ -51,7 +58,14 @@ export default function OnboardingWizard() {
           <Text style={styles.title}>Primary Goal</Text>
           <Text style={styles.subtitle}>What are we focusing on?</Text>
           {['Muscle Gain', 'Fat Loss', 'Strength', 'Maintenance'].map(g => (
-            <TouchableOpacity key={g} style={[styles.choiceBtn, goal === g && styles.choiceActive]} onPress={() => setGoal(g)}>
+            <TouchableOpacity
+              key={g}
+              style={[styles.choiceBtn, goal === g && styles.choiceActive]}
+              onPress={() => setGoal(g)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: goal === g }}
+              accessibilityLabel={g}
+            >
               <Text style={[styles.choiceText, goal === g && styles.choiceTextActive]}>{g}</Text>
             </TouchableOpacity>
           ))}
@@ -63,7 +77,14 @@ export default function OnboardingWizard() {
           <Text style={styles.title}>Experience Level</Text>
           <Text style={styles.subtitle}>This sets your initial volume.</Text>
           {['Beginner', 'Intermediate', 'Advanced'].map(e => (
-            <TouchableOpacity key={e} style={[styles.choiceBtn, experience === e && styles.choiceActive]} onPress={() => setExperience(e)}>
+            <TouchableOpacity
+              key={e}
+              style={[styles.choiceBtn, experience === e && styles.choiceActive]}
+              onPress={() => setExperience(e)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: experience === e }}
+              accessibilityLabel={e}
+            >
               <Text style={[styles.choiceText, experience === e && styles.choiceTextActive]}>{e}</Text>
             </TouchableOpacity>
           ))}
@@ -76,13 +97,27 @@ export default function OnboardingWizard() {
           <Text style={styles.subtitle}>How often and where?</Text>
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
             {['Gym', 'Home'].map(env => (
-              <TouchableOpacity key={env} style={[styles.choiceBtn, { flex: 1, padding: 12 }, environment === env && styles.choiceActive]} onPress={() => setEnvironment(env)}>
+              <TouchableOpacity
+                key={env}
+                style={[styles.choiceBtn, { flex: 1, padding: 12 }, environment === env && styles.choiceActive]}
+                onPress={() => setEnvironment(env)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: environment === env }}
+                accessibilityLabel={env}
+              >
                 <Text style={[styles.choiceText, { textAlign: 'center' }, environment === env && styles.choiceTextActive]}>{env}</Text>
               </TouchableOpacity>
             ))}
           </View>
           {['2 Days', '3 Days', '4 Days', '5+ Days'].map(d => (
-            <TouchableOpacity key={d} style={[styles.choiceBtn, days === d && styles.choiceActive]} onPress={() => setDays(d)}>
+            <TouchableOpacity
+              key={d}
+              style={[styles.choiceBtn, days === d && styles.choiceActive]}
+              onPress={() => setDays(d)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: days === d }}
+              accessibilityLabel={d}
+            >
               <Text style={[styles.choiceText, days === d && styles.choiceTextActive]}>{d}</Text>
             </TouchableOpacity>
           ))}
@@ -95,13 +130,13 @@ export default function OnboardingWizard() {
           <Text style={styles.subtitle}>Let Yeti calculate your macros.</Text>
           <TextInput style={styles.input} placeholder="Dietary Preference (e.g. Vegan, Keto, Any)" placeholderTextColor="#666" value={diet} onChangeText={setDiet} />
           <TextInput style={styles.input} placeholder="Manual Calories (Optional)" placeholderTextColor="#666" keyboardType="numeric" value={calories} onChangeText={setCalories} />
-          <TouchableOpacity style={styles.calcBtn}>
+          <TouchableOpacity style={styles.calcBtn} accessibilityRole="button" accessibilityLabel="Auto-calculate with Yeti AI">
             <Text style={styles.calcText}>Auto-Calculate with Yeti AI 🧠</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
+      <TouchableOpacity style={styles.nextBtn} onPress={handleNext} accessibilityRole="button" accessibilityLabel={step === 5 ? 'Generate dashboard' : 'Next'}>
         <Text style={styles.nextText}>{step === 5 ? 'Generate Dashboard' : 'Next'}</Text>
       </TouchableOpacity>
     </View>

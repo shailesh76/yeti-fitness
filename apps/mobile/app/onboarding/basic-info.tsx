@@ -87,6 +87,9 @@ export default function BasicInfoScreen() {
                           isSelected ? styles.genderBtnSelected : null
                         ]}
                         activeOpacity={0.8}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: isSelected }}
+                        accessibilityLabel={g}
                       >
                         <Text style={[
                           styles.genderText,
@@ -110,6 +113,9 @@ export default function BasicInfoScreen() {
             onPress={handleNext}
             disabled={!isFormValid}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Next step"
+            accessibilityState={{ disabled: !isFormValid }}
           >
             <Text style={[
               styles.nextBtnText,

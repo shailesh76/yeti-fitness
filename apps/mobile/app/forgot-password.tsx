@@ -64,7 +64,13 @@ export default function ForgotPasswordScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <Animated.View entering={FadeInDown.duration(600).springify()} style={[sharedStyles.cardGlow, styles.card]}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={22} color={P.TEXT_SEC} />
         </TouchableOpacity>
 
@@ -82,10 +88,17 @@ export default function ForgotPasswordScreen() {
               style={[styles.primaryBtn, glowStyle(P.ACCENT, 12, 0.45)]}
               onPress={() => router.replace('/auth')}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Back to log in"
             >
               <Text style={styles.primaryBtnText}>Back to Log In</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.linkBtn} onPress={() => setSent(false)}>
+            <TouchableOpacity
+              style={styles.linkBtn}
+              onPress={() => setSent(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Didn't get it? Try again"
+            >
               <Text style={styles.linkBtnText}>Didn&apos;t get it? Try again</Text>
             </TouchableOpacity>
           </View>
@@ -129,6 +142,9 @@ export default function ForgotPasswordScreen() {
               onPress={handleSendResetLink}
               disabled={!email.trim() || loading}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Send reset link"
+              accessibilityState={{ disabled: !email.trim() || loading, busy: loading }}
             >
               {loading ? (
                 <ActivityIndicator color={P.BG} />
@@ -137,7 +153,12 @@ export default function ForgotPasswordScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.linkBtn} onPress={() => router.replace('/auth')}>
+            <TouchableOpacity
+              style={styles.linkBtn}
+              onPress={() => router.replace('/auth')}
+              accessibilityRole="button"
+              accessibilityLabel="Back to log in"
+            >
               <Text style={styles.linkBtnText}>Back to Log In</Text>
             </TouchableOpacity>
           </>

@@ -83,6 +83,8 @@ export default function BetaFeedbackScreen() {
           <TouchableOpacity
             style={styles.backBtn}
             onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
             <Text style={styles.backBtnText}>Go Back</Text>
           </TouchableOpacity>

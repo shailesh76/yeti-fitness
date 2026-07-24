@@ -130,6 +130,9 @@ export default function GoalsScreen() {
                     isSelected ? styles.cardBtnSelected : null
                   ]}
                   activeOpacity={0.8}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected }}
+                  accessibilityLabel={`${goalItem.title}. ${goalItem.subtitle}`}
                 >
                   <Text style={[
                     styles.cardTitle,
@@ -162,6 +165,9 @@ export default function GoalsScreen() {
                     isSelected ? styles.cardBtnSelected : null
                   ]}
                   activeOpacity={0.8}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected }}
+                  accessibilityLabel={`${actItem.title}. ${actItem.subtitle}`}
                 >
                   <Text style={[
                     styles.cardTitle,
@@ -186,6 +192,8 @@ export default function GoalsScreen() {
             style={styles.backBtn}
             onPress={() => router.back()}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
             <Text style={styles.backBtnText}>Back</Text>
           </TouchableOpacity>
@@ -198,6 +206,9 @@ export default function GoalsScreen() {
             onPress={handleComplete}
             disabled={!isFormValid || loading}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Finish profile"
+            accessibilityState={{ disabled: !isFormValid || loading, busy: loading }}
           >
             {loading ? (
               <ActivityIndicator color="#000000" />

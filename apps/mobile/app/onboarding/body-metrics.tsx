@@ -94,15 +94,17 @@ export default function BodyMetricsScreen() {
           </View>
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backBtn}
               onPress={() => router.back()}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
             >
               <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[
                 styles.nextBtn,
                 isFormValid ? [styles.nextBtnActive, glowStyle(P.ACCENT, 12, 0.45)] : null
@@ -110,6 +112,9 @@ export default function BodyMetricsScreen() {
               onPress={handleNext}
               disabled={!isFormValid}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Next step"
+              accessibilityState={{ disabled: !isFormValid }}
             >
               <Text style={[
                 styles.nextBtnText,

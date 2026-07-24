@@ -50,18 +50,25 @@ export default function NotificationCenterScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <TouchableOpacity 
-              onPress={() => router.back()} 
+            <TouchableOpacity
+              onPress={() => router.back()}
               style={styles.backBtn}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
             >
               <Ionicons name="arrow-back" size={20} color={P.ACCENT} />
             </TouchableOpacity>
             <Text style={styles.title}>Notifications</Text>
           </View>
-          
+
           {notifications.length > 0 && (
-            <TouchableOpacity onPress={markAllAsRead} activeOpacity={0.8}>
+            <TouchableOpacity
+              onPress={markAllAsRead}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Mark all as read"
+            >
               <Text style={styles.markAllText}>Mark all read</Text>
             </TouchableOpacity>
           )}
@@ -91,6 +98,8 @@ export default function NotificationCenterScreen() {
                       isUnread ? styles.notifItemUnread : null
                     ]}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${isUnread ? 'Unread. ' : ''}${notif.title}. ${notif.body}`}
                   >
                     <View style={[
                       styles.iconWrapper,
@@ -242,7 +251,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.04)',
   },
   iconWrapperUnread: {
-    backgroundColor: 'rgba(57,255,106,0.1)',
+    backgroundColor: P.ACCENT_DIM,
     borderColor: P.ACCENT_BORDER,
   },
   itemHeader: {
