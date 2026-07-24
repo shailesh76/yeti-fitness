@@ -17,11 +17,11 @@ export default function ExercisesScreen() {
   const session = useAuthStore((state) => state.session);
   const { exerciseRepository } = useRepositories();
   const router = useRouter();
-  const params = useLocalSearchParams<{ builderPick?: string }>();
+  const params = useLocalSearchParams<{ builderPick?: string; muscle?: string }>();
   const builderPickSuffix = params.builderPick === '1' ? '?builderPick=1' : '';
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMuscle, setSelectedMuscle] = useState('All');
+  const [selectedMuscle, setSelectedMuscle] = useState(params.muscle || 'All');
   const [selectedEquipment, setSelectedEquipment] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
