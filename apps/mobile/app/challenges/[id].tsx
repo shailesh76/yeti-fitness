@@ -95,7 +95,7 @@ export default function ChallengeDetailScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centeredContainer}>
           <Text style={styles.errorText}>Challenge not found</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity accessible={true} accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={styles.backButton}>
             <Text style={styles.backButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
   },
   avatarCellMe: {
     borderColor: P.ACCENT,
-    backgroundColor: 'rgba(57,255,106,0.15)',
+    backgroundColor: P.ACCENT_DIM,
   },
   avatarCellTop3: {
     borderColor: 'rgba(255,255,255,0.12)',
@@ -380,7 +380,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   youBadge: {
-    color: 'rgba(57,255,106,0.7)',
+    color: P.ACCENT,
     fontSize: 8,
     fontWeight: '900',
     textTransform: 'uppercase',
