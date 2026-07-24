@@ -63,20 +63,9 @@ function rpeDescriptor(rpe: number): string {
   return 'Very Light';
 }
 
-// Alert.alert is a no-op on React Native Web, so a native-only confirm would
-// make "End Workout" silently do nothing in the browser. Use window.confirm on
-// web and the native Alert elsewhere.
-function confirmDestructive(title: string, message: string, confirmLabel: string, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
-  } else {
-    Alert.alert(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: confirmLabel, style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-}
-
+// Alert.alert is a no-op on RN Web and window.confirm/alert can be suppressed
+// inside embedded preview frames, so confirmations use an in-app modal instead
+// (see the confirmDialog overlay). This is only for the rare save-error path.
 function notify(title: string, message: string) {
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined') window.alert(`${title}\n\n${message}`);
@@ -244,6 +233,9 @@ export default function WorkoutSessionScreen() {
 
   const [isFinishing, setIsFinishing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string; message: string; confirmLabel: string; onConfirm: () => void;
+  } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [heroUri, setHeroUri] = useState<string | undefined>(undefined);
@@ -366,16 +358,21 @@ export default function WorkoutSessionScreen() {
 
   const handleEndWorkout = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    confirmDestructive('End Workout', 'Save and finish this workout session?', 'End Workout', doFinish);
+    setConfirmDialog({
+      title: 'End Workout',
+      message: 'Save and finish this workout session?',
+      confirmLabel: 'End Workout',
+      onConfirm: doFinish,
+    });
   }, [doFinish]);
 
   const handleMenu = useCallback(() => {
-    confirmDestructive(
-      activeSession?.name || 'Workout',
-      'Discard this workout without saving?',
-      'Discard Workout',
-      () => { abandonSession(); router.replace('/workouts'); },
-    );
+    setConfirmDialog({
+      title: activeSession?.name || 'Workout',
+      message: 'Discard this workout without saving?',
+      confirmLabel: 'Discard',
+      onConfirm: () => { abandonSession(); router.replace('/home'); },
+    });
   }, [activeSession?.name, abandonSession, router]);
 
   const saveNote = useCallback(() => {
@@ -383,12 +380,13 @@ export default function WorkoutSessionScreen() {
     setNotesOpen(false);
   }, [noteDraft, setNotes]);
 
-  // The active-session redirect uses router.replace(), so there may be no
-  // history entry to pop — fall back to the Workouts tab instead of firing an
-  // unhandled GO_BACK.
+  // Leaving the active-workout screen goes to Home (the session keeps running
+  // in the background and resumes when you return). We deliberately do NOT use
+  // router.back() or target /workouts: back() can throw an unhandled GO_BACK
+  // when this screen was launched via replace()/deep-link, and /workouts would
+  // bounce straight back here via its own active-session redirect.
   const handleBack = useCallback(() => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/workouts');
+    router.replace('/home');
   }, [router]);
 
   // ── No active session ─────────────────────────────────────────────────────
@@ -811,6 +809,37 @@ export default function WorkoutSessionScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* In-app confirm modal — reliable across web, native, and preview frames
+          where Alert.alert / window.confirm are no-ops or suppressed */}
+      {confirmDialog && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{confirmDialog.title}</Text>
+            <Text style={styles.modalMessage}>{confirmDialog.message}</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                onPress={() => setConfirmDialog(null)}
+                style={styles.modalCancelBtn}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={confirmDialog.confirmLabel}
+                onPress={() => { const cb = confirmDialog.onConfirm; setConfirmDialog(null); cb(); }}
+                style={styles.modalConfirmBtn}
+              >
+                <Text style={styles.modalConfirmText}>{confirmDialog.confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Lock overlay — prevents accidental taps mid-set; tap the button to exit */}
       {isLocked && (
         <View style={styles.lockOverlay}>
@@ -1054,6 +1083,32 @@ const styles = StyleSheet.create({
     backgroundColor: P.DESTRUCTIVE, borderRadius: P.RADIUS_PILL,
   },
   barBtnPrimaryText: { color: '#FFF', fontSize: 13, fontWeight: '900' },
+
+  // Confirm modal
+  modalOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center', padding: 28, zIndex: 60,
+  },
+  modalCard: {
+    width: '100%', maxWidth: 360,
+    backgroundColor: P.CARD_BG, borderWidth: 1, borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD, padding: 22,
+  },
+  modalTitle: { color: P.TEXT_PRI, fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
+  modalMessage: { color: P.TEXT_SEC, fontSize: 14, fontWeight: '500', lineHeight: 20, marginTop: 8 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 22 },
+  modalCancelBtn: {
+    flex: 1, height: 48, alignItems: 'center', justifyContent: 'center',
+    borderRadius: P.RADIUS_PILL, backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: P.CARD_BORDER,
+  },
+  modalCancelText: { color: P.TEXT_PRI, fontSize: 14, fontWeight: '800' },
+  modalConfirmBtn: {
+    flex: 1, height: 48, alignItems: 'center', justifyContent: 'center',
+    borderRadius: P.RADIUS_PILL, backgroundColor: P.DESTRUCTIVE,
+  },
+  modalConfirmText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
 
   // Lock overlay
   lockOverlay: {
