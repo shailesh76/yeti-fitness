@@ -266,6 +266,9 @@ export default function FoodDiaryScreen() {
               </View>
               {/* Calendar toggle button */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={showMonthView ? 'Switch to week view' : 'Switch to month view'}
                 onPress={() => setShowMonthView(!showMonthView)}
                 style={sharedStyles.circleBtn}
                 activeOpacity={0.7}
@@ -288,6 +291,9 @@ export default function FoodDiaryScreen() {
                   {selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase()}
                 </Text>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={showMonthView ? 'Switch to week view' : 'Switch to month view'}
                   onPress={() => setShowMonthView(!showMonthView)}
                   style={styles.calToggleBtn}
                   activeOpacity={0.7}
@@ -307,6 +313,10 @@ export default function FoodDiaryScreen() {
                     return (
                       <TouchableOpacity
                         key={idx}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isSel }}
+                        accessibilityLabel={day.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                         onPress={() => setSelectedDate(day)}
                         style={[styles.calDay, isSel && styles.calDayActive]}
                         activeOpacity={0.8}
@@ -330,13 +340,25 @@ export default function FoodDiaryScreen() {
                 /* ── Month grid ─────────────────────────────────────── */
                 <View>
                   <View style={[sharedStyles.rowBetween, { marginBottom: 8 }]}>
-                    <TouchableOpacity onPress={handlePrevMonth} style={styles.navBtn}>
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Previous month"
+                      onPress={handlePrevMonth}
+                      style={styles.navBtn}
+                    >
                       <Ionicons name="chevron-back" size={16} color={P.TEXT_PRI} />
                     </TouchableOpacity>
                     <Text style={styles.navMonthText}>
                       {selectedDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
                     </Text>
-                    <TouchableOpacity onPress={handleNextMonth} style={styles.navBtn}>
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Next month"
+                      onPress={handleNextMonth}
+                      style={styles.navBtn}
+                    >
                       <Ionicons name="chevron-forward" size={16} color={P.TEXT_PRI} />
                     </TouchableOpacity>
                   </View>
@@ -353,6 +375,10 @@ export default function FoodDiaryScreen() {
                       return (
                         <TouchableOpacity
                           key={day.toDateString()}
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSel }}
+                          accessibilityLabel={day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
                           onPress={() => { setSelectedDate(day); setShowMonthView(false); }}
                           style={[styles.gridCell, isSel && styles.gridCellActive]}
                           activeOpacity={0.8}
@@ -378,6 +404,9 @@ export default function FoodDiaryScreen() {
             <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.captureTilesRow}>
               {/* Snap Photo — primary / brighter */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Snap a photo of your food"
                 onPress={() => router.push({ pathname: '/food-search', params: { mealType: 'BREAKFAST', openCamera: 'photo' } })}
                 style={[styles.captureTilePrimary, glowStyle(P.ACCENT, 14, 0.30)]}
                 activeOpacity={0.8}
@@ -390,6 +419,9 @@ export default function FoodDiaryScreen() {
 
               {/* Barcode — secondary */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Scan a food barcode"
                 onPress={() => router.push({ pathname: '/food-search', params: { mealType: 'BREAKFAST', openCamera: 'barcode' } })}
                 style={styles.captureTileSecondary}
                 activeOpacity={0.8}
@@ -400,6 +432,9 @@ export default function FoodDiaryScreen() {
 
               {/* Search — secondary */}
               <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Search for food"
                 onPress={() => router.push({ pathname: '/food-search', params: { mealType: 'BREAKFAST' } })}
                 style={styles.captureTileSecondary}
                 activeOpacity={0.8}
@@ -512,6 +547,9 @@ export default function FoodDiaryScreen() {
                       </View>
                     </View>
                     <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add food to ${type.charAt(0) + type.slice(1).toLowerCase()}`}
                       onPress={() => router.push({ pathname: '/food-search', params: { mealType: type } })}
                       style={[styles.addBtn, { borderColor: meta.color + '40', backgroundColor: meta.color + '10' }]}
                       activeOpacity={0.8}
@@ -558,6 +596,9 @@ export default function FoodDiaryScreen() {
                               </Text>
                               <View style={[sharedStyles.row, { gap: 6 }]}>
                                 <TouchableOpacity
+                                  accessible={true}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Edit servings for ${log.food?.name}`}
                                   onPress={() => handleEditServings(log)}
                                   style={styles.logActionBtn}
                                   activeOpacity={0.7}
@@ -565,6 +606,9 @@ export default function FoodDiaryScreen() {
                                   <Text style={styles.logActionText}>Edit</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
+                                  accessible={true}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Delete ${log.food?.name} from log`}
                                   onPress={() => deleteMealLog(log.id)}
                                   style={[styles.logActionBtn, styles.logDeleteBtn]}
                                   activeOpacity={0.7}
@@ -601,6 +645,9 @@ export default function FoodDiaryScreen() {
               />
               <View style={[sharedStyles.row, { gap: 12, marginTop: 16 }]}>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel editing servings"
                   onPress={() => setEditingLog(null)}
                   style={[styles.modalBtn, styles.modalBtnGhost]}
                   activeOpacity={0.8}
@@ -608,6 +655,9 @@ export default function FoodDiaryScreen() {
                   <Text style={styles.modalBtnGhostText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save servings"
                   onPress={handleSaveServings}
                   style={[styles.modalBtn, styles.modalBtnPrimary, glowStyle(P.ACCENT, 10, 0.35)]}
                   activeOpacity={0.85}
@@ -689,7 +739,7 @@ const styles = StyleSheet.create({
     gap:             2,
   },
   calDayActive: {
-    backgroundColor: 'rgba(57,255,106,0.08)',
+    backgroundColor: P.ACCENT_DIM,
     borderWidth:     2,
     borderColor:     P.ACCENT,
     ...Platform.select({
@@ -761,7 +811,7 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
   gridCellActive: {
-    backgroundColor: 'rgba(57,255,106,0.10)',
+    backgroundColor: P.ACCENT_DIM,
     borderWidth:     1,
     borderColor:     P.ACCENT_BORDER,
   },
