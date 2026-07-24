@@ -56,6 +56,9 @@ export const P = {
   AMBER_DIM:     'rgba(255, 214, 10, 0.12)',
   AMBER_BORDER:  'rgba(255, 214, 10, 0.30)',
 
+  PURPLE_AI_DIM:    'rgba(139, 92, 246, 0.12)',
+  PURPLE_AI_BORDER: 'rgba(139, 92, 246, 0.20)',
+
   // Dark Monolithic Surfaces — exact v1.0 spec values
   BG:             '#090B10', // Main screen background
   CARD_BG:        '#161B22', // Card surface
