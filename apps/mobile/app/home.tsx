@@ -553,16 +553,15 @@ const QuickActionsGrid = memo(({
 }: {
   onNavigate: (route: string) => void;
 }) => {
+  // Matches the reference's exact 4 actions, in order. Scan Food and Progress
+  // Check (both real, previously shown here as a 5th/6th tile) are dropped from
+  // this grid — they're still one tap away via the Food Diary's own scan button
+  // and the bottom tab bar's Progress tab, so nothing becomes unreachable.
   const actions = [
-    // Reference's primary 4 (same order/labels), each wired to the screen where
-    // that existing capability actually lives.
-    { label: 'Log Workout', icon: 'barbell-outline', route: '/workouts', color: P.ACCENT },
-    { label: 'Add Meal', icon: 'restaurant-outline', route: '/food-diary', color: P.PROTEIN },
-    { label: 'Track Weight', icon: 'scale-outline', route: '/analytics', color: P.WATER },
-    { label: 'Log Water', icon: 'water-outline', route: '/food-diary', color: P.WATER },
-    // Existing shortcuts preserved as an additional row in the same style.
-    { label: 'Scan Food', icon: 'camera-outline', route: '/ai-food-scan', color: P.ACCENT_BRIGHT },
-    { label: 'Progress Check', icon: 'analytics-outline', route: '/analytics', color: P.ACCENT_BRIGHT },
+    { label: 'Log Workout', icon: 'barbell-outline', route: '/workouts' },
+    { label: 'Add Meal', icon: 'restaurant-outline', route: '/food-diary' },
+    { label: 'Track Weight', icon: 'scale-outline', route: '/analytics' },
+    { label: 'Log Water', icon: 'water-outline', route: '/food-diary' },
   ];
 
   return (
@@ -582,8 +581,8 @@ const QuickActionsGrid = memo(({
             }}
             style={styles.actionGridTile}
           >
-            <View style={[styles.actionIconBg, { backgroundColor: act.color + '15', borderColor: act.color + '30' }]}>
-              <Ionicons name={act.icon as any} size={22} color={act.color} />
+            <View style={styles.actionIconBg}>
+              <Ionicons name={act.icon as any} size={22} color={P.ACCENT} />
             </View>
             <Text style={styles.actionTileLabel} numberOfLines={1}>{act.label}</Text>
           </TouchableOpacity>
@@ -593,6 +592,77 @@ const QuickActionsGrid = memo(({
   );
 });
 QuickActionsGrid.displayName = 'QuickActionsGrid';
+
+// ─── 8. Weekly Progress Stat Row ──────────────────────────────────────────────
+const WeeklyProgressCard = memo(({
+  workoutCount,
+  weeklyCalories,
+  targetWeeklyCalories,
+  readinessScore,
+  onPressViewAll,
+}: {
+  workoutCount: number;
+  weeklyCalories: number;
+  targetWeeklyCalories: number;
+  readinessScore: number;
+  onPressViewAll: () => void;
+}) => {
+  // Workouts has no real weekly target anywhere in the schema (plan_days is an
+  // ordered list of workout days, not a calendar/weekly schedule) — the bar
+  // shows calendar-day coverage (workouts / 7) rather than a fabricated target.
+  const workoutPct = Math.min(workoutCount / 7, 1);
+  const caloriePct = Math.min(weeklyCalories / (targetWeeklyCalories || 1), 1);
+  // Recovery reuses the same Yeti Readiness score shown above — there is no
+  // separate real weekly recovery metric computed anywhere yet, so this is a
+  // mirror of that (still-placeholder) number, not an independent calculation.
+  const recoveryPct = Math.min(readinessScore / 100, 1);
+
+  return (
+    <View style={{ marginBottom: 20 }}>
+      <View style={[sharedStyles.rowBetween, { marginBottom: 12 }]}>
+        <Text style={sharedStyles.labelCaps}>WEEKLY PROGRESS</Text>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="View all weekly progress"
+          onPress={onPressViewAll}
+        >
+          <Text style={styles.editActionText}>View All</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.weeklyStatsRow}>
+        <View style={styles.weeklyStatTile}>
+          <Text style={styles.weeklyStatLabel}>Workouts</Text>
+          <Text style={styles.weeklyStatValue}>{workoutCount}</Text>
+          <Text style={styles.weeklyStatSub}>This Week</Text>
+          <View style={styles.weeklyStatBarTrack}>
+            <View style={[styles.weeklyStatBarFill, { width: `${workoutPct * 100}%`, backgroundColor: P.ACCENT }]} />
+          </View>
+        </View>
+
+        <View style={styles.weeklyStatTile}>
+          <Text style={styles.weeklyStatLabel}>Calories</Text>
+          <Text style={styles.weeklyStatValue}>{weeklyCalories.toLocaleString()}</Text>
+          <Text style={styles.weeklyStatSub}>This Week</Text>
+          <View style={styles.weeklyStatBarTrack}>
+            <View style={[styles.weeklyStatBarFill, { width: `${caloriePct * 100}%`, backgroundColor: P.CALORIES }]} />
+          </View>
+        </View>
+
+        <View style={styles.weeklyStatTile}>
+          <Text style={styles.weeklyStatLabel}>Recovery</Text>
+          <Text style={styles.weeklyStatValue}>{readinessScore}%</Text>
+          <Text style={styles.weeklyStatSub}>This Week</Text>
+          <View style={styles.weeklyStatBarTrack}>
+            <View style={[styles.weeklyStatBarFill, { width: `${recoveryPct * 100}%`, backgroundColor: P.STEPS }]} />
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+});
+WeeklyProgressCard.displayName = 'WeeklyProgressCard';
 
 // ─── Main HomeScreen Master Component ─────────────────────────────────────────
 export default function HomeScreen() {
@@ -614,6 +684,8 @@ export default function HomeScreen() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [waterMl, setWaterMl] = useState(0);
   const [steps, setSteps] = useState(0);
+  const [weeklyWorkoutCount, setWeeklyWorkoutCount] = useState(0);
+  const [weeklyCalories, setWeeklyCalories] = useState(0);
 
   const waterGoal = useHydrationStore((s) => s.waterGoal);
   const getWaterForDate = useHydrationStore((s) => s.getWaterForDate);
@@ -653,6 +725,25 @@ export default function HomeScreen() {
 
       const telemetry = await fetchDailyTelemetry();
       setSteps(telemetry.steps);
+
+      // Weekly Progress: real completed-session count (this calendar week) and
+      // a real 7-day trailing calorie sum — no hardcoded weekly numbers.
+      const startOfWeek = new Date();
+      startOfWeek.setHours(0, 0, 0, 0);
+      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+      const history = await workoutRepository.getWorkoutHistory(userId);
+      const thisWeekSessions = history.filter((s) => (s.finished_at || 0) >= startOfWeek.getTime());
+      setWeeklyWorkoutCount(thisWeekSessions.length);
+
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        return d.getTime();
+      });
+      const dailyTotals = await Promise.all(
+        last7Days.map((dayMs) => nutritionRepository.calculateDailyNutrition(userId, dayMs))
+      );
+      setWeeklyCalories(dailyTotals.reduce((sum, d) => sum + d.calories, 0));
 
       if (isNativeDbAvailable && database) {
         const activeSessions = (await database
@@ -747,7 +838,18 @@ export default function HomeScreen() {
             <QuickActionsGrid onNavigate={(route) => router.push(route as any)} />
           </Animated.View>
 
-          {/* 6. Daily Progress 4-Ring Widget — not in the reference; kept below
+          {/* 6. Weekly Progress */}
+          <Animated.View entering={FadeInDown.duration(400).delay(220)}>
+            <WeeklyProgressCard
+              workoutCount={weeklyWorkoutCount}
+              weeklyCalories={weeklyCalories}
+              targetWeeklyCalories={targetMacros.calories * 7}
+              readinessScore={yetiScore}
+              onPressViewAll={() => router.push('/analytics')}
+            />
+          </Animated.View>
+
+          {/* 7. Daily Progress 4-Ring Widget — not in the reference; kept below
               the reference-matched flow rather than removed (real, wired data). */}
           <Animated.View entering={FadeInDown.duration(400).delay(240)}>
             <DailyProgressWidget
@@ -762,7 +864,7 @@ export default function HomeScreen() {
             />
           </Animated.View>
 
-          {/* 7. Hero Motivational Banner — not in the reference; kept as a
+          {/* 8. Hero Motivational Banner — not in the reference; kept as a
               secondary Coach entry point rather than removed. */}
           <Animated.View entering={FadeInDown.duration(400).delay(280)}>
             <MotivationalBanner onPressAsk={() => router.push('/coach')} />
@@ -939,9 +1041,32 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: P.RADIUS_SM,
     borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+    backgroundColor: P.ACCENT_DIM,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   actionTileLabel: { color: P.TEXT_PRI, fontSize: 12, fontWeight: '700', textAlign: 'center' },
+
+  // Weekly Progress
+  weeklyStatsRow: { flexDirection: 'row', gap: 10 },
+  weeklyStatTile: {
+    flex: 1,
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 12,
+  },
+  weeklyStatLabel: { color: P.TEXT_MUT, fontSize: 11, fontWeight: '700' },
+  weeklyStatValue: { color: P.TEXT_PRI, fontSize: 20, fontWeight: '900', marginTop: 6, letterSpacing: -0.3 },
+  weeklyStatSub: { color: P.TEXT_MUT, fontSize: 10, fontWeight: '600', marginTop: 2, marginBottom: 8 },
+  weeklyStatBarTrack: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 99,
+    overflow: 'hidden',
+  },
+  weeklyStatBarFill: { height: '100%', borderRadius: 99 },
 });
