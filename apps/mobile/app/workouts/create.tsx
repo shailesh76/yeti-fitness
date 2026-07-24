@@ -27,23 +27,55 @@ function ExerciseRow({ ex, index, total }: { ex: DraftExercise; index: number; t
           </Text>
         </View>
         <View style={styles.reorderCol}>
-          <TouchableOpacity disabled={index === 0} onPress={() => reorder(index, index - 1)} hitSlop={8}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${ex.exerciseName} up`}
+            disabled={index === 0}
+            onPress={() => reorder(index, index - 1)}
+            hitSlop={8}
+          >
             <Text style={[styles.reorderBtn, index === 0 && styles.reorderBtnDisabled]}>▲</Text>
           </TouchableOpacity>
-          <TouchableOpacity disabled={index === total - 1} onPress={() => reorder(index, index + 1)} hitSlop={8}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${ex.exerciseName} down`}
+            disabled={index === total - 1}
+            onPress={() => reorder(index, index + 1)}
+            hitSlop={8}
+          >
             <Text style={[styles.reorderBtn, index === total - 1 && styles.reorderBtnDisabled]}>▼</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.actionRow}>
-        <TouchableOpacity onPress={() => setExpanded(!expanded)} style={styles.actionBtn}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? `Hide configuration for ${ex.exerciseName}` : `Configure ${ex.exerciseName}`}
+          onPress={() => setExpanded(!expanded)}
+          style={styles.actionBtn}
+        >
           <Text style={styles.actionBtnText}>{expanded ? 'Hide Details' : 'Configure'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={startReplace} style={styles.actionBtn}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={`Replace ${ex.exerciseName}`}
+          onPress={startReplace}
+          style={styles.actionBtn}
+        >
           <Text style={styles.actionBtnText}>Replace</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => removeExercise(ex.tempId)} style={styles.actionBtn}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${ex.exerciseName}`}
+          onPress={() => removeExercise(ex.tempId)}
+          style={styles.actionBtn}
+        >
           <Text style={[styles.actionBtnText, styles.removeText]}>Remove</Text>
         </TouchableOpacity>
       </View>
@@ -72,6 +104,10 @@ function ExerciseRow({ ex, index, total }: { ex: DraftExercise; index: number; t
             onChangeText={v => updateExerciseConfig(ex.tempId, { warmupSets: Number(v) || 0 })}
           />
           <TouchableOpacity
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: ex.isDropset }}
+            accessibilityLabel={`Drop set for ${ex.exerciseName}`}
             onPress={() => updateExerciseConfig(ex.tempId, { isDropset: !ex.isDropset })}
             style={[styles.toggle, ex.isDropset ? styles.toggleOn : null]}
           >
@@ -158,11 +194,26 @@ export default function CreateWorkoutScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} activeOpacity={0.8}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel and go back"
+            onPress={() => router.back()}
+            style={styles.headerBtn}
+            activeOpacity={0.8}
+          >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.title}>{params.planId ? 'Edit Template' : 'New Template'}</Text>
-          <TouchableOpacity onPress={handleSave} disabled={saving || loading} style={styles.headerBtn} activeOpacity={0.8}>
+          <TouchableOpacity
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Save workout template"
+            onPress={handleSave}
+            disabled={saving || loading}
+            style={styles.headerBtn}
+            activeOpacity={0.8}
+          >
             {saving ? <ActivityIndicator color={P.ACCENT} /> : <Text style={styles.saveText}>Save</Text>}
           </TouchableOpacity>
         </View>
@@ -194,7 +245,14 @@ export default function CreateWorkoutScreen() {
 
             <View style={[sharedStyles.rowBetween, { marginBottom: 12 }]}>
               <Text style={[sharedStyles.labelCaps, styles.sectionLabel]}>Exercises ({exercises.length})</Text>
-              <TouchableOpacity onPress={() => router.push('/exercises?builderPick=1')} style={styles.addBtn} activeOpacity={0.8}>
+              <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Add exercise from library"
+                onPress={() => router.push('/exercises?builderPick=1')}
+                style={styles.addBtn}
+                activeOpacity={0.8}
+              >
                 <Text style={styles.addBtnText}>+ Add Exercise</Text>
               </TouchableOpacity>
             </View>
