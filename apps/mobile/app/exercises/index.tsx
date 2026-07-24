@@ -149,6 +149,9 @@ export default function ExercisesScreen() {
                 {recentExercises.map(ex => (
                   <TouchableOpacity
                     key={ex.id}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Search for ${ex.name}`}
                     onPress={() => setSearchQuery(ex.name)}
                     style={styles.recentPill}
                     activeOpacity={0.8}
@@ -169,6 +172,10 @@ export default function ExercisesScreen() {
             >
               {userId && (
                 <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: favoritesOnly }}
+                  accessibilityLabel="Filter to favorites only"
                   onPress={() => setFavoritesOnly(!favoritesOnly)}
                   style={[styles.chipBtn, favoritesOnly ? styles.favoriteChipSelected : null]}
                   activeOpacity={0.8}
@@ -183,6 +190,10 @@ export default function ExercisesScreen() {
                 return (
                   <TouchableOpacity
                     key={muscle}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Filter by muscle group: ${muscle}`}
                     onPress={() => setSelectedMuscle(muscle)}
                     style={[
                       styles.chipBtn,
@@ -212,6 +223,10 @@ export default function ExercisesScreen() {
                   return (
                     <TouchableOpacity
                       key={eq}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={`Filter by equipment: ${eq === 'All' ? 'All' : displayLabel(eq)}`}
                       onPress={() => setSelectedEquipment(eq)}
                       style={[styles.chipBtn, isSelected ? styles.chipBtnSelected : null]}
                       activeOpacity={0.8}
@@ -236,6 +251,10 @@ export default function ExercisesScreen() {
                   return (
                     <TouchableOpacity
                       key={cat}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={`Filter by category: ${cat === 'All' ? 'All' : displayLabel(cat)}`}
                       onPress={() => setSelectedCategory(cat)}
                       style={[styles.chipBtn, isSelected ? styles.chipBtnSelected : null]}
                       activeOpacity={0.8}
@@ -271,6 +290,9 @@ export default function ExercisesScreen() {
                         <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
 
                         <TouchableOpacity
+                          accessible={true}
+                          accessibilityRole="button"
+                          accessibilityLabel={`View ${ex.name}, ${ex.muscle_group || 'Full Body'}`}
                           onPress={() => router.push(`/exercises/${ex.id}${builderPickSuffix}`)}
                           style={styles.cardTrigger}
                           activeOpacity={0.8}
@@ -284,6 +306,10 @@ export default function ExercisesScreen() {
                           </View>
                           {userId && (
                             <TouchableOpacity
+                              accessible={true}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: isFavorite }}
+                              accessibilityLabel={isFavorite ? `Remove ${ex.name} from favorites` : `Add ${ex.name} to favorites`}
                               onPress={() => toggleFavorite(ex.id)}
                               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                               style={styles.favoriteBtn}
