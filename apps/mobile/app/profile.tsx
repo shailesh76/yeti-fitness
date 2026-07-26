@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, Switch, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, StyleSheet, Image, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,6 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import AppShell from '../components/AppShell';
 import { requestWearablePermissions } from '../services/wearableService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNotificationStore } from '../store/useNotificationStore';
 import { useNotificationHistoryStore } from '../store/useNotificationHistoryStore';
 import { useLogStore } from '../store/useLogStore';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
@@ -18,6 +17,8 @@ import Constants from 'expo-constants';
 
 // The Yeti mascot portrait the athlete's avatar defaults to (no photo upload yet).
 const YETI_AVATAR = require('../assets/yeti_avatar_portrait.png');
+// The full mascot badge used on the Go Premium banner.
+const YETI_MASCOT = require('../assets/yeti_mascot_avatar.png');
 
 const GOALS = [
   { id: 'BUILD_MUSCLE', label: 'Build Muscle', desc: 'High calorie & protein surplus' },
@@ -98,7 +99,6 @@ export default function MoreScreen() {
   const [wearablesConnected, setWearablesConnected] = useState(false);
   const [goalsExpanded, setGoalsExpanded] = useState(false);
 
-  const notifStore = useNotificationStore();
   const unreadCount = useNotificationHistoryStore((s) => s.unreadCount);
   const fetchNotifications = useNotificationHistoryStore((s) => s.fetchNotifications);
   const logsHistory = useLogStore((s) => s.logsHistory);
@@ -107,7 +107,6 @@ export default function MoreScreen() {
   const fetchPRs = useLogStore((s) => s.fetchPRs);
 
   useEffect(() => {
-    notifStore.loadPreferences();
     fetchNotifications();
     if (session?.user?.id) {
       fetchProfile();
@@ -201,6 +200,26 @@ export default function MoreScreen() {
       Alert.alert('Update Failed', 'Failed to save new goal. Please try again.');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  // Rows for features that don't have a screen/endpoint yet surface an honest
+  // "coming soon" message instead of navigating nowhere.
+  const handleComingSoon = (label: string) => () => {
+    if (Platform.OS === 'web') {
+      window.alert(`${label} is coming soon.`);
+    } else {
+      Alert.alert('Coming soon', `${label} isn't available yet — we're working on it.`);
+    }
+  };
+
+  const handleInvite = async () => {
+    try {
+      await Share.share({
+        message: "I'm crushing my goals with Yeti Fitness — come train with me! 🏔️",
+      });
+    } catch {
+      // user dismissed the share sheet, or sharing is unavailable on this platform
     }
   };
 
@@ -354,15 +373,49 @@ export default function MoreScreen() {
             </View>
           </Animated.View>
 
+          {/* ── Go Premium (not yet available) ─────────────────────── */}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Go Premium — coming soon"
+            activeOpacity={0.85}
+            onPress={handleComingSoon('Premium')}
+            style={styles.premiumCard}
+          >
+            <Image source={YETI_MASCOT} style={styles.premiumMascot} resizeMode="cover" />
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.premiumTitle}>Go Premium</Text>
+                <View style={styles.soonPill}><Text style={styles.soonPillText}>SOON</Text></View>
+              </View>
+              <Text style={styles.premiumSub}>Unlock advanced insights, custom programs, and more.</Text>
+            </View>
+            <View style={styles.premiumBtn}>
+              <Text style={styles.premiumBtnText}>Upgrade</Text>
+            </View>
+          </TouchableOpacity>
+
           {/* ── Account ────────────────────────────────────────────── */}
           <Text style={styles.sectionHeader}>ACCOUNT</Text>
           <View style={styles.group}>
             <SettingsRow
               first
-              icon="flag"
-              title="Goals"
+              icon="person"
+              title="Edit Profile"
+              subtitle="Update your personal information"
+              onPress={() => router.push('/onboarding/basic-info')}
+            />
+            <SettingsRow
+              icon="body"
+              title="Body Metrics"
+              subtitle="View and update your body measurements"
+              onPress={() => router.push('/onboarding/body-metrics')}
+            />
+            <SettingsRow
+              icon="barbell"
+              title="Training Preferences"
+              subtitle="Workout goals and preferences"
               value={goalsExpanded ? undefined : (currentGoal || 'Not set')}
-              accessibilityLabel="Change fitness goal"
+              accessibilityLabel="Change training goal"
               onPress={() => setGoalsExpanded((v) => !v)}
               accessory={<Ionicons name={goalsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={P.TEXT_MUT} />}
             />
@@ -393,25 +446,12 @@ export default function MoreScreen() {
               </View>
             )}
             <SettingsRow
-              icon="person"
-              title="Edit Profile"
-              subtitle="Update your personal information"
-              onPress={() => router.push('/onboarding/basic-info')}
+              icon="nutrition"
+              title="Nutrition Preferences"
+              subtitle="Dietary goals and food preferences"
+              onPress={() => router.push('/food-diary')}
             />
             <SettingsRow
-              last
-              icon="body"
-              title="Body Metrics"
-              subtitle="View and update your body measurements"
-              onPress={() => router.push('/onboarding/body-metrics')}
-            />
-          </View>
-
-          {/* ── Connected apps ─────────────────────────────────────── */}
-          <Text style={styles.sectionHeader}>CONNECTED APPS</Text>
-          <View style={styles.group}>
-            <SettingsRow
-              first
               last
               icon="link"
               iconColor={wearablesConnected ? P.SUCCESS : P.ACCENT}
@@ -429,66 +469,51 @@ export default function MoreScreen() {
             />
           </View>
 
-          {/* ── Notifications ──────────────────────────────────────── */}
-          <Text style={styles.sectionHeader}>NOTIFICATIONS</Text>
-          <View style={styles.group}>
-            {([
-              ['workoutReminders', 'Workout Reminders', 'Get reminded on training days'],
-              ['coachMessages', 'Coach Messages', 'Updates from your assigned coach'],
-              ['challengeUpdates', 'Challenge Updates', 'Rank changes and invites'],
-            ] as const).map(([key, title, subtitle], i, arr) => (
-              <SettingsRow
-                key={key}
-                first={i === 0}
-                last={i === arr.length - 1}
-                icon={key === 'workoutReminders' ? 'alarm' : key === 'coachMessages' ? 'chatbubble-ellipses' : 'trophy'}
-                title={title}
-                subtitle={subtitle}
-                accessory={
-                  <Switch
-                    accessible={true}
-                    accessibilityRole="switch"
-                    accessibilityLabel={`Toggle ${title}`}
-                    value={notifStore[key]}
-                    onValueChange={(val) => notifStore.setPreference(key, val)}
-                    trackColor={{ false: '#222', true: P.ACCENT }}
-                    thumbColor={Platform.OS === 'ios' ? '#FFFFFF' : (notifStore[key] ? P.ACCENT : '#888888')}
-                  />
-                }
-              />
-            ))}
-          </View>
-
           {/* ── Support & more ─────────────────────────────────────── */}
           <Text style={styles.sectionHeader}>SUPPORT & MORE</Text>
           <View style={styles.group}>
             <SettingsRow
               first
-              icon="trophy"
-              iconColor={P.WARNING}
-              title="Social Challenges"
-              subtitle="Leaderboards & step challenges"
-              onPress={() => router.push('/challenges')}
+              icon="help-buoy"
+              title="Help Center"
+              subtitle="Get help and find answers"
+              onPress={() => router.push('/settings/feedback')}
             />
             <SettingsRow
-              icon="help-buoy"
-              title="Help & Support"
-              subtitle="Get help and contact support"
+              icon="mail"
+              title="Contact Support"
+              subtitle="We're here to help"
               onPress={() => router.push('/settings/feedback')}
+            />
+            <SettingsRow
+              icon="person-add"
+              title="Invite Friends"
+              subtitle="Share Yeti Fitness with friends"
+              onPress={handleInvite}
             />
             <SettingsRow
               icon="star"
               iconColor={P.WARNING}
-              title="Rate the App"
+              title="Rate Yeti Fitness"
               subtitle="Share your feedback"
               onPress={() => router.push('/settings/feedback')}
             />
             <SettingsRow
+              icon="shield-checkmark"
+              title="Privacy Policy"
+              subtitle="Read our privacy policy"
+              accessibilityLabel="Privacy Policy — coming soon"
+              onPress={handleComingSoon('Privacy Policy')}
+              accessory={<View style={styles.soonPill}><Text style={styles.soonPillText}>SOON</Text></View>}
+            />
+            <SettingsRow
               last
-              icon="pulse"
-              title="System Diagnostics"
-              subtitle="App details, sync state & entitlements"
-              onPress={() => router.push('/settings/diagnostics')}
+              icon="document-text"
+              title="Terms of Service"
+              subtitle="Read our terms of service"
+              accessibilityLabel="Terms of Service — coming soon"
+              onPress={handleComingSoon('Terms of Service')}
+              accessory={<View style={styles.soonPill}><Text style={styles.soonPillText}>SOON</Text></View>}
             />
           </View>
 
@@ -718,6 +743,32 @@ const styles = StyleSheet.create({
     color: P.TEXT_SEC,
     marginTop: 3,
   },
+
+  premiumCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: P.RADIUS_CARD,
+    backgroundColor: P.ACCENT_DIM,
+    borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+  },
+  premiumMascot: { width: 48, height: 48, borderRadius: 12 },
+  premiumTitle: { fontSize: 15, fontWeight: '900', color: P.TEXT_PRI },
+  premiumSub: { fontSize: 11, fontWeight: '600', color: P.TEXT_SEC, marginTop: 3, lineHeight: 15 },
+  premiumBtn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: P.ACCENT },
+  premiumBtnText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
+  soonPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: P.WARNING + '22',
+    borderWidth: 1,
+    borderColor: P.WARNING + '55',
+  },
+  soonPillText: { fontSize: 8, fontWeight: '900', color: P.WARNING, letterSpacing: 0.6 },
 
   pill: {
     paddingHorizontal: 10,
