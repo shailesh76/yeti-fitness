@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, Switch, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, Switch, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,9 @@ import { useNotificationHistoryStore } from '../store/useNotificationHistoryStor
 import { useLogStore } from '../store/useLogStore';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import Constants from 'expo-constants';
+
+// The Yeti mascot portrait the athlete's avatar defaults to (no photo upload yet).
+const YETI_AVATAR = require('../assets/yeti_avatar_portrait.png');
 
 const GOALS = [
   { id: 'BUILD_MUSCLE', label: 'Build Muscle', desc: 'High calorie & protein surplus' },
@@ -245,7 +248,6 @@ export default function MoreScreen() {
   };
 
   const displayName = profile?.full_name || 'Dude Athlete';
-  const initial = (displayName || session?.user?.email || 'A').trim().charAt(0).toUpperCase();
   const currentGoal = profile?.goal ? GOAL_LABEL[profile.goal] : undefined;
 
   if (loading) {
@@ -303,7 +305,7 @@ export default function MoreScreen() {
               activeOpacity={0.85}
             >
               <View style={styles.avatar}>
-                <Text style={styles.avatarInitial}>{initial}</Text>
+                <Image source={YETI_AVATAR} style={styles.avatarImg} resizeMode="cover" />
               </View>
               <View style={styles.avatarEdit}>
                 <Ionicons name="camera" size={11} color="#FFFFFF" />
@@ -581,12 +583,13 @@ const styles = StyleSheet.create({
     borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
     ...glowStyle(P.ACCENT, 12, 0.3),
   },
-  avatarInitial: {
-    fontSize: 24,
-    fontWeight: '900',
-    color: P.ACCENT,
+  avatarImg: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 30,
   },
   profileName: {
     fontSize: 19,

@@ -110,7 +110,6 @@ const HeaderAndGreeting = memo(({
   else if (currentHour >= 17) greeting = 'Good evening';
 
   const firstName = fullName.split(' ')[0] || 'Athlete';
-  const initial = firstName.charAt(0).toUpperCase();
 
   return (
     <View style={[sharedStyles.rowBetween, { marginBottom: 20 }]}>
@@ -123,7 +122,11 @@ const HeaderAndGreeting = memo(({
         style={sharedStyles.row}
       >
         <View style={styles.avatarCircle}>
-          <Text style={styles.avatarInitial}>{initial}</Text>
+          <Image
+            source={require('../assets/yeti_avatar_portrait.png')}
+            style={styles.avatarImg}
+            resizeMode="cover"
+          />
         </View>
         <View style={{ marginLeft: 12 }}>
           <Text style={styles.greetingTitle}>
@@ -889,8 +892,9 @@ const styles = StyleSheet.create({
     borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarInitial: { color: P.ACCENT, fontSize: 17, fontWeight: '900' },
+  avatarImg: { width: '100%', height: '100%', borderRadius: 22 },
   greetingSub: { color: P.TEXT_SEC, fontSize: 12, fontWeight: '600', marginTop: 2 },
   bellBtn: {
     width: 44,
