@@ -383,7 +383,7 @@ export default function FoodDiaryScreen() {
   );
 
   const renderMealsSection = () => (
-    <View style={{ flex: 1 }}>
+    <View>
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionHeaderLabel}>MEALS & LOGS</Text>
         <Text style={styles.sectionHeaderSubKcal}>{consumedCalories.toLocaleString()} kcal</Text>
@@ -436,7 +436,7 @@ export default function FoodDiaryScreen() {
   );
 
   const renderWaterSection = () => (
-    <View style={{ flex: 1 }}>
+    <View>
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionHeaderLabel}>WATER INTAKE</Text>
         <Text style={styles.sectionHeaderSubKcal}>{waterLiters} / {waterGoalLiters}L</Text>
