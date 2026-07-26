@@ -11,7 +11,10 @@ import AppShell from '../components/AppShell';
 import { requestWearablePermissions } from '../services/wearableService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNotificationStore } from '../store/useNotificationStore';
+import { useNotificationHistoryStore } from '../store/useNotificationHistoryStore';
+import { useLogStore } from '../store/useLogStore';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
+import Constants from 'expo-constants';
 
 const GOALS = [
   { id: 'BUILD_MUSCLE', label: 'Build Muscle', desc: 'High calorie & protein surplus' },
@@ -93,16 +96,63 @@ export default function MoreScreen() {
   const [goalsExpanded, setGoalsExpanded] = useState(false);
 
   const notifStore = useNotificationStore();
+  const unreadCount = useNotificationHistoryStore((s) => s.unreadCount);
+  const fetchNotifications = useNotificationHistoryStore((s) => s.fetchNotifications);
+  const logsHistory = useLogStore((s) => s.logsHistory);
+  const prs = useLogStore((s) => s.prs);
+  const fetchLogsHistory = useLogStore((s) => s.fetchLogsHistory);
+  const fetchPRs = useLogStore((s) => s.fetchPRs);
 
   useEffect(() => {
     notifStore.loadPreferences();
+    fetchNotifications();
     if (session?.user?.id) {
       fetchProfile();
       checkWearables();
+      fetchLogsHistory(session.user.id);
+      fetchPRs(session.user.id);
     } else {
       setLoading(false);
     }
   }, [session]);
+
+  // Real profile stats (workout history/PRs are native-only, so these read 0
+  // on web and populate on device — never fabricated).
+  const workoutCount = logsHistory?.length ?? 0;
+  const prCount = prs?.length ?? 0;
+  const streak = React.useMemo(() => {
+    const days = new Set((logsHistory || []).map((l: any) => l.completed_at && new Date(l.completed_at).toDateString()).filter(Boolean));
+    let n = 0;
+    for (let i = 0; i < 90; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      if (days.has(d.toDateString())) n += 1;
+      else if (i === 0) continue;
+      else break;
+    }
+    return n;
+  }, [logsHistory]);
+  // Activity-based Yeti Score from real recent training (matches the Progress
+  // screen's logic); null until there's any workout history.
+  const yetiScore = React.useMemo(() => {
+    const days = new Set((logsHistory || []).map((l: any) => l.completed_at && new Date(l.completed_at).toDateString()).filter(Boolean));
+    if (days.size === 0) return null;
+    let recent = 0;
+    for (let i = 0; i < 14; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      if (days.has(d.toDateString())) recent += 1;
+    }
+    return Math.min(100, Math.round((recent / 6) * 100));
+  }, [logsHistory]);
+
+  const memberSince = React.useMemo(() => {
+    const created = (session?.user as any)?.created_at;
+    if (!created) return null;
+    return new Date(created).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }, [session]);
+  const isVerified = !!(session?.user as any)?.email_confirmed_at;
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
 
   const checkWearables = async () => {
     try {
@@ -211,38 +261,94 @@ export default function MoreScreen() {
   return (
     <AppShell activeTab="more">
       <SafeAreaView style={styles.safeArea} edges={['top']}>
+        {/* ── Top header ───────────────────────────────────────────── */}
+        <View style={styles.topHeader}>
+          <Text style={styles.topTitle}>Profile</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="System diagnostics and settings"
+              onPress={() => router.push('/settings/diagnostics')}
+              style={styles.headerIconBtn}
+            >
+              <Ionicons name="settings-outline" size={19} color={P.TEXT_PRI} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              onPress={() => router.push('/notifications')}
+              style={[styles.headerIconBtn, { position: 'relative' }]}
+            >
+              <Ionicons name="notifications-outline" size={19} color={P.TEXT_PRI} />
+              {unreadCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scroll}
         >
-          {/* ── Profile header ─────────────────────────────────────── */}
+          {/* ── Profile header card ────────────────────────────────── */}
           <Animated.View entering={FadeIn.duration(400)} style={[sharedStyles.cardGlow, styles.headerCard]}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitial}>{initial}</Text>
-            </View>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Edit profile photo and details"
+              onPress={() => router.push('/onboarding/basic-info')}
+              style={styles.avatarWrap}
+              activeOpacity={0.85}
+            >
+              <View style={styles.avatar}>
+                <Text style={styles.avatarInitial}>{initial}</Text>
+              </View>
+              <View style={styles.avatarEdit}>
+                <Ionicons name="camera" size={11} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
             <View style={{ flex: 1 }}>
-              <Text style={styles.profileName} numberOfLines={1}>{displayName}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Text style={styles.profileName} numberOfLines={1}>{displayName}</Text>
+                {isVerified && <Ionicons name="checkmark-circle" size={16} color={P.ACCENT} />}
+              </View>
               <Text style={styles.profileEmail} numberOfLines={1}>{session?.user?.email}</Text>
+              {memberSince && (
+                <View style={[sharedStyles.row, { gap: 5, marginTop: 4 }]}>
+                  <Ionicons name="calendar-outline" size={11} color={P.TEXT_MUT} />
+                  <Text style={styles.memberSince}>Member since {memberSince}</Text>
+                </View>
+              )}
               <View style={styles.badge}>
                 <Ionicons name="barbell" size={10} color={P.ACCENT} />
-                <Text style={styles.badgeText}>{currentGoal ? currentGoal.toUpperCase() : 'ATHLETE'}</Text>
+                <Text style={styles.badgeText}>{currentGoal ? currentGoal.toUpperCase() : 'YETI ATHLETE'}</Text>
               </View>
             </View>
           </Animated.View>
 
-          {/* ── Body stats ─────────────────────────────────────────── */}
+          {/* ── Real stat cards ────────────────────────────────────── */}
           <Animated.View entering={FadeInDown.delay(60).duration(400)} style={styles.statsRow}>
             <View style={[styles.statTile, sharedStyles.card]}>
-              <Text style={styles.statLabel}>HEIGHT</Text>
-              <Text style={styles.statValue}>{profile?.height_cm || '--'} <Text style={styles.statUnit}>cm</Text></Text>
+              <Ionicons name="flame" size={16} color={P.ACCENT} />
+              <Text style={styles.statValueBig}>{yetiScore ?? '—'}</Text>
+              <Text style={styles.statCaption}>Yeti Score</Text>
             </View>
             <View style={[styles.statTile, sharedStyles.card]}>
-              <Text style={styles.statLabel}>WEIGHT</Text>
-              <Text style={styles.statValue}>{profile?.weight_kg || '--'} <Text style={styles.statUnit}>kg</Text></Text>
+              <Ionicons name="barbell" size={16} color={P.STEPS} />
+              <Text style={styles.statValueBig}>{workoutCount}</Text>
+              <Text style={styles.statCaption}>Workouts</Text>
             </View>
             <View style={[styles.statTile, sharedStyles.card]}>
-              <Text style={styles.statLabel}>BODY FAT</Text>
-              <Text style={styles.statValue}>{profile?.body_fat_percent || '--'} <Text style={styles.statUnit}>%</Text></Text>
+              <Ionicons name="trophy" size={16} color={P.WARNING} />
+              <Text style={styles.statValueBig}>{prCount}</Text>
+              <Text style={styles.statCaption}>PRs</Text>
+            </View>
+            <View style={[styles.statTile, sharedStyles.card]}>
+              <Ionicons name="flash" size={16} color={P.PROTEIN} />
+              <Text style={styles.statValueBig}>{streak}</Text>
+              <Text style={styles.statCaption}>Day Streak</Text>
             </View>
           </Animated.View>
 
@@ -286,29 +392,29 @@ export default function MoreScreen() {
             )}
             <SettingsRow
               icon="person"
-              title="Personal Information"
-              subtitle="Name, age & basics"
+              title="Edit Profile"
+              subtitle="Update your personal information"
               onPress={() => router.push('/onboarding/basic-info')}
             />
             <SettingsRow
               last
               icon="body"
-              title="Measurements"
-              subtitle="Height, weight & body metrics"
+              title="Body Metrics"
+              subtitle="View and update your body measurements"
               onPress={() => router.push('/onboarding/body-metrics')}
             />
           </View>
 
-          {/* ── Integrations ───────────────────────────────────────── */}
-          <Text style={styles.sectionHeader}>INTEGRATIONS</Text>
+          {/* ── Connected apps ─────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>CONNECTED APPS</Text>
           <View style={styles.group}>
             <SettingsRow
               first
               last
-              icon="fitness"
+              icon="link"
               iconColor={wearablesConnected ? P.SUCCESS : P.ACCENT}
-              title="Sync Wearables"
-              subtitle={wearablesConnected ? 'Connected — Apple Health & Google Fit' : 'Apple Health & Google Fit'}
+              title="Connected Apps"
+              subtitle={wearablesConnected ? 'Connected — Apple Health & Google Fit' : 'Manage devices — Apple Health & Google Fit'}
               accessibilityLabel={wearablesConnected ? 'Disconnect background wearables sync' : 'Enable background wearables sync'}
               onPress={wearablesConnected ? handleDisableWearables : handleEnableWearables}
               accessory={
@@ -351,8 +457,8 @@ export default function MoreScreen() {
             ))}
           </View>
 
-          {/* ── More ───────────────────────────────────────────────── */}
-          <Text style={styles.sectionHeader}>MORE</Text>
+          {/* ── Support & more ─────────────────────────────────────── */}
+          <Text style={styles.sectionHeader}>SUPPORT & MORE</Text>
           <View style={styles.group}>
             <SettingsRow
               first
@@ -363,17 +469,24 @@ export default function MoreScreen() {
               onPress={() => router.push('/challenges')}
             />
             <SettingsRow
+              icon="help-buoy"
+              title="Help & Support"
+              subtitle="Get help and contact support"
+              onPress={() => router.push('/settings/feedback')}
+            />
+            <SettingsRow
+              icon="star"
+              iconColor={P.WARNING}
+              title="Rate the App"
+              subtitle="Share your feedback"
+              onPress={() => router.push('/settings/feedback')}
+            />
+            <SettingsRow
+              last
               icon="pulse"
               title="System Diagnostics"
               subtitle="App details, sync state & entitlements"
               onPress={() => router.push('/settings/diagnostics')}
-            />
-            <SettingsRow
-              last
-              icon="help-buoy"
-              title="Help & Support"
-              subtitle="Send feedback & get help"
-              onPress={() => router.push('/settings/feedback')}
             />
           </View>
 
@@ -390,6 +503,8 @@ export default function MoreScreen() {
             <Text style={styles.logoutBtnText}>Log Out</Text>
           </TouchableOpacity>
 
+          <Text style={styles.versionText}>Version {appVersion}</Text>
+
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
@@ -399,13 +514,64 @@ export default function MoreScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: P.BG },
-  scroll: { paddingHorizontal: 20, paddingTop: 12 },
+  scroll: { paddingHorizontal: 20, paddingTop: 4 },
+
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  topTitle: { fontSize: 26, fontWeight: '900', color: P.TEXT_PRI, letterSpacing: -0.5 },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: P.RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
 
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
   },
+  avatarWrap: { position: 'relative' },
+  avatarEdit: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: P.ACCENT,
+    borderWidth: 2,
+    borderColor: P.CARD_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberSince: { fontSize: 11, fontWeight: '600', color: P.TEXT_MUT },
+  versionText: { fontSize: 11, fontWeight: '600', color: P.TEXT_MUT, textAlign: 'center', marginTop: 16 },
+  statValueBig: { fontSize: 20, fontWeight: '900', color: P.TEXT_PRI, marginTop: 6, letterSpacing: -0.5 },
+  statCaption: { fontSize: 10, fontWeight: '700', color: P.TEXT_MUT, marginTop: 3 },
   avatar: {
     width: 60,
     height: 60,
@@ -463,26 +629,8 @@ const styles = StyleSheet.create({
   statTile: {
     flex: 1,
     paddingVertical: 14,
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: P.TEXT_MUT,
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: P.TEXT_PRI,
-    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
-  },
-  statUnit: {
-    fontSize: 10,
-    color: P.TEXT_MUT,
-    fontWeight: '700',
   },
 
   sectionHeader: {
