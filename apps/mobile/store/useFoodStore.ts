@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuthStore } from './useAuthStore';
 import { NutritionRepository, Food as DBFood, MealLog as DBMealLog, EventRepository } from '@yeti/database';
 import { lookupBarcodeProduct } from '../services/nutritionApi';
+import { dedupeRecentFoods, favoritesStorageKey } from '../services/nutritionUtils';
 import { EVENTS } from '../constants/analyticsEvents';
 
 const nutritionRepository = new NutritionRepository(database, supabase);
@@ -56,12 +57,20 @@ interface FoodStore {
   updateMealLog: (id: string, servings: number) => Promise<void>;
   scanBarcode: (barcode: string, mealType: string) => Promise<MealLog | null>;
   analyzeFoodPhoto: (base64Image: string) => Promise<Partial<Food>[]>;
+
+  // Recent + favorite foods (beta usability)
+  favoriteFoodIds: string[];
+  recentFoods: (limit?: number) => Food[];
+  loadFavorites: () => Promise<void>;
+  toggleFavorite: (food: Food) => Promise<void>;
+  isFavorite: (foodId: string) => boolean;
 }
 
 export const useFoodStore = create<FoodStore>((set, get) => ({
   foods: [],
   mealLogs: [],
   loading: false,
+  favoriteFoodIds: [],
 
   async loadLocalCache() {
     if (isNativeDbAvailable && database) {
@@ -128,6 +137,7 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
   async initSync() {
     set({ loading: true });
     await get().loadLocalCache();
+    await get().loadFavorites();
     set({ loading: false });
   },
 
@@ -379,5 +389,69 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
       console.error("Error analyzing food photo:", e);
       throw e;
     }
-  }
+  },
+
+  // Most-recently-logged unique foods (meal logs are kept newest-first, so we
+  // dedupe by food_id preserving the most recent occurrence). Derived — no extra
+  // storage, and works offline from the local cache.
+  recentFoods(limit = 12) {
+    return dedupeRecentFoods<Food>(get().mealLogs, limit);
+  },
+
+  isFavorite(foodId) {
+    return get().favoriteFoodIds.includes(foodId);
+  },
+
+  // Favorites are user-specific and offline-first: the per-user AsyncStorage list
+  // is authoritative for the UI; the food_favorites table (RLS-scoped to the user)
+  // is a best-effort cross-device mirror that no-ops when offline or not yet added.
+  async loadFavorites() {
+    const userId = useAuthStore.getState().session?.user?.id;
+    if (!userId) { set({ favoriteFoodIds: [] }); return; }
+
+    let ids: string[] = [];
+    try {
+      const raw = await AsyncStorage.getItem(favoritesStorageKey(userId));
+      if (raw) ids = JSON.parse(raw);
+    } catch { /* ignore malformed cache */ }
+
+    try {
+      const { data } = await supabase
+        .from('food_favorites')
+        .select('food_id')
+        .eq('user_id', userId);
+      if (Array.isArray(data)) {
+        const serverIds = data.map((r: any) => r.food_id).filter(Boolean);
+        ids = Array.from(new Set([...ids, ...serverIds]));
+        await AsyncStorage.setItem(favoritesStorageKey(userId), JSON.stringify(ids));
+      }
+    } catch { /* offline or table not applied yet — local list stands */ }
+
+    set({ favoriteFoodIds: ids });
+  },
+
+  async toggleFavorite(food) {
+    const userId = useAuthStore.getState().session?.user?.id;
+    if (!userId) return;
+
+    const current = get().favoriteFoodIds;
+    const has = current.includes(food.id);
+    const next = has ? current.filter((id) => id !== food.id) : [...current, food.id];
+    set({ favoriteFoodIds: next });
+
+    try {
+      await AsyncStorage.setItem(favoritesStorageKey(userId), JSON.stringify(next));
+    } catch { /* ignore */ }
+
+    try {
+      if (has) {
+        await supabase.from('food_favorites').delete().eq('user_id', userId).eq('food_id', food.id);
+      } else {
+        await supabase.from('food_favorites').upsert(
+          { user_id: userId, food_id: food.id },
+          { onConflict: 'user_id,food_id' },
+        );
+      }
+    } catch { /* offline or table not applied yet — local state is authoritative */ }
+  },
 }));

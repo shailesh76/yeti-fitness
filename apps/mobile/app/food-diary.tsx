@@ -8,6 +8,7 @@ import {
   TextInput,
   StyleSheet,
   Modal,
+  Alert,
   useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -21,19 +22,24 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useFoodStore, MealLog } from '../store/useFoodStore';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { useRepositories } from '../hooks/useRepositories';
+import { isValidWaterMl } from '../services/nutritionUtils';
 
 // The meal buckets shown in the diary. Real logs are grouped under these by
 // their meal_type — no sample/placeholder foods.
 const MEAL_TYPES: { key: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'BREAKFAST', title: 'Breakfast', icon: 'sunny-outline' },
-  { key: 'LUNCH',     title: 'Lunch',     icon: 'restaurant-outline' },
-  { key: 'DINNER',    title: 'Dinner',    icon: 'moon-outline' },
-  { key: 'SNACK',     title: 'Snacks',    icon: 'nutrition-outline' },
+  { key: 'BREAKFAST',    title: 'Breakfast',    icon: 'sunny-outline' },
+  { key: 'LUNCH',        title: 'Lunch',        icon: 'restaurant-outline' },
+  { key: 'DINNER',       title: 'Dinner',       icon: 'moon-outline' },
+  { key: 'SNACK',        title: 'Snacks',       icon: 'nutrition-outline' },
+  { key: 'PRE_WORKOUT',  title: 'Pre-Workout',  icon: 'barbell-outline' },
+  { key: 'POST_WORKOUT', title: 'Post-Workout', icon: 'flash-outline' },
 ];
 
 // Normalise the various meal_type spellings the logging flows may use.
 function normalizeMealType(mt?: string): string {
   const u = (mt || '').toUpperCase();
+  if (u.startsWith('PRE')) return 'PRE_WORKOUT';
+  if (u.startsWith('POST')) return 'POST_WORKOUT';
   if (u.startsWith('SNACK')) return 'SNACK';
   if (u.startsWith('BREAK')) return 'BREAKFAST';
   if (u.startsWith('LUNCH')) return 'LUNCH';
@@ -67,6 +73,8 @@ export default function FoodDiaryScreen() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [waterLogged, setWaterLogged] = useState(0);
   const [waterStreak, setWaterStreak] = useState(0);
+  const [showWaterModal, setShowWaterModal] = useState(false);
+  const [customWaterText, setCustomWaterText] = useState('');
 
   // Goal targets — seeded from the user's profile on load (fallbacks only apply
   // if the profile has none), and editable via the Goals modal.
@@ -281,6 +289,27 @@ export default function FoodDiaryScreen() {
     setWaterLogged(newAmount || waterLogged + 300);
   };
 
+  // Custom / quick water add with validation (positive, capped per single add).
+  const handleAddWaterAmount = async (ml: number) => {
+    if (!isValidWaterMl(ml)) {
+      if (Platform.OS === 'web') window.alert('Enter an amount between 1 and 3000 ml.');
+      else Alert.alert('Invalid amount', 'Enter an amount between 1 and 3000 ml.');
+      return false;
+    }
+    const newAmount = await addWaterForDate(ml, dateStr);
+    setWaterLogged(newAmount || waterLogged + ml);
+    return true;
+  };
+
+  const handleSubmitCustomWater = async () => {
+    const ml = parseInt(customWaterText, 10);
+    const ok = await handleAddWaterAmount(ml);
+    if (ok) {
+      setCustomWaterText('');
+      setShowWaterModal(false);
+    }
+  };
+
   const handleEditServings = (log: MealLog) => {
     setEditingLog(log);
     setEditServingsText(log.servings.toString());
@@ -459,7 +488,9 @@ export default function FoodDiaryScreen() {
         </View>
         <TouchableOpacity
           activeOpacity={0.7}
-          onPress={handleAddWater}
+          onPress={() => setShowWaterModal(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Add water"
           style={styles.waterAddSquareBtn}
         >
           <Ionicons name="add" size={18} color="#38BDF8" />
@@ -1025,6 +1056,57 @@ export default function FoodDiaryScreen() {
             </View>
           </Modal>
         )}
+
+        {/* ══════════════════════════════════════════════════════════
+            ADD WATER MODAL (quick amounts + validated custom amount)
+        ══════════════════════════════════════════════════════════ */}
+        <Modal visible={showWaterModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <Text style={styles.modalTitle}>Add Water</Text>
+                <TouchableOpacity onPress={() => setShowWaterModal(false)} accessibilityRole="button" accessibilityLabel="Close">
+                  <Ionicons name="close" size={22} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
+                {[250, 500, 750].map((ml) => (
+                  <TouchableOpacity
+                    key={ml}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${ml} millilitres of water`}
+                    onPress={async () => { const ok = await handleAddWaterAmount(ml); if (ok) setShowWaterModal(false); }}
+                    style={[styles.optionPill, { flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 6 }]}
+                  >
+                    <Ionicons name="water" size={14} color="#38BDF8" />
+                    <Text style={styles.optionPillText}>{ml} ml</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.inputLabel}>Custom amount (ml)</Text>
+              <TextInput
+                style={styles.modalInput}
+                keyboardType="numeric"
+                value={customWaterText}
+                onChangeText={setCustomWaterText}
+                placeholder="e.g. 400"
+                placeholderTextColor="#64748B"
+                onSubmitEditing={handleSubmitCustomWater}
+              />
+
+              <TouchableOpacity
+                onPress={handleSubmitCustomWater}
+                style={[styles.modalBtn, styles.modalBtnSave, { marginTop: 14 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Add custom water amount"
+              >
+                <Text style={styles.modalBtnSaveText}>Add Water</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </AppShell>
   );

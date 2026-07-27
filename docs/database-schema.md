@@ -40,9 +40,10 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   (`omercotkd-gifs`, `free-exercise-db`, `exercisegymgifsdb`). Columns: `name`, `muscle_group`,
   `body_part`, `target_muscle`, `secondary_muscles`, `equipment`, `category`, `difficulty`,
   `instructions`, `gif_url`/`video_url`/`media_type`/`thumbnail_url`, `source`/`source_id`, `is_public`,
-  `created_by_coach_id` (custom coach-authored exercises). `UNIQUE(name)` (case-sensitive). RLS: any
+  `created_by_coach_id` (custom coach-authored exercises), `default_rest_period_sec` (default 90),
+  `created_at`, `updated_at`. `UNIQUE(name)` (case-sensitive). RLS: any
   authenticated user reads all; a coach can insert/update/delete only exercises where
-  `created_by_coach_id = auth.uid()`.
+  `created_by_coach_id = auth.uid()`. Synced to mobile via WatermelonDB `sync-pull` (pull-only).
 - **`exercise_relations`** — self-referential `(exercise_id, related_exercise_id, relation_type)` where
   `relation_type` is `variation` or `alternative`.
 - **`exercise_taxonomy`** — `(kind, value)` lookup powering filter dropdowns (`kind` ∈ `muscle`,
@@ -59,8 +60,9 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`assigned_plans`** — decouples athlete assignment from `workout_plans.user_id`, so a plan can be
   assigned to an athlete without being "owned" by them. It is pull-only for athlete clients and has
   `updated_at` tracking for incremental sync.
-- The mobile WatermelonDB schema mirrors `workout_plans`, `plan_days`, `plan_exercises`, and
-  `assigned_plans`. Athlete-authored templates are local-first; coach assignments are read-only locally.
+- The mobile WatermelonDB schema mirrors `workout_plans`, `plan_days`, `plan_exercises`,
+  `assigned_plans`, and `exercises` (pull-only catalog). Athlete-authored templates are local-first;
+  coach assignments are read-only locally.
 - **`workout_plan_sync_deletions`** — RLS-scoped tombstones for hard deletes, allowing other devices to
   remove deleted plan records during incremental pull without retaining soft-deleted domain rows.
 - **`exercise_bundles`** → **`bundle_exercises`** — reusable named groups of exercises a coach can drop
@@ -84,7 +86,15 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`foods`** — shared food library with barcode lookup. RLS: any authenticated user reads all and can
   insert; only the original `created_by` can update their own row; nobody can delete except `service_role`.
 - **`meal_logs`** — per-athlete logged meals (`meal_type`, `servings`, `source`, `raw_response` for
-  AI-parsed entries). A coach can read their clients' logs.
+  AI-parsed entries). A coach can read their clients' logs. `meal_type` is free text; the app uses
+  `BREAKFAST`/`LUNCH`/`DINNER`/`SNACK`/`PRE_WORKOUT`/`POST_WORKOUT`.
+- **`food_favorites`** — per-user favorite foods (`user_id`, `food_id`, unique per pair). RLS restricts
+  every row to its owner (`auth.uid() = user_id`) for select/insert/delete. `food_id` has no FK (custom
+  foods can be favorited offline before they sync). Added in
+  [20260727_add_food_favorites.sql](../supabase/migrations/20260727_add_food_favorites.sql); the mobile
+  app is offline-first (per-user AsyncStorage list) and best-effort mirrors here. **NOTE: file not yet
+  applied to the live DB** (see migration ledger drift) — apply with
+  `supabase db query --linked -f supabase/migrations/20260727_add_food_favorites.sql`.
 
 ### Progress tracking
 - **`measurements`** — generic typed measurement log (`type` + `value` — weight, body fat %, circumference,
@@ -169,13 +179,17 @@ global beta-mode check (`beta_mode_config`, fails safe). See migration-audit.md 
 | `ai-coach` | Chat with the AI coach; tier/rate-limit gated | ai_memory, ai_usage, ai_safety_logs, ai_request_logs, progression_recommendations, user_entitlements |
 | `analyze-food-image` | Vision-based food logging | ai_request_logs, user_entitlements |
 | `calculate-adaptive-nutrition` | Adjusts nutrition targets from weight trend | profiles, weight_logs |
+| `exercise-guidance` | On-demand AI coaching text for a single exercise (form, mistakes, breathing, variants) | exercises, ai_usage, ai_request_logs, user_entitlements |
 | `generate-health-insights` | Produces free-text health insights | health_insights, live_metrics, meal_logs, workout_logs, profiles |
+| `generate-workout-plan` | AI-generated hypertrophy program from target muscles, equipment, experience | ai_usage, ai_request_logs, user_entitlements |
+| `generate-workout-summary` | Post-workout performance analysis (deterministic volume + AI coaching) | ai_usage, ai_request_logs, user_entitlements |
 | `get-client-exercise-history` | Coach view of a client's history for one exercise | exercise_sets, profiles |
 | `get-client-last-workout` | Coach view of a client's most recent workout | exercise_sets, workout_logs, profiles |
 | `get-r2-signed-url` | Signed upload URL for R2 media | workout_plans |
 | `manage-entitlements` | Admin grant/revoke of subscription plans | profiles, user_entitlements, subscription_plans *(broken — see above)* |
+| `suggest-exercise-swap` | AI-powered exercise alternative recommendations (3 biomechanical alternatives) | ai_usage, ai_request_logs, user_entitlements |
 | `sync-live-metrics` | Realtime heart-rate/calorie push | live_metrics |
-| `sync-pull` | WatermelonDB pull side of sync | meal_logs, measurements, session_sets, workout_sessions, workout_plans, plan_days, plan_exercises, assigned_plans, workout_plan_sync_deletions (tombstones, read-only) |
+| `sync-pull` | WatermelonDB pull side of sync | exercises (pull-only catalog), meal_logs, measurements, session_sets, workout_sessions, workout_plans, plan_days, plan_exercises, assigned_plans, workout_plan_sync_deletions (tombstones, read-only) |
 | `sync-push` | WatermelonDB push side of sync | meal_logs, measurements, session_sets, workout_sessions, workout_plans, plan_days, plan_exercises (assigned_plans is pull-only — coaches assign, athletes don't push it) |
 | `update-challenge-standings` | Recomputes challenge leaderboard | challenges, challenge_participants |
 | `upload-to-r2` | Proxy upload to Cloudflare R2 | — (storage only) |

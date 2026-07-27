@@ -49,13 +49,15 @@ import { useFoodStore, Food } from '../store/useFoodStore';
 const MASCOT = require('../assets/yeti_mascot_avatar.png');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type MealType = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
+type MealType = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK' | 'PRE_WORKOUT' | 'POST_WORKOUT';
 
 const MEAL_OPTIONS: { id: MealType; label: string; icon: string; emoji: string }[] = [
-  { id: 'BREAKFAST', label: 'Breakfast', icon: 'sunny-outline',    emoji: '☀️' },
-  { id: 'LUNCH',     label: 'Lunch',     icon: 'restaurant-outline', emoji: '🍽️' },
-  { id: 'DINNER',    label: 'Dinner',    icon: 'moon-outline',      emoji: '🌙' },
-  { id: 'SNACK',     label: 'Snack',     icon: 'nutrition-outline', emoji: '🍎' },
+  { id: 'BREAKFAST',    label: 'Breakfast', icon: 'sunny-outline',      emoji: '☀️' },
+  { id: 'LUNCH',        label: 'Lunch',     icon: 'restaurant-outline', emoji: '🍽️' },
+  { id: 'DINNER',       label: 'Dinner',    icon: 'moon-outline',       emoji: '🌙' },
+  { id: 'SNACK',        label: 'Snack',     icon: 'nutrition-outline',  emoji: '🍎' },
+  { id: 'PRE_WORKOUT',  label: 'Pre',       icon: 'barbell-outline',    emoji: '💪' },
+  { id: 'POST_WORKOUT', label: 'Post',      icon: 'flash-outline',      emoji: '⚡' },
 ];
 
 type ScanResult = Omit<Food, 'id'> & { fiber: number; description: string };
@@ -1211,11 +1213,14 @@ const ss = StyleSheet.create({
   // Add to Meal selector
   mealSelectorRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 14,
   },
   mealOption: {
-    flex: 1,
+    flexBasis: '31%',
+    flexGrow: 1,
+    minWidth: 88,
     alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 16,

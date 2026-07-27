@@ -60,7 +60,7 @@ interface DraftFood {
   carbs:        string;
   fat:          string;
   serving_size: string;
-  confidence?:  number;
+  confidence?:  number | null;
   barcode?:     string;
   raw_response: any;
   source:       'photo' | 'barcode' | 'text';
@@ -69,10 +69,15 @@ interface DraftFood {
 export default function FoodSearchScreen() {
   const router = useRouter();
   const { mealType = 'BREAKFAST', openCamera } = useLocalSearchParams<{
-    mealType: 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
+    mealType: 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK' | 'PRE_WORKOUT' | 'POST_WORKOUT';
     openCamera?: 'photo' | 'barcode';
   }>();
   const { searchFoods, addFood, logMeal } = useFoodStore();
+  const allFoods        = useFoodStore((s) => s.foods);
+  const mealLogs        = useFoodStore((s) => s.mealLogs);
+  const favoriteFoodIds = useFoodStore((s) => s.favoriteFoodIds);
+  const toggleFavorite  = useFoodStore((s) => s.toggleFavorite);
+  const recentFoodsFn   = useFoodStore((s) => s.recentFoods);
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -409,6 +414,50 @@ export default function FoodSearchScreen() {
     handleBack();
   };
 
+  // Recent (most-recently-logged) + favorite foods, shown when the search box is
+  // empty for one-tap re-logging.
+  const recentList = React.useMemo(() => recentFoodsFn(8), [mealLogs, recentFoodsFn]);
+  const favoriteList = React.useMemo(
+    () => allFoods.filter((f) => favoriteFoodIds.includes(f.id)).slice(0, 12),
+    [allFoods, favoriteFoodIds],
+  );
+
+  // Shared row for search results / recent / favorites, with a favorite toggle.
+  const renderFoodRow = (food: Food) => {
+    const fav = favoriteFoodIds.includes(food.id);
+    return (
+      <View key={food.id} style={styles.resultCard}>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={`Log ${food.name}, ${food.calories} calories`}
+          onPress={() => { setSelectedFood(food); setServings('1.0'); }}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+          activeOpacity={0.8}
+        >
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={styles.resultName} numberOfLines={1}>{food.name}</Text>
+            <Text style={styles.resultMeta}>{food.brand}  ·  {food.serving_size}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={styles.resultKcal}>{food.calories} kcal</Text>
+            <Text style={styles.resultMacros}>P: {food.protein}g  C: {food.carbs}g  F: {food.fat}g</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={fav ? `Remove ${food.name} from favorites` : `Add ${food.name} to favorites`}
+          onPress={() => toggleFavorite(food)}
+          style={{ paddingLeft: 12, paddingVertical: 4 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name={fav ? 'star' : 'star-outline'} size={18} color={fav ? P.AMBER : P.TEXT_MUT} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   // ─── Camera Views (unchanged — transient overlays, not themed) ──────────────
   if (cameraMode) {
     if (Platform.OS === 'web' && cameraMode === 'photo') {
@@ -680,6 +729,24 @@ export default function FoodSearchScreen() {
                 onChangeText={setQuery}
               />
 
+              {/* ── Favorites & Recent (empty query only) ─────────────── */}
+              {query.trim() === '' && favoriteList.length > 0 && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={sharedStyles.labelCaps}>⭐ Favorites</Text>
+                  <View style={{ gap: 8, marginTop: 10 }}>
+                    {favoriteList.map((food) => renderFoodRow(food))}
+                  </View>
+                </View>
+              )}
+              {query.trim() === '' && recentList.length > 0 && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={sharedStyles.labelCaps}>Recent</Text>
+                  <View style={{ gap: 8, marginTop: 10 }}>
+                    {recentList.map((food) => renderFoodRow(food))}
+                  </View>
+                </View>
+              )}
+
               {/* ── Results ───────────────────────────────────────────── */}
               <View style={[sharedStyles.rowBetween, { marginBottom: 10 }]}>
                 <Text style={sharedStyles.labelCaps}>Search Results</Text>
@@ -706,34 +773,7 @@ export default function FoodSearchScreen() {
                 </View>
               ) : (
                 <View style={{ gap: 8 }}>
-                  {results.map((food, idx) => (
-                    <Animated.View
-                      key={food.id}
-                      entering={FadeInDown.delay(idx * 40).duration(300)}
-                    >
-                      <TouchableOpacity
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Log ${food.name}, ${food.calories} calories`}
-                        onPress={() => { setSelectedFood(food); setServings('1.0'); }}
-                        style={styles.resultCard}
-                        activeOpacity={0.8}
-                      >
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={styles.resultName} numberOfLines={1}>{food.name}</Text>
-                          <Text style={styles.resultMeta}>
-                            {food.brand}  ·  {food.serving_size}
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={styles.resultKcal}>{food.calories} kcal</Text>
-                          <Text style={styles.resultMacros}>
-                            P: {food.protein}g  C: {food.carbs}g  F: {food.fat}g
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    </Animated.View>
-                  ))}
+                  {results.map((food) => renderFoodRow(food))}
                 </View>
               )}
             </Animated.View>
@@ -898,10 +938,10 @@ export default function FoodSearchScreen() {
                 </TouchableOpacity>
               </View>
 
-              {(draftResult.confidence ?? 1) < 0.7 && draftResult.source === 'photo' && (
+              {draftResult.source === 'photo' && (
                 <View style={styles.lowConfidenceWarn}>
-                  <Ionicons name="warning" size={15} color={P.AMBER} />
-                  <Text style={styles.lowConfidenceText}>Low confidence match. Please verify macros.</Text>
+                  <Ionicons name="sparkles" size={15} color={P.AMBER} />
+                  <Text style={styles.lowConfidenceText}>AI estimate — please confirm the macros before saving.</Text>
                 </View>
               )}
 
