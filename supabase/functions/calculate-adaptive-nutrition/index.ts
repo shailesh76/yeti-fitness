@@ -28,9 +28,15 @@ serve(async (req) => {
 
     for (const profile of profiles || []) {
       const userId = profile.id;
+
+      // Respect coach-locked targets — the adaptive engine must never override a
+      // target a coach explicitly assigned. (Column is additive; undefined before
+      // the 20260728 migration is applied, so behaviour is unchanged until then.)
+      if (profile.nutrition_targets_locked) continue;
+
       const currentCalTarget = profile.daily_calorie_target || 2000;
       const goal = profile.goal || 'MAINTAIN';
-      
+
       // Fetch weight logs for last 14 days
       const fourteenDaysAgo = new Date();
       fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);

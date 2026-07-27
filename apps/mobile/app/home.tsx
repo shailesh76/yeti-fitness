@@ -29,6 +29,7 @@ import { database, isNativeDbAvailable } from '../database';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { fetchDailyTelemetry } from '../services/wearableService';
+import { fetchNutritionTargets } from '../services/nutritionTargets';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 
 const { width } = Dimensions.get('window');
@@ -708,15 +709,16 @@ export default function HomeScreen() {
       await eventRepository.logActivity(userId, EVENTS.APP_OPENED);
 
       const profile = await userRepository.getProfile(userId);
-      if (profile) {
-        if (profile.full_name) setAthleteName(profile.full_name);
-        setTargetMacros({
-          calories: profile.target_calories || 2500,
-          protein: profile.target_protein || 170,
-          carbs: profile.target_carbs || 280,
-          fat: profile.target_fat || 80,
-        });
-      }
+      if (profile?.full_name) setAthleteName(profile.full_name);
+
+      // Canonical nutrition targets (server daily_*_target) with offline cache.
+      const targets = await fetchNutritionTargets(userId);
+      setTargetMacros({
+        calories: targets.calories ?? 2500,
+        protein: targets.protein ?? 170,
+        carbs: targets.carbs ?? 280,
+        fat: targets.fat ?? 80,
+      });
 
       const todayMacros = await nutritionRepository.calculateDailyNutrition(userId, Date.now());
       if (todayMacros && todayMacros.calories > 0) {

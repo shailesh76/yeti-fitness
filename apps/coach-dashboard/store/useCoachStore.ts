@@ -78,7 +78,11 @@ interface CoachState {
   }>;
   getExercises: () => Promise<void>;
   assignPlan: (plan: DraftPlan, clientIds: string[]) => Promise<void>;
-  
+  assignNutritionTargets: (
+    athleteId: string,
+    targets: { calories: number; protein: number; carbs: number; fat: number },
+  ) => Promise<void>;
+
   previousWeights: Record<string, number>;
   fetchPreviousWeights: (athleteId: string) => Promise<void>;
   
@@ -462,6 +466,52 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       await get().getClients();
     } catch (e) {
       console.error("Failed to assign plan:", e);
+      throw e;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  assignNutritionTargets: async (athleteId, targets) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const coachId = sessionData.session?.user?.id;
+    if (!coachId) throw new Error('Not authenticated');
+
+    set({ loading: true });
+    try {
+      // Writes the CANONICAL profiles.daily_*_target columns and locks them. RLS
+      // ("Coaches update client nutrition targets") restricts this to the coach's
+      // own assigned athletes, so a coach cannot touch anyone else's targets.
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          daily_calorie_target: targets.calories,
+          daily_protein_target: targets.protein,
+          daily_carb_target: targets.carbs,
+          daily_fat_target: targets.fat,
+          nutrition_targets_locked: true,
+          nutrition_targets_updated_by: coachId,
+          nutrition_targets_updated_at: new Date().toISOString(),
+        })
+        .eq('id', athleteId);
+      if (error) throw error;
+
+      // Best-effort notification so the athlete knows their targets changed.
+      try {
+        await supabase.from('notifications').insert({
+          user_id: athleteId,
+          type: 'coach',
+          title: 'Nutrition targets updated',
+          body: `Your coach set new daily targets: ${targets.calories} kcal · ${targets.protein}P / ${targets.carbs}C / ${targets.fat}F.`,
+          deep_link: '/food-diary',
+        });
+      } catch (notifErr) {
+        console.warn('Nutrition target notification failed (non-fatal):', notifErr);
+      }
+
+      await get().getClients();
+    } catch (e) {
+      console.error('Failed to assign nutrition targets:', e);
       throw e;
     } finally {
       set({ loading: false });

@@ -96,6 +96,14 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   applied to the live DB** (see migration ledger drift) — apply with
   `supabase db query --linked -f supabase/migrations/20260727_add_food_favorites.sql`.
 
+- **Nutrition targets** live on `profiles` as the **canonical** columns `daily_calorie_target`,
+  `daily_protein_target`, `daily_carb_target`, `daily_fat_target` (INT, added 2024). The mobile app
+  reads/writes these directly via `services/nutritionTargets.ts` (offline-cached). ⚠️ The mobile
+  WatermelonDB `target_*` columns are a legacy phantom — never present server-side and not synced;
+  do not use them. Coach assignment + a `nutrition_targets_locked` flag come from
+  [20260728_coach_nutrition_targets.sql](../supabase/migrations/20260728_coach_nutrition_targets.sql)
+  (coach UPDATE gated by `coach_clients`). **NOTE: not yet applied to the live DB.**
+
 ### Progress tracking
 - **`measurements`** — generic typed measurement log (`type` + `value` — weight, body fat %, circumference,
   etc.), the primary progress-tracking table used by the mobile app and sync.

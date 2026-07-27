@@ -8,6 +8,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { NutritionTargetCard } from "@/components/NutritionTargetCard";
 import {
   ArrowLeft, MessageSquare, Activity, Heart, Flame, Target,
   CheckCircle2, XCircle, Trash2, Brain, TrendingUp, AlertTriangle,
@@ -79,34 +80,36 @@ function IntelligencePanel({ athleteId, client }: { athleteId: string; client: C
       // 1. Workout completion 14d
       const { data: sessions } = await supabase
         .from("workout_sessions")
-        .select("id, status, started_at")
+        .select("id, started_at, completed_at")
         .eq("athlete_id", athleteId)
         .gte("started_at", fourteenDaysAgo);
 
-      const completed = (sessions || []).filter((s: any) => s.status === "completed").length;
+      const completed = (sessions || []).filter((s: any) => s.completed_at !== null).length;
       const assigned = (sessions || []).length;
 
       // 2. Strength progression (top exercises by volume)
       const { data: sets } = await supabase
         .from("session_sets")
-        .select("exercise_name, weight_kg, reps, completed_at, workout_sessions!inner(athlete_id)")
+        .select("weight, reps, completed_at, exercises(name), workout_sessions!inner(athlete_id)")
         .eq("workout_sessions.athlete_id", athleteId)
-        .not("weight_kg", "is", null)
+        .not("weight", "is", null)
         .order("completed_at", { ascending: true })
         .limit(200);
 
       const strengthData: Record<string, StrengthDataPoint[]> = {};
       (sets || []).forEach((s: any) => {
-        if (!s.exercise_name || !s.weight_kg) return;
-        if (!strengthData[s.exercise_name]) strengthData[s.exercise_name] = [];
-        const date = new Date(s.completed_at).toLocaleDateString("en-AU", { month: "short", day: "numeric" });
+        const exName = (Array.isArray(s.exercises) ? s.exercises[0]?.name : s.exercises?.name) || 'Exercise';
+        const weightVal = Number(s.weight) || 0;
+        if (!exName || !weightVal) return;
+        if (!strengthData[exName]) strengthData[exName] = [];
+        const date = s.completed_at ? new Date(s.completed_at).toLocaleDateString("en-AU", { month: "short", day: "numeric" }) : 'Recent';
         // Only add if it's a new max for that date
-        const existing = strengthData[s.exercise_name].find((d) => d.date === date);
-        if (!existing || s.weight_kg > existing.weight) {
+        const existing = strengthData[exName].find((d) => d.date === date);
+        if (!existing || weightVal > existing.weight) {
           if (existing) {
-            existing.weight = s.weight_kg;
+            existing.weight = weightVal;
           } else {
-            strengthData[s.exercise_name].push({ date, weight: s.weight_kg, exercise: s.exercise_name });
+            strengthData[exName].push({ date, weight: weightVal, exercise: exName });
           }
         }
       });
@@ -810,7 +813,10 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
       )}
 
       {activeTab === "intelligence" && (
-        <IntelligencePanel athleteId={params.userId} client={client} />
+        <div className="space-y-6">
+          <IntelligencePanel athleteId={params.userId} client={client} />
+          {client && <NutritionTargetCard athleteId={params.userId} athleteName={client.name} />}
+        </div>
       )}
 
       {activeTab === "notes" && (

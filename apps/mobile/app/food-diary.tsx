@@ -23,6 +23,7 @@ import { useFoodStore, MealLog } from '../store/useFoodStore';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { useRepositories } from '../hooks/useRepositories';
 import { isValidWaterMl } from '../services/nutritionUtils';
+import { fetchNutritionTargets, saveNutritionTargets } from '../services/nutritionTargets';
 
 // The meal buckets shown in the diary. Real logs are grouped under these by
 // their meal_type — no sample/placeholder foods.
@@ -75,6 +76,8 @@ export default function FoodDiaryScreen() {
   const [waterStreak, setWaterStreak] = useState(0);
   const [showWaterModal, setShowWaterModal] = useState(false);
   const [customWaterText, setCustomWaterText] = useState('');
+  // True when a coach has locked this athlete's nutrition targets.
+  const [targetsLocked, setTargetsLocked] = useState(false);
 
   // Goal targets — seeded from the user's profile on load (fallbacks only apply
   // if the profile has none), and editable via the Goals modal.
@@ -106,13 +109,19 @@ export default function FoodDiaryScreen() {
     if (session?.user?.id) {
       loadGoal();
       initSync().catch(() => {});
-      // Seed calorie/macro goals from the athlete's real profile targets.
+      // Seed calorie/macro goals from the canonical server targets
+      // (profiles.daily_*_target), with an offline cache. This is where a coach's
+      // or the adaptive engine's assigned targets finally reach the athlete app.
+      fetchNutritionTargets(session.user.id).then((t) => {
+        if (t.calories != null) setCalorieGoal(t.calories);
+        if (t.protein != null) setProteinGoal(t.protein);
+        if (t.carbs != null) setCarbsGoal(t.carbs);
+        if (t.fat != null) setFatGoal(t.fat);
+        setTargetsLocked(t.locked);
+      }).catch(() => {});
+      // Body metrics still come from the profile record.
       userRepository.getProfile(session.user.id).then((profile: any) => {
         if (!profile) return;
-        if (profile.target_calories) setCalorieGoal(profile.target_calories);
-        if (profile.target_protein) setProteinGoal(profile.target_protein);
-        if (profile.target_carbs) setCarbsGoal(profile.target_carbs);
-        if (profile.target_fat) setFatGoal(profile.target_fat);
         if (profile.weight_kg) setWeightKg(String(profile.weight_kg));
         if (profile.height_cm) setHeightCm(String(profile.height_cm));
         if (profile.age) setAge(String(profile.age));
@@ -262,12 +271,37 @@ export default function FoodDiaryScreen() {
     };
   }, [weightKg, heightCm, age, gender, activityLevel, fitnessGoal]);
 
-  const handleApplyAutoBMI = () => {
-    setCalorieGoal(calculatedMetrics.calcCalories);
-    setProteinGoal(calculatedMetrics.calcProtein);
-    setCarbsGoal(calculatedMetrics.calcCarbs);
-    setFatGoal(calculatedMetrics.calcFat);
+  // Persists the athlete's self-chosen targets to the canonical server columns
+  // (no-op if a coach has locked them). Local state is updated regardless so the
+  // UI stays responsive; the offline cache is refreshed inside saveNutritionTargets.
+  const persistTargets = async (t: { calories: number; protein: number; carbs: number; fat: number }) => {
+    if (!session?.user?.id) return;
+    if (targetsLocked) {
+      if (Platform.OS === 'web') window.alert('Your coach set these targets. They can’t be edited here.');
+      else Alert.alert('Locked by coach', 'Your coach set these targets. They can’t be edited here.');
+      return;
+    }
+    await saveNutritionTargets(session.user.id, t);
+  };
+
+  const handleApplyAutoBMI = async () => {
+    const t = {
+      calories: calculatedMetrics.calcCalories,
+      protein: calculatedMetrics.calcProtein,
+      carbs: calculatedMetrics.calcCarbs,
+      fat: calculatedMetrics.calcFat,
+    };
+    setCalorieGoal(t.calories);
+    setProteinGoal(t.protein);
+    setCarbsGoal(t.carbs);
+    setFatGoal(t.fat);
     setShowGoalModal(false);
+    await persistTargets(t);
+  };
+
+  const handleSaveManualTargets = async () => {
+    setShowGoalModal(false);
+    await persistTargets({ calories: calorieGoal, protein: proteinGoal, carbs: carbsGoal, fat: fatGoal });
   };
 
   // Honest insight derived from the day's real numbers — not a canned message.
@@ -349,7 +383,7 @@ export default function FoodDiaryScreen() {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={{ marginLeft: 6 }}
               >
-                <Ionicons name="pencil-outline" size={15} color="#94A3B8" />
+                <Ionicons name={targetsLocked ? 'lock-closed' : 'pencil-outline'} size={15} color={targetsLocked ? '#F59E0B' : '#94A3B8'} />
               </TouchableOpacity>
             </View>
           </View>
@@ -828,6 +862,15 @@ export default function FoodDiaryScreen() {
                 </TouchableOpacity>
               </View>
 
+              {targetsLocked && (
+                <View style={styles.lockedBanner}>
+                  <Ionicons name="lock-closed" size={14} color="#F59E0B" />
+                  <Text style={styles.lockedBannerText}>
+                    Your coach set these targets — editing is disabled here.
+                  </Text>
+                </View>
+              )}
+
               {/* Mode Switcher Tabs */}
               <View style={styles.modalTabRow}>
                 <TouchableOpacity
@@ -1008,7 +1051,7 @@ export default function FoodDiaryScreen() {
                       <Text style={styles.modalBtnCancelText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => setShowGoalModal(false)}
+                      onPress={handleSaveManualTargets}
                       style={[styles.modalBtn, styles.modalBtnSave]}
                     >
                       <Text style={styles.modalBtnSaveText}>Save Custom Targets</Text>
@@ -1731,5 +1774,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  lockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  lockedBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FCD34D',
   },
 });

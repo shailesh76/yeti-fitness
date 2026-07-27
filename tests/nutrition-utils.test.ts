@@ -9,6 +9,10 @@ import {
   dedupeRecentFoods,
   favoritesStorageKey,
   isValidWaterMl,
+  mapProfileTargets,
+  toProfileTargetColumns,
+  targetsStorageKey,
+  canAthleteEditTargets,
 } from '../apps/mobile/services/nutritionUtils';
 
 describe('barcode mock gating (production safety)', () => {
@@ -168,5 +172,50 @@ describe('custom water amount validation', () => {
     expect(isValidWaterMl(-100)).toBe(false);
     expect(isValidWaterMl(5000)).toBe(false); // over per-add cap
     expect(isValidWaterMl(NaN)).toBe(false);
+  });
+});
+
+describe('nutrition targets — canonical field mapping (drift fix)', () => {
+  it('maps canonical daily_*_target columns into the app target object', () => {
+    const t = mapProfileTargets({
+      daily_calorie_target: 2200,
+      daily_protein_target: 165,
+      daily_carb_target: 240,
+      daily_fat_target: 70,
+      nutrition_targets_locked: true,
+    });
+    expect(t).toEqual({ calories: 2200, protein: 165, carbs: 240, fat: 70, locked: true });
+  });
+
+  it('keeps unset targets null (never 0) and defaults locked to false', () => {
+    const t = mapProfileTargets({ daily_calorie_target: 2000 });
+    expect(t.calories).toBe(2000);
+    expect(t.protein).toBeNull();
+    expect(t.carbs).toBeNull();
+    expect(t.fat).toBeNull();
+    expect(t.locked).toBe(false);
+  });
+
+  it('handles a null/absent row', () => {
+    expect(mapProfileTargets(null)).toEqual({ calories: null, protein: null, carbs: null, fat: null, locked: false });
+  });
+
+  it('round-trips app object → canonical columns', () => {
+    expect(toProfileTargetColumns({ calories: 2200, protein: 165, carbs: 240, fat: 70 })).toEqual({
+      daily_calorie_target: 2200,
+      daily_protein_target: 165,
+      daily_carb_target: 240,
+      daily_fat_target: 70,
+    });
+  });
+
+  it('produces a distinct per-user targets cache key', () => {
+    expect(targetsStorageKey('user-a')).not.toBe(targetsStorageKey('user-b'));
+    expect(targetsStorageKey('abc')).toContain('abc');
+  });
+
+  it('blocks athlete edits only when a coach has locked the targets', () => {
+    expect(canAthleteEditTargets(false)).toBe(true);
+    expect(canAthleteEditTargets(true)).toBe(false);
   });
 });

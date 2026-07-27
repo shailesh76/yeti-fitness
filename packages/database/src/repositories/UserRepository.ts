@@ -57,9 +57,12 @@ export class UserRepository {
     if (!this.supabase) {
       throw new Error('Supabase client not configured in UserRepository');
     }
+    // Select the columns the local Profile model can cache. Nutrition targets use
+    // the canonical daily_*_target columns and are fetched directly by the mobile
+    // nutritionTargets service, not cached through this WatermelonDB path.
     const { data, error } = await this.supabase
       .from('profiles')
-      .select('id')
+      .select('id, full_name, avatar_url')
       .eq('id', userId)
       .maybeSingle();
     return { data, error };

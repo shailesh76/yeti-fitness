@@ -241,3 +241,49 @@ export function favoritesStorageKey(userId: string): string {
 export function isValidWaterMl(ml: number): boolean {
   return Number.isFinite(ml) && ml > 0 && ml <= 3000;
 }
+
+// ─── Nutrition targets (canonical field mapping) ────────────────────────────────
+// Canonical DB columns live on `profiles`:
+//   daily_calorie_target, daily_protein_target, daily_carb_target, daily_fat_target
+// (INT, added 2024). The app works with a single clean {calories,protein,carbs,fat}
+// object; these two helpers are the ONLY place the wire names are translated.
+export interface NutritionTargets {
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+  locked: boolean; // set true when a coach has locked the athlete's targets
+}
+
+/** Supabase profiles row → the app's target object (missing values stay null). */
+export function mapProfileTargets(row: any): NutritionTargets {
+  return {
+    calories: row?.daily_calorie_target ?? null,
+    protein: row?.daily_protein_target ?? null,
+    carbs: row?.daily_carb_target ?? null,
+    fat: row?.daily_fat_target ?? null,
+    locked: !!row?.nutrition_targets_locked,
+  };
+}
+
+/** App target object → canonical `profiles` columns for persistence. */
+export function toProfileTargetColumns(t: {
+  calories?: number | null; protein?: number | null; carbs?: number | null; fat?: number | null;
+}): Record<string, number | null> {
+  return {
+    daily_calorie_target: t.calories ?? null,
+    daily_protein_target: t.protein ?? null,
+    daily_carb_target: t.carbs ?? null,
+    daily_fat_target: t.fat ?? null,
+  };
+}
+
+/** Per-user AsyncStorage key for the offline targets cache. */
+export function targetsStorageKey(userId: string): string {
+  return `@yeti_targets_${userId}`;
+}
+
+/** An athlete may edit their own targets only when a coach hasn't locked them. */
+export function canAthleteEditTargets(locked: boolean): boolean {
+  return !locked;
+}
