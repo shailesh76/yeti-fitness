@@ -207,9 +207,9 @@ describe('AI Coach eval — grounded prompt', () => {
       coachInstructions: 'Do not increase squat until depth is consistent.',
       safetyTriggered: false,
     });
-    expect(COACH_PROMPT_VERSION).toBe('coach-v2');
+    expect(COACH_PROMPT_VERSION).toBe('coach-v3');
     expect(prompt).toContain('not_all_sets_reached_top_range'); // engine result injected
     expect(prompt).toContain('COACH INSTRUCTIONS');
-    expect(prompt).toContain('Answer the athlete');
+    expect(prompt).toMatch(/acknowledge the athlete/i);
   });
 });

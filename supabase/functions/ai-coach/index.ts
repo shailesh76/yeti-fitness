@@ -6,6 +6,7 @@ import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
 import { resolveExerciseAlias } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
+import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from "../_shared/ai/coachMemory.ts";
 import {
   parseCoachResponse, responseViolatesIntent, safePlainText, ungroundedNumbers,
   REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
@@ -348,8 +349,26 @@ serve(async (req) => {
       contextBlock = typeof context === 'string' ? context : '';
     }
 
+    // 4b. Coach Memory — long-term ai_memory folded with deterministic profile
+    //     facts, so Yeti remembers the athlete across the conversation.
+    let memoryCard = '';
+    try {
+      const { data: memoryRows } = await supabaseClient
+        .from('ai_memory').select('category, memory_key, memory_value').eq('athlete_id', user.id);
+      let memory = foldMemoryRows(memoryRows || []);
+      const { data: memProfile } = await supabaseClient
+        .from('profiles').select('goal, weight_kg').eq('id', user.id).maybeSingle();
+      if (memProfile) {
+        memory = mergeCoachMemory(memory, {
+          goal: memProfile.goal ?? memory.goal,
+          currentWeightKg: memProfile.weight_kg ?? memory.currentWeightKg,
+        });
+      }
+      memoryCard = buildCoachMemoryCard(memory);
+    } catch (_e) { /* memory is best-effort — never blocks a reply */ }
+
     // 5. Grounded system prompt -------------------------------------------------
-    const systemPrompt = buildCoachSystemPrompt({ intent, engineResult, context: contextBlock, coachInstructions, safetyTriggered });
+    const systemPrompt = buildCoachSystemPrompt({ intent, engineResult, context: contextBlock, memoryCard, coachInstructions, safetyTriggered });
 
     // Build messages: system → prior turns → latest message LAST (authoritative).
     const priorTurns = (Array.isArray(messageHistory) ? messageHistory : [])
@@ -397,6 +416,23 @@ serve(async (req) => {
         response: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
         actions: [], intent,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+    }
+
+    // 7b. Persist durable facts the coach learned (restores ai_memory writes).
+    if (resp.memory_updates && resp.memory_updates.length) {
+      const allowed = ['preferences', 'training goals', 'workout style', 'nutrition preferences', 'equipment preferences', 'injuries'];
+      for (const u of resp.memory_updates) {
+        if (!u?.memory_key || !allowed.includes(u.category)) continue;
+        if (u.memory_value === '') {
+          await supabaseServiceRole.from('ai_memory').delete()
+            .eq('athlete_id', user.id).eq('memory_key', u.memory_key).then(() => {}).catch(() => {});
+        } else {
+          await supabaseServiceRole.from('ai_memory').upsert({
+            athlete_id: user.id, category: u.category, memory_key: u.memory_key,
+            memory_value: u.memory_value, updated_at: new Date().toISOString(),
+          }, { onConflict: 'athlete_id,memory_key' }).then(() => {}).catch(() => {});
+        }
+      }
     }
 
     // 8. Log + return -----------------------------------------------------------

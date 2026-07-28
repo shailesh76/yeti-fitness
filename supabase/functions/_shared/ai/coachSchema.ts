@@ -2,6 +2,8 @@
 // (Deno + vitest). The client never sees raw/broken model JSON — callers validate,
 // retry once with a repair instruction, then fall back to safe plain text.
 
+export interface MemoryUpdate { category: string; memory_key: string; memory_value: string }
+
 export interface CoachResponse {
   direct_answer: string;
   reason: string;
@@ -10,6 +12,7 @@ export interface CoachResponse {
   missing_information: string[];
   safety_flag: boolean;
   follow_up_question: string | null;
+  memory_updates?: MemoryUpdate[]; // optional — durable facts the coach learned
 }
 
 /** Validates the 7-field contract. Optional fields may be null but must be well-typed. */
@@ -52,6 +55,7 @@ export function parseCoachResponse(text: string): { ok: true; value: CoachRespon
       missing_information: obj.missing_information,
       safety_flag: obj.safety_flag,
       follow_up_question: obj.follow_up_question ?? null,
+      memory_updates: Array.isArray(obj.memory_updates) ? obj.memory_updates : undefined,
     },
   };
 }
