@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/index.ts";
 import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
-import { computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
+import { decideProgression, computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import {
   parseCoachResponse, responseViolatesIntent, safePlainText,
@@ -92,6 +92,99 @@ async function loadNutritionContext(
     `NUTRITION TARGETS: ${engine.calorieTarget ?? '—'} kcal / P${engine.proteinTarget ?? '—'} C${engine.carbTarget ?? '—'} F${engine.fatTarget ?? '—'}\n` +
     `CONSUMED TODAY: ${engine.consumedCalories} kcal / P${engine.consumedProtein} C${engine.consumedCarbs} F${engine.consumedFat}`;
   return { context, engine };
+}
+
+// ─── Progression history for a specific lift ─────────────────────────────────────
+// Real schema: session_sets(weight, reps, exercise_id, session_id, completed_at) —
+// NO rpe/exercise_name/user_id. Ownership + completion come via
+// session_id → workout_sessions(athlete_id, completed_at). RPE is therefore never
+// fabricated (avgRpe stays null).
+
+/** Best-effort extraction of the target lift phrase from a progression question. */
+function extractExerciseName(message: string): string {
+  return (message || '')
+    .toLowerCase()
+    .replace(/[?.!,]/g, ' ')
+    .replace(/\b(should i|can i|do i|is it time to|ready to|time to|increase|go up|add (weight|load)|more weight|heavier|bump( up)?|progress(?:ion)?|the weight|weight|load|my|on|for|to|today|next session|next|reps?|sets?)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Loads the last 3–5 completed working sets for the lift named in the message and
+ * builds the deterministic decideProgression() input + a human-readable history
+ * block. Returns engineInput: null when the lift/history can't be resolved (the
+ * engine then reports insufficient_data — nothing is invented).
+ */
+async function loadProgressionForExercise(
+  supabase: any, userId: string, message: string,
+): Promise<{ engineInput: any | null; context: string }> {
+  const candidate = extractExerciseName(message);
+  if (!candidate) return { engineInput: null, context: 'No specific exercise named in the question.' };
+
+  // 1. Resolve the exercise name → id (best fuzzy catalog match).
+  const { data: matches } = await supabase
+    .from('exercises').select('id, name').ilike('name', `%${candidate}%`).limit(1);
+  const ex = matches?.[0];
+  if (!ex) return { engineInput: null, context: `No catalog exercise matched "${candidate}".` };
+
+  // 2. Recent COMPLETED sessions for the athlete (ownership + completion here).
+  const { data: sessions } = await supabase
+    .from('workout_sessions').select('id, completed_at')
+    .eq('athlete_id', userId).not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false }).limit(8);
+  const sessionIds = (sessions || []).map((s: any) => s.id);
+  if (!sessionIds.length) {
+    return { engineInput: null, context: `EXERCISE: ${ex.name}\nNo completed sessions logged yet.` };
+  }
+
+  // 3. This lift's working sets within those sessions.
+  const { data: sets } = await supabase
+    .from('session_sets').select('weight, reps, session_id, completed_at')
+    .eq('exercise_id', ex.id).in('session_id', sessionIds);
+  if (!sets || sets.length === 0) {
+    return { engineInput: null, context: `EXERCISE: ${ex.name}\nNo completed sets logged for this lift yet.` };
+  }
+
+  // 4. Group by session, ordered by session recency; take the latest 3–5.
+  const bySession: Record<string, any[]> = {};
+  for (const s of sets) (bySession[s.session_id] ||= []).push(s);
+  const orderedIds = sessionIds.filter((id: string) => bySession[id]).slice(0, 5);
+  const latest = bySession[orderedIds[0]];
+  const lastSetReps = latest.map((s: any) => Number(s.reps) || 0);
+  const currentWeight = Math.max(...latest.map((s: any) => Number(s.weight) || 0));
+
+  // 5. Target sets/reps from the plan prescription, if the lift is programmed.
+  const { data: pex } = await supabase
+    .from('plan_exercises').select('sets, reps').eq('exercise_id', ex.id).limit(1);
+  const repMatch = String(pex?.[0]?.reps ?? '').match(/(\d+)\s*-\s*(\d+)/);
+  const targetRepsLow = repMatch ? Number(repMatch[1]) : Math.min(...lastSetReps);
+  const targetRepsHigh = repMatch ? Number(repMatch[2]) : Math.max(8, ...lastSetReps);
+  const targetSets = Number(pex?.[0]?.sets) || latest.length;
+
+  const engineInput = {
+    exercise: ex.name,
+    currentWeightKg: currentWeight,
+    targetRepsLow, targetRepsHigh, targetSets,
+    lastSetReps,
+    avgRpe: null,          // RPE is not recorded server-side — never fabricated
+    recoveryScore: null,
+    isUpperBody: /\b(bench|press|row|curl|pulldown|fly|raise|dip|pull-?up|push-?up|shrug|extension|chin)\b/.test(ex.name.toLowerCase()),
+  };
+
+  const histLines = orderedIds.map((id: string, i: number) => {
+    const sess = bySession[id];
+    const w = Math.max(...sess.map((s: any) => Number(s.weight) || 0));
+    const reps = sess.map((s: any) => Number(s.reps) || 0).join(', ');
+    const when = sess[0]?.completed_at ? new Date(sess[0].completed_at).toLocaleDateString() : '';
+    return `  ${i === 0 ? 'latest' : `-${i}`} ${when}: ${w}kg x [${reps}]`;
+  }).join('\n');
+
+  const context =
+    `EXERCISE: ${ex.name}\nTARGET: ${targetSets} x ${targetRepsLow}-${targetRepsHigh}\n` +
+    `RECENT SESSIONS (newest first):\n${histLines}\n(RPE is not recorded — do not reference RPE.)`;
+
+  return { engineInput, context };
 }
 
 // ─── Model execution + schema/cross-intent validation with one retry each ────────
@@ -215,10 +308,18 @@ serve(async (req) => {
     let coachInstructions = '';
 
     if (WORKOUT_INTENTS.includes(intent)) {
-      contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
-      // 4. Deterministic mutation for plan edits (LLM only explains it).
-      if (intent === 'workout_plan_edit') {
-        engineResult = parsePlanEdit(latestUserMessage);
+      if (intent === 'workout_progression') {
+        // Pull the target lift's last 3–5 completed working sets and let the
+        // deterministic engine decide; the LLM only explains the result.
+        const prog = await loadProgressionForExercise(supabaseClient, user.id, latestUserMessage);
+        contextBlock = prog.context; // workout-only — nutrition is never loaded
+        engineResult = prog.engineInput ? decideProgression(prog.engineInput) : undefined;
+      } else {
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
+        // Deterministic mutation for plan edits (LLM only explains it).
+        if (intent === 'workout_plan_edit') {
+          engineResult = parsePlanEdit(latestUserMessage);
+        }
       }
     } else if (intent === 'nutrition_status') {
       const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id); // no workouts

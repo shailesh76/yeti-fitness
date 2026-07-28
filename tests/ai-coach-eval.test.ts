@@ -83,6 +83,16 @@ describe('AI Coach eval — progression decisions', () => {
     expect(r.recommended_weight_kg).toBe(62.5);
   });
 
+  it('11b. task example: 3 sessions of 80kg x 8 (upper body) → bump to 82.5kg', () => {
+    // RPE is not stored server-side, so avgRpe is null (the increase gate allows it).
+    const r = decideProgression({
+      exercise: 'Bench Press', currentWeightKg: 80, targetRepsLow: 6, targetRepsHigh: 8,
+      targetSets: 3, lastSetReps: [8, 8, 8], avgRpe: null, isUpperBody: true,
+    });
+    expect(r.decision).toBe('increase_weight');
+    expect(r.recommended_weight_kg).toBe(82.5);
+  });
+
   it('12. is deterministic — same input yields identical recommendation', () => {
     expect(squat([8, 7, 6])).toEqual(squat([8, 7, 6]));
   });
