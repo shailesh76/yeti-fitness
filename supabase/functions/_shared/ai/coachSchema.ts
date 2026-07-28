@@ -69,6 +69,25 @@ export function safePlainText(text: string, safety = false): CoachResponse {
   };
 }
 
+// Cross-intent leakage guard: nutrition output must never appear in a workout
+// answer. Used to reject + retry a response that ignored the intent isolation.
+const NUTRITION_LEAK = /(calories?|kcal|protein\s*(target|goal|:|\d)|carb(ohydrate)?s?\s*(target|goal|:|\d)|fat\s*(target|goal|:|\d)|macros?|daily nutrition|nutrition targets?|\d+\s*g\s*(of\s*)?(protein|carbs?|fat)|grams of (protein|carbs?|fat))/i;
+
+const WORKOUT_ONLY_INTENTS = new Set([
+  'workout_plan_edit', 'workout_progression', 'exercise_substitution', 'rest_pacing', 'workout_explanation',
+]);
+
+/** True if a workout-only intent's response leaks nutrition content (invalid). */
+export function responseViolatesIntent(intent: string, responseText: string): boolean {
+  if (!WORKOUT_ONLY_INTENTS.has(intent)) return false;
+  return NUTRITION_LEAK.test(responseText || '');
+}
+
+/** Strict correction appended on the single retry when a workout answer leaked nutrition. */
+export const INTENT_ISOLATION_RETRY =
+  'Your previous answer included nutrition content, which is not allowed for this workout request. ' +
+  'Answer ONLY the workout question. Do not mention calories, protein, carbs, fat, macros or nutrition targets.';
+
 /** Instruction appended on the single repair retry when the first output failed validation. */
 export const REPAIR_INSTRUCTION =
   'Your previous reply was not valid JSON for the required schema. Reply again with ONLY a JSON object ' +
