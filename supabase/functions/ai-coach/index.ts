@@ -1,321 +1,307 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/index.ts";
+import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
+import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
+import { computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
+import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
+import {
+  parseCoachResponse, responseViolatesIntent, safePlainText,
+  REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, CoachResponse,
+} from "../_shared/ai/coachSchema.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
+const WORKOUT_INTENTS: CoachIntent[] = ['workout_plan_edit', 'workout_progression', 'exercise_substitution'];
 
-  // Provider health check: GET /ai-coach?health=1 — reports which AI providers are live.
+// ─── Intent-scoped context loaders (isolated — never cross domains) ──────────────
+
+/** Workout plan/day/exercise context. NEVER loads nutrition. */
+async function loadWorkoutContext(supabase: any, userId: string): Promise<string> {
+  try {
+    const { data: plans } = await supabase
+      .from('workout_plans').select('id, name')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+    const plan = plans?.[0];
+    if (!plan) return 'No active workout plan on file.';
+
+    const { data: days } = await supabase
+      .from('plan_days').select('id, day_number, name').eq('plan_id', plan.id).order('day_number');
+    const dayIds = (days || []).map((d: any) => d.id);
+
+    const exByDay: Record<string, any[]> = {};
+    if (dayIds.length) {
+      const { data: pex } = await supabase
+        .from('plan_exercises')
+        .select('plan_day_id, sets, reps, target_rpe, order_index, exercises(name)')
+        .in('plan_day_id', dayIds).order('order_index');
+      for (const e of pex || []) (exByDay[e.plan_day_id] ||= []).push(e);
+    }
+
+    const lines = [`ACTIVE PLAN: ${plan.name}`];
+    for (const d of days || []) {
+      lines.push(`Day ${d.day_number}${d.name ? ` (${d.name})` : ''}:`);
+      for (const e of exByDay[d.id] || []) {
+        const nm = e.exercises?.name || 'Exercise';
+        lines.push(`  - ${nm}: ${e.sets ?? '?'} x ${e.reps ?? '?'}${e.target_rpe ? ` @RPE ${e.target_rpe}` : ''}`);
+      }
+    }
+    return lines.join('\n');
+  } catch (_e) {
+    return '';
+  }
+}
+
+/** Nutrition context + engine input. NEVER loads workout routines. */
+async function loadNutritionContext(
+  supabase: any, userId: string,
+): Promise<{ context: string; engine: NutritionInput }> {
+  const engine: NutritionInput = {
+    calorieTarget: null, proteinTarget: null, carbTarget: null, fatTarget: null,
+    consumedCalories: 0, consumedProtein: 0, consumedCarbs: 0, consumedFat: 0,
+  };
+  try {
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('daily_calorie_target,daily_protein_target,daily_carb_target,daily_fat_target')
+      .eq('id', userId).maybeSingle();
+    if (prof) {
+      engine.calorieTarget = prof.daily_calorie_target ?? null;
+      engine.proteinTarget = prof.daily_protein_target ?? null;
+      engine.carbTarget = prof.daily_carb_target ?? null;
+      engine.fatTarget = prof.daily_fat_target ?? null;
+    }
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const { data: logs } = await supabase
+      .from('meal_logs')
+      .select('servings, food:foods(calories,protein,carbs,fat)')
+      .eq('user_id', userId).gte('logged_at', start.toISOString());
+    let c = 0, p = 0, cb = 0, f = 0;
+    for (const l of logs || []) {
+      const s = Number(l.servings) || 0; const fd = l.food || {};
+      c += (fd.calories || 0) * s; p += (fd.protein || 0) * s; cb += (fd.carbs || 0) * s; f += (fd.fat || 0) * s;
+    }
+    engine.consumedCalories = Math.round(c); engine.consumedProtein = Math.round(p);
+    engine.consumedCarbs = Math.round(cb); engine.consumedFat = Math.round(f);
+  } catch (_e) { /* degrade to empty */ }
+
+  const context =
+    `NUTRITION TARGETS: ${engine.calorieTarget ?? '—'} kcal / P${engine.proteinTarget ?? '—'} C${engine.carbTarget ?? '—'} F${engine.fatTarget ?? '—'}\n` +
+    `CONSUMED TODAY: ${engine.consumedCalories} kcal / P${engine.consumedProtein} C${engine.consumedCarbs} F${engine.consumedFat}`;
+  return { context, engine };
+}
+
+// ─── Model execution + schema/cross-intent validation with one retry each ────────
+async function runCoach(
+  baseMessages: { role: string; content: string }[],
+  intent: CoachIntent,
+): Promise<{ resp: CoachResponse; provider: string; model: string; usage: any; costUsd: number }> {
+  const gen = (msgs: any[]) => generateChat({ messages: msgs, jsonMode: true, temperature: 0.2, maxTokens: 800 });
+
+  let result = await gen(baseMessages);
+  let parsed = parseCoachResponse(result.text);
+
+  // Retry once on invalid schema.
+  if (!parsed.ok) {
+    result = await gen([...baseMessages, { role: 'user', content: REPAIR_INSTRUCTION }]);
+    parsed = parseCoachResponse(result.text);
+  }
+  let resp: CoachResponse = parsed.ok ? parsed.value : safePlainText(result.text);
+
+  // Cross-intent isolation: a workout answer must not leak nutrition.
+  if (responseViolatesIntent(intent, `${resp.direct_answer} ${resp.reason}`)) {
+    const retry = await gen([...baseMessages, { role: 'user', content: INTENT_ISOLATION_RETRY }]);
+    const reparsed = parseCoachResponse(retry.text);
+    const retryResp = reparsed.ok ? reparsed.value : safePlainText(retry.text);
+    if (!responseViolatesIntent(intent, `${retryResp.direct_answer} ${retryResp.reason}`)) {
+      resp = retryResp; result = retry;
+    } else {
+      // Never return the leaking answer — safe deterministic fallback.
+      resp = safePlainText("I've kept this to your training. Tell me the workout day and I'll refine the sets and reps.");
+    }
+  }
+  return { resp, provider: result.provider, model: result.model, usage: result.usage, costUsd: result.costUsd };
+}
+
+function toReply(resp: CoachResponse): string {
+  const parts = [resp.direct_answer.trim()];
+  if (resp.reason && resp.reason.trim()) parts.push(resp.reason.trim());
+  if (typeof resp.recommended_action === 'string' && resp.recommended_action.trim()) parts.push(resp.recommended_action.trim());
+  return parts.join('\n\n');
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
   const reqUrl = new URL(req.url);
   if (req.method === 'GET' && reqUrl.searchParams.get('health') === '1') {
     return new Response(JSON.stringify(await healthCheck()), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
     });
   }
 
   try {
+    // 1. Auth ------------------------------------------------------------------
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '');
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+      Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } },
     );
-
-    // 1. Validate User
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-    if (authError || !user) throw new Error('Unauthorized');
-
-    // Instantiate service_role client for RLS-bypassed writes (logs, safety, memory)
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token || undefined);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+      });
+    }
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabaseServiceRole = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      serviceRoleKey,
-      { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } }
+      Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey,
+      { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } },
     );
 
-    const { type, message, rawContext, conversationId } = await req.json();
-    let truncatedMessage = message || '';
-    if (truncatedMessage.length > 1000) {
-      truncatedMessage = truncatedMessage.substring(0, 1000) + '... [truncated for length]';
-    }
-
-    // Guard: message must not exceed 2000 characters
+    // 1b. Input validation — read `context` + `messageHistory` (client field names)
+    const { message, context, messageHistory, conversationId } = await req.json();
     if (message && message.length > 2000) {
-      return new Response(JSON.stringify({ 
-        error: 'Message exceeds maximum length (2000 characters).' 
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
+      return new Response(JSON.stringify({ error: 'Message exceeds maximum length (2000 characters).' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
       });
     }
+    let latestUserMessage = message || '';
+    if (latestUserMessage.length > 1000) latestUserMessage = latestUserMessage.substring(0, 1000) + '... [truncated]';
 
-    // 2. Fetch User Entitlements (Check Subscription status)
+    // Entitlements + daily free-tier limit -------------------------------------
     const { data: entitlements } = await supabaseClient
-      .from('user_entitlements')
-      .select('plan_id')
-      .eq('user_id', user.id)
-      .eq('status', 'active');
-
-    const isPremiumPlan = (entitlements || []).some(
-      (e: any) => e.plan_id === 'PRO' || e.plan_id === 'COACHING'
-    );
+      .from('user_entitlements').select('plan_id').eq('user_id', user.id).eq('status', 'active');
+    const isPremiumPlan = (entitlements || []).some((e: any) => e.plan_id === 'PRO' || e.plan_id === 'COACHING');
     const subscriptionTier = isPremiumPlan
-      ? ((entitlements || []).find((e: any) => e.plan_id === 'COACHING') ? 'COACHING' : 'PRO')
-      : 'FREE';
-
-    // Check Global Beta config
+      ? ((entitlements || []).find((e: any) => e.plan_id === 'COACHING') ? 'COACHING' : 'PRO') : 'FREE';
     const { data: betaConfig } = await supabaseClient
-      .from('beta_mode_config')
-      .select('is_global_beta_active')
-      .single();
-    const isGlobalBeta = betaConfig?.is_global_beta_active ?? false;
+      .from('beta_mode_config').select('is_global_beta_active').single();
+    const isPremium = isPremiumPlan || (betaConfig?.is_global_beta_active ?? false);
 
-    const isPremium = isPremiumPlan || isGlobalBeta;
-
-    // 3. Count daily AI requests
     const today = new Date().toISOString().split('T')[0];
     const { data: usageData } = await supabaseClient
-      .from('ai_usage')
-      .select('requests_count')
-      .eq('athlete_id', user.id)
-      .eq('date', today)
-      .maybeSingle();
-
+      .from('ai_usage').select('requests_count').eq('athlete_id', user.id).eq('date', today).maybeSingle();
     const currentRequests = usageData?.requests_count || 0;
-
-    // 4. Enforce Premium Limits — log and reject if over limit
     if (!isPremium && currentRequests >= 5) {
-      // Log failed request (over limit) — does NOT increment daily count
       await supabaseServiceRole.from('ai_request_logs').insert({
-        athlete_id: user.id,
-        subscription_tier: subscriptionTier,
-        success: false,
-        error_reason: 'daily_limit_exceeded',
-        message_length: message?.length ?? 0,
+        athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
+        error_reason: 'daily_limit_exceeded', message_length: message?.length ?? 0,
       }).then(() => {}).catch(() => {});
-
-      return new Response(JSON.stringify({ 
-        error: 'AI Coach daily limit reached for free tier. Upgrade to Yeti Pro to get unlimited coaching!' 
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 403,
+      return new Response(JSON.stringify({ error: 'AI Coach daily limit reached for free tier. Upgrade to Yeti Pro for unlimited coaching!' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
       });
     }
 
-    // 5. Fetch AI memory for this athlete
-    const { data: memories } = await supabaseClient
-      .from('ai_memory')
-      .select('category, memory_key, memory_value')
-      .eq('athlete_id', user.id);
+    // 2. Deterministic, stateless intent classification (latest message only) ---
+    const intent = classifyIntent(latestUserMessage);
 
-    const memoryString = (memories || [])
-      .map(m => `- [${m.category}] ${m.memory_key}: ${m.memory_value}`)
-      .join('\n');
-
-    // 6. Fetch pending progression recommendations
-    const { data: recommendations } = await supabaseClient
-      .from('progression_recommendations')
-      .select('exercise_name, suggestion_text')
-      .eq('user_id', user.id)
-      .eq('status', 'pending')
-      .limit(3);
-
-    const recommendationsString = (recommendations || [])
-      .map(r => `- Suggestion for ${r.exercise_name}: ${r.suggestion_text}`)
-      .join('\n');
-
-    // 7. Run safety checks (triggers only, not medical diagnosis)
-    const safetyKeywords = ['pain', 'hurt', 'injured', 'sprain', 'tweak', 'ache', 'injury'];
-    const messageLower = truncatedMessage.toLowerCase();
-    const isSafetyTriggered = safetyKeywords.some(keyword => messageLower.includes(keyword));
-
-    if (isSafetyTriggered) {
+    // Safety keyword scan (log injury reports).
+    const safetyTriggered = /\b(pain|hurt|injured|sprain|tweak|ache|injury)\b/i.test(latestUserMessage) || intent === 'medical_safety';
+    if (safetyTriggered) {
       await supabaseServiceRole.from('ai_safety_logs').insert({
-        user_id: user.id,
-        conversation_id: conversationId || 'general',
-        risk_type: 'INJURY_REPORT',
-        trigger_text: truncatedMessage,
-        category: 'injuries'
-      });
+        user_id: user.id, conversation_id: conversationId || 'general',
+        risk_type: 'INJURY_REPORT', trigger_text: latestUserMessage, category: 'injuries',
+      }).then(() => {}).catch(() => {});
     }
 
-    // 8. Build system prompt with context, memories, recommendations, and safety rules
-    const systemPromptMap: Record<string, string> = {
-      'workout': `You are the Yeti AI Workout Coach. Optimize training for ${rawContext?.goal || 'fitness goals'}.`,
-      'nutrition': `You are the Yeti AI Nutrition Coach. Target weight: ${rawContext?.target_weight || 'fitness weight'}.`,
-      'recovery': `You are the Yeti AI Recovery Coach. Recovery focus.`,
-      'motivation': `You are the Yeti AI Motivation Coach. Be energetic.`
-    };
+    // 3. Intent-scoped context loading (STRICT isolation) -----------------------
+    let contextBlock = '';
+    let engineResult: unknown = undefined;
+    let coachInstructions = '';
 
-    const sysPromptBase = systemPromptMap[type] || systemPromptMap['workout'];
-    const safetyGuardrails = `
-CRITICAL SAFETY RULES (MUST OBEY):
-1. NEVER diagnose medical conditions or prescribe physical therapy/treatments.
-2. NEVER encourage training through joint pain or injuries.
-3. IF the user reports injury or joint pain (safety triggered), you MUST recommend:
-   - Modifying or changing the exercise.
-   - Reducing load/intensity.
-   - Consulting a qualified medical professional/physiotherapist.
-`;
-
-    const instructionsPrompt = `
-You must reply to the user message in structured JSON format. 
-Response schema:
-{
-  "reply": "Your coaching response text here. Address the user directly, incorporating relevant memories or recommendations.",
-  "memory_updates": [
-    {
-      "category": "preferences" | "training goals" | "workout style" | "nutrition preferences" | "equipment preferences" | "injuries",
-      "memory_key": "unique_lowercase_key_representing_fact",
-      "memory_value": "Short summary of preference or injury learned, OR empty string '' to delete this memory if user asked to forget it"
-    }
-  ]
-}
-
-AI MEMORY QUALITY RULES:
-1. ONLY store long-term, meaningful athlete preferences or constraints (e.g. split choice, equipment limitations, chronic pains, calorie goals).
-2. NEVER store temporary states (e.g. "is tired today", "had a bad sleep last night", "ate pizza for lunch").
-3. NEVER store assumptions or PII (e.g. phone numbers, email).
-4. If the user asks you to "forget" or "remove" a preference, output that key with memory_value = "" to delete it.
-
-ATHLETE CURRENT LOCAL CONTEXT:
-${JSON.stringify(rawContext || {})}
-
-ATHLETE LONG-TERM MEMORIES:
-${memoryString || '(No memories stored yet)'}
-
-PENDING PROGRESSION RECOMMENDATIONS:
-${recommendationsString || '(No pending suggestions)'}
-
-SAFETY ALERT: ${isSafetyTriggered ? 'TRUE - Athlete reported joint pain or potential injury. Follow Safety Rules strictly.' : 'FALSE'}
-`;
-
-    // 9. Request structured completion via the shared AI provider service
-    //    (OpenAI primary → Gemini fallback → Anthropic optional; with retry, token
-    //     usage + cost tracking). Fails loudly if no provider is configured.
-    let finalReply = '';
-    let memoryUpdates: any[] = [];
-    let aiProvider = 'unknown';
-    let aiModel = 'unknown';
-    let usage = { inputTokens: 0, outputTokens: 0 };
-    let costUsd = 0;
-
-    try {
-      const result = await generateChat({
-        messages: [
-          { role: 'system', content: `${sysPromptBase}\n${safetyGuardrails}\n${instructionsPrompt}` },
-          { role: 'user', content: truncatedMessage },
-        ],
-        jsonMode: true,
-        temperature: 0.7,
-      });
-      aiProvider = result.provider;
-      aiModel = result.model;
-      usage = result.usage;
-      costUsd = result.costUsd;
-
-      try {
-        const parsed = JSON.parse(result.text);
-        finalReply = parsed.reply || '';
-        memoryUpdates = parsed.memory_updates || [];
-      } catch {
-        finalReply = result.text;
+    if (WORKOUT_INTENTS.includes(intent)) {
+      contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
+      // 4. Deterministic mutation for plan edits (LLM only explains it).
+      if (intent === 'workout_plan_edit') {
+        engineResult = parsePlanEdit(latestUserMessage);
       }
+    } else if (intent === 'nutrition_status') {
+      const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id); // no workouts
+      contextBlock = nctx;
+      engineResult = computeNutritionRemaining(engine);
+    } else {
+      // general_chat / explanation / recovery / advice / meal_suggestion / rest_pacing:
+      // use only the light client-supplied context; NEVER default to nutrition.
+      contextBlock = typeof context === 'string' ? context : '';
+    }
+
+    // 5. Grounded system prompt -------------------------------------------------
+    const systemPrompt = buildCoachSystemPrompt({ intent, engineResult, context: contextBlock, coachInstructions, safetyTriggered });
+
+    // Build messages: system → prior turns → latest message LAST (authoritative).
+    const priorTurns = (Array.isArray(messageHistory) ? messageHistory : [])
+      .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .slice(-8);
+    while (priorTurns.length && priorTurns[priorTurns.length - 1].role === 'user'
+      && priorTurns[priorTurns.length - 1].content.trim() === (message || '').trim()) {
+      priorTurns.pop(); // avoid duplicating the current message
+    }
+    const baseMessages = [
+      { role: 'system', content: systemPrompt },
+      ...priorTurns.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
+      { role: 'user', content: latestUserMessage },
+    ];
+
+    // Dev logging of the final payload (secrets/PII removed).
+    if (Deno.env.get('DEBUG_AI') === '1') {
+      console.log('[ai-coach] payload', JSON.stringify({
+        intent, provider_order: 'gemini→groq', turns: baseMessages.length,
+        engineResult, contextChars: contextBlock.length,
+      }));
+    }
+
+    // 6 + 7. Model execution + validation + retries -----------------------------
+    const started = Date.now();
+    let resp: CoachResponse, provider = 'unknown', model = 'unknown', usage = { inputTokens: 0, outputTokens: 0 }, costUsd = 0;
+    try {
+      const out = await runCoach(baseMessages, intent);
+      resp = out.resp; provider = out.provider; model = out.model; usage = out.usage; costUsd = out.costUsd;
     } catch (providerErr: any) {
-      // No provider configured → explicit 503 instead of a silent mock fallback.
       if (providerErr instanceof AINotConfiguredError) {
         return new Response(JSON.stringify({
           error: 'AI_PROVIDER_NOT_CONFIGURED',
-          message: 'No AI provider is configured. Set GEMINI_API_KEY (primary), OPENAI_API_KEY, or ANTHROPIC_API_KEY.',
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
-        });
+          message: 'No AI provider is configured. Set GEMINI_API_KEY and/or GROQ_API_KEY.',
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 503 });
       }
-      console.error('[ai-coach] provider error:', providerErr?.message);
-      finalReply = "I'm having trouble connecting to my neural net right now. Keep pushing!";
       await supabaseServiceRole.from('ai_request_logs').insert({
-        athlete_id: user.id,
-        subscription_tier: subscriptionTier,
-        success: false,
-        error_reason: 'provider_error',
-        message_length: truncatedMessage.length,
-        coach_type: type || 'workout',
+        athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
+        error_reason: 'provider_error', coach_type: intent, message_length: latestUserMessage.length,
       }).then(() => {}).catch(() => {});
+      return new Response(JSON.stringify({
+        reply: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
+        response: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
+        actions: [], intent,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
 
-    // 10. Process and save memory updates
-    if (memoryUpdates.length > 0) {
-      const allowedCategories = ['preferences', 'training goals', 'workout style', 'nutrition preferences', 'equipment preferences', 'injuries'];
-      for (const update of memoryUpdates) {
-        if (!update.memory_key || !allowedCategories.includes(update.category)) continue;
+    // 8. Log + return -----------------------------------------------------------
+    const latencyMs = Date.now() - started;
+    await Promise.all([
+      supabaseServiceRole.from('ai_usage').upsert({
+        athlete_id: user.id, date: today, requests_count: currentRequests + 1,
+        subscription_tier: subscriptionTier, last_request_at: new Date().toISOString(),
+      }, { onConflict: 'athlete_id,date' }),
+      supabaseServiceRole.from('ai_request_logs').insert({
+        athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
+        coach_type: intent, provider, model,
+        input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
+        cost_usd: costUsd, latency_ms: latencyMs, message_length: latestUserMessage.length,
+      }),
+    ]).catch(() => {}); // non-blocking
 
-        if (update.memory_value === "") {
-          await supabaseServiceRole
-            .from('ai_memory')
-            .delete()
-            .eq('athlete_id', user.id)
-            .eq('memory_key', update.memory_key);
-        } else {
-          await supabaseServiceRole
-            .from('ai_memory')
-            .upsert({
-              athlete_id: user.id,
-              category: update.category,
-              memory_key: update.memory_key,
-              memory_value: update.memory_value,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'athlete_id,memory_key' });
-        }
-      }
-    }
-
-    // 11. Increment usage count AND log the successful request (only when a
-    //     provider actually responded — a provider error was already logged above).
-    if (aiProvider !== 'unknown') {
-      await Promise.all([
-        supabaseServiceRole
-          .from('ai_usage')
-          .upsert({
-            athlete_id: user.id,
-            date: today,
-            requests_count: currentRequests + 1,
-            subscription_tier: subscriptionTier,
-            last_request_at: new Date().toISOString(),
-          }, { onConflict: 'athlete_id,date' }),
-        supabaseServiceRole.from('ai_request_logs').insert({
-          athlete_id: user.id,
-          subscription_tier: subscriptionTier,
-          success: true,
-          message_length: truncatedMessage.length,
-          coach_type: type || 'workout',
-          provider: aiProvider,
-          model: aiModel,
-          input_tokens: usage.inputTokens,
-          output_tokens: usage.outputTokens,
-          cost_usd: costUsd,
-        }),
-      ]).catch(() => {}); // Non-blocking — never crash the response for logging failures
-    }
-
-    // Return compatibility response containing both reply and response keys
-    return new Response(JSON.stringify({ reply: finalReply, response: finalReply }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
+    const reply = toReply(resp);
+    return new Response(JSON.stringify({ reply, response: reply, actions: [], intent, structured: resp }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
     });
-
   } catch (error: any) {
     console.error('[ai-coach] error:', error);
     return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
     });
   }
 });
