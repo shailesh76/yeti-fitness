@@ -83,6 +83,25 @@ export function responseViolatesIntent(intent: string, responseText: string): bo
   return NUTRITION_LEAK.test(responseText || '');
 }
 
+/**
+ * Hallucination guard: every number cited in supporting_data must appear in the
+ * grounded source (the deterministic engine result + the loaded context). Returns
+ * the list of ungrounded numbers — empty means clean. supporting_data must only
+ * reference real Yeti values, never invented ones.
+ */
+export function ungroundedNumbers(supportingData: unknown, groundedSource: string): string[] {
+  if (supportingData == null) return [];
+  const cited = JSON.stringify(supportingData).match(/\d+(?:\.\d+)?/g) || [];
+  const src = groundedSource || '';
+  const bad = cited.filter((n) => !src.includes(n));
+  return Array.from(new Set(bad));
+}
+
+/** Correction appended on the single retry when supporting_data cited ungrounded numbers. */
+export const GROUNDING_RETRY =
+  'Your supporting_data cited numbers that are not in the provided ENGINE RESULT or CONTEXT. ' +
+  'Reply again using ONLY values that appear in the supplied data; if you have none, use an empty supporting_data ({}) and list what is missing in missing_information.';
+
 /** Strict correction appended on the single retry when a workout answer leaked nutrition. */
 export const INTENT_ISOLATION_RETRY =
   'Your previous answer included nutrition content, which is not allowed for this workout request. ' +

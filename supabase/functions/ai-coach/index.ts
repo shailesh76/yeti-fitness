@@ -3,11 +3,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/index.ts";
 import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
+import { resolveExerciseAlias } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import {
-  parseCoachResponse, responseViolatesIntent, safePlainText,
-  REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, CoachResponse,
+  parseCoachResponse, responseViolatesIntent, safePlainText, ungroundedNumbers,
+  REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
 } from "../_shared/ai/coachSchema.ts";
 
 const corsHeaders = {
@@ -122,9 +123,10 @@ async function loadProgressionForExercise(
   const candidate = extractExerciseName(message);
   if (!candidate) return { engineInput: null, context: 'No specific exercise named in the question.' };
 
-  // 1. Resolve the exercise name → id (best fuzzy catalog match).
+  // 1. Alias-resolve → canonical search term, then look up the catalog id.
+  const canonical = resolveExerciseAlias(candidate);
   const { data: matches } = await supabase
-    .from('exercises').select('id, name').ilike('name', `%${candidate}%`).limit(1);
+    .from('exercises').select('id, name').ilike('name', `%${canonical}%`).limit(1);
   const ex = matches?.[0];
   if (!ex) return { engineInput: null, context: `No catalog exercise matched "${candidate}".` };
 
@@ -191,6 +193,7 @@ async function loadProgressionForExercise(
 async function runCoach(
   baseMessages: { role: string; content: string }[],
   intent: CoachIntent,
+  groundedSource: string,
 ): Promise<{ resp: CoachResponse; provider: string; model: string; usage: any; costUsd: number }> {
   const gen = (msgs: any[]) => generateChat({ messages: msgs, jsonMode: true, temperature: 0.2, maxTokens: 800 });
 
@@ -216,6 +219,20 @@ async function runCoach(
       resp = safePlainText("I've kept this to your training. Tell me the workout day and I'll refine the sets and reps.");
     }
   }
+
+  // Hallucination guard: supporting_data must cite only grounded numbers.
+  if (ungroundedNumbers(resp.supporting_data, groundedSource).length > 0) {
+    const retry = await gen([...baseMessages, { role: 'user', content: GROUNDING_RETRY }]);
+    const reparsed = parseCoachResponse(retry.text);
+    const retryResp = reparsed.ok ? reparsed.value : resp;
+    if (ungroundedNumbers(retryResp.supporting_data, groundedSource).length === 0) {
+      resp = retryResp; result = retry;
+    } else {
+      // Strip ungrounded supporting_data rather than surface invented numbers.
+      resp = { ...resp, supporting_data: null };
+    }
+  }
+
   return { resp, provider: result.provider, model: result.model, usage: result.usage, costUsd: result.costUsd };
 }
 
@@ -360,7 +377,9 @@ serve(async (req) => {
     const started = Date.now();
     let resp: CoachResponse, provider = 'unknown', model = 'unknown', usage = { inputTokens: 0, outputTokens: 0 }, costUsd = 0;
     try {
-      const out = await runCoach(baseMessages, intent);
+      // Everything the answer may cite must appear here (engine result + context).
+      const groundedSource = `${engineResult !== undefined ? JSON.stringify(engineResult) : ''}\n${contextBlock}`;
+      const out = await runCoach(baseMessages, intent, groundedSource);
       resp = out.resp; provider = out.provider; model = out.model; usage = out.usage; costUsd = out.costUsd;
     } catch (providerErr: any) {
       if (providerErr instanceof AINotConfiguredError) {
