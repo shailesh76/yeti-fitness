@@ -7,6 +7,7 @@ import { resolveExerciseAlias } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from "../_shared/ai/coachMemory.ts";
+import { classifyMemory } from "../_shared/ai/memoryClassifier.ts";
 import {
   parseCoachResponse, responseViolatesIntent, safePlainText, ungroundedNumbers,
   REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
@@ -190,6 +191,94 @@ async function loadProgressionForExercise(
   return { engineInput, context };
 }
 
+// ─── Deterministic workout-plan mutation (Phase 2) ──────────────────────────────
+// Resolves the exercise, finds the athlete's active plan + target day, and
+// EXECUTES the change against plan_exercises (RLS-gated to the athlete). Returns
+// an honest { success, message } — the LLM explains this result and NEVER claims
+// success unless success === true. Offline devices pick the change up via the
+// existing plan_exercises sync-pull path.
+interface PlanEditResult { success: boolean; action?: string; message: string; exercise?: string; replacement?: string; day?: string; reason?: string }
+
+async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<PlanEditResult> {
+  if (!edit || edit.ambiguous || !edit.exercise) {
+    return { success: false, reason: 'ambiguous', message: "I couldn't tell exactly which exercise you meant. Which movement and which day?" };
+  }
+  const canonical = resolveExerciseAlias(edit.exercise);
+  const { data: exs } = await supabase.from('exercises').select('id, name').ilike('name', `%${canonical}%`).limit(1);
+  const ex = exs?.[0];
+  if (!ex && edit.action !== 'remove') {
+    return { success: false, reason: 'unknown_exercise', message: `I couldn't find "${edit.exercise}" in the exercise library.` };
+  }
+
+  const { data: plans } = await supabase
+    .from('workout_plans').select('id, name').eq('user_id', userId)
+    .order('created_at', { ascending: false }).limit(1);
+  const plan = plans?.[0];
+  if (!plan) return { success: false, reason: 'no_plan', message: "You don't have an active workout plan yet — create one and I'll edit it." };
+
+  const { data: days } = await supabase
+    .from('plan_days').select('id, day_number, name').eq('plan_id', plan.id).order('day_number');
+  if (!days?.length) return { success: false, reason: 'no_days', message: 'Your plan has no training days set up yet.' };
+
+  // Resolve the target day (by name/number) or default to the first day.
+  let day = days[0];
+  if (edit.targetDay) {
+    const t = String(edit.targetDay).toLowerCase();
+    const num = t.match(/\d+/);
+    const found = days.find((d: any) =>
+      (d.name || '').toLowerCase().includes(t.replace(/day\s*\d*/, '').trim()) ||
+      (num && String(d.day_number) === num[0]));
+    if (found) day = found;
+  }
+  const dayLabel = day.name || `Day ${day.day_number}`;
+  const dayIds = days.map((d: any) => d.id);
+
+  try {
+    if (edit.action === 'add') {
+      const { data: existing } = await supabase
+        .from('plan_exercises').select('order_index').eq('plan_day_id', day.id)
+        .order('order_index', { ascending: false }).limit(1);
+      const nextOrder = ((existing?.[0]?.order_index) ?? -1) + 1;
+      const { error } = await supabase.from('plan_exercises').insert({
+        plan_day_id: day.id, exercise_id: ex.id, order_index: nextOrder, sets: '3', reps: '12-15',
+      });
+      if (error) throw error;
+      return { success: true, action: 'add', exercise: ex.name, day: dayLabel, message: `${ex.name} was added to ${dayLabel}.` };
+    }
+
+    // remove / replace / move all locate the existing plan_exercise first.
+    const { data: pxs } = await supabase
+      .from('plan_exercises').select('id, exercise_id, exercises(name)').in('plan_day_id', dayIds);
+    const target = (pxs || []).find((p: any) =>
+      (ex && p.exercise_id === ex.id) || (p.exercises?.name || '').toLowerCase().includes(canonical));
+    if (!target) return { success: false, reason: 'not_in_plan', message: `I couldn't find ${edit.exercise} in your current plan.` };
+    const targetName = target.exercises?.name || edit.exercise;
+
+    if (edit.action === 'remove') {
+      const { error } = await supabase.from('plan_exercises').delete().eq('id', target.id);
+      if (error) throw error;
+      return { success: true, action: 'remove', exercise: targetName, message: `${targetName} was removed from your plan.` };
+    }
+    if (edit.action === 'replace') {
+      const rc = resolveExerciseAlias(edit.replacement || '');
+      const { data: rexs } = await supabase.from('exercises').select('id, name').ilike('name', `%${rc}%`).limit(1);
+      const rex = rexs?.[0];
+      if (!rex) return { success: false, reason: 'unknown_replacement', message: `I couldn't find "${edit.replacement}" in the library to swap in.` };
+      const { error } = await supabase.from('plan_exercises').update({ exercise_id: rex.id }).eq('id', target.id);
+      if (error) throw error;
+      return { success: true, action: 'replace', exercise: targetName, replacement: rex.name, message: `${targetName} was replaced with ${rex.name}.` };
+    }
+    if (edit.action === 'move') {
+      const { error } = await supabase.from('plan_exercises').update({ plan_day_id: day.id }).eq('id', target.id);
+      if (error) throw error;
+      return { success: true, action: 'move', exercise: targetName, day: dayLabel, message: `${targetName} was moved to ${dayLabel}.` };
+    }
+    return { success: false, reason: 'unknown_action', message: "I couldn't process that edit." };
+  } catch (_e) {
+    return { success: false, reason: 'db_error', message: "The update didn't go through. Please try again in a moment." };
+  }
+}
+
 // ─── Model execution + schema/cross-intent validation with one retry each ────────
 async function runCoach(
   baseMessages: { role: string; content: string }[],
@@ -332,12 +421,15 @@ serve(async (req) => {
         const prog = await loadProgressionForExercise(supabaseClient, user.id, latestUserMessage);
         contextBlock = prog.context; // workout-only — nutrition is never loaded
         engineResult = prog.engineInput ? decideProgression(prog.engineInput) : undefined;
+      } else if (intent === 'workout_plan_edit') {
+        // Parse → resolve → EXECUTE the plan mutation. engineResult carries the
+        // honest { success, message }; the LLM explains it and confirms ONLY when
+        // success === true (never pretends an update happened).
+        const edit = parsePlanEdit(latestUserMessage);
+        engineResult = await applyPlanEdit(supabaseClient, user.id, edit);
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
       } else {
         contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
-        // Deterministic mutation for plan edits (LLM only explains it).
-        if (intent === 'workout_plan_edit') {
-          engineResult = parsePlanEdit(latestUserMessage);
-        }
       }
     } else if (intent === 'nutrition_status') {
       const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id); // no workouts
@@ -424,9 +516,12 @@ serve(async (req) => {
       for (const u of resp.memory_updates) {
         if (!u?.memory_key || !allowed.includes(u.category)) continue;
         if (u.memory_value === '') {
+          // Forgetting is always allowed.
           await supabaseServiceRole.from('ai_memory').delete()
             .eq('athlete_id', user.id).eq('memory_key', u.memory_key).then(() => {}).catch(() => {});
-        } else {
+        } else if (classifyMemory(u.memory_value).shouldStore) {
+          // Quality gate: only persist durable facts (goal/injury/diet/preference),
+          // never transient states ("tired today", "had pizza").
           await supabaseServiceRole.from('ai_memory').upsert({
             athlete_id: user.id, category: u.category, memory_key: u.memory_key,
             memory_value: u.memory_value, updated_at: new Date().toISOString(),

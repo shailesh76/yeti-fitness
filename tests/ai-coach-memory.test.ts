@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from '../supabase/functions/_shared/ai/coachMemory.ts';
 import { buildCoachSystemPrompt, COACH_PROMPT_VERSION } from '../supabase/functions/_shared/ai/coachPrompt.ts';
 import { parseCoachResponse } from '../supabase/functions/_shared/ai/coachSchema.ts';
+import { classifyMemory } from '../supabase/functions/_shared/ai/memoryClassifier.ts';
 
 describe('Coach Memory — card building', () => {
   it('formats known fields and omits unknown ones (never fabricated)', () => {
@@ -75,6 +76,26 @@ describe('Conversational prompt (coach-v3)', () => {
     expect(prompt).toMatch(/NOT bullet lists/i);
     expect(prompt).toMatch(/follow-up/i);
     expect(prompt).toMatch(/NEVER invent/i);
+  });
+});
+
+describe('Memory quality classifier (do not save junk)', () => {
+  it('does NOT store temporary states', () => {
+    for (const s of ["I'm tired today", 'I had pizza', 'My gym was busy', 'My shoulder hurts today', 'slept badly last night']) {
+      expect(classifyMemory(s).shouldStore, s).toBe(false);
+    }
+  });
+
+  it('stores durable long-term facts with the right category', () => {
+    expect(classifyMemory('My goal is a lean bulk')).toMatchObject({ shouldStore: true, category: 'training goals' });
+    expect(classifyMemory("I'm vegetarian")).toMatchObject({ shouldStore: true, category: 'nutrition preferences' });
+    expect(classifyMemory('I have a left shoulder injury')).toMatchObject({ shouldStore: true, category: 'injuries' });
+    expect(classifyMemory('I prefer push pull legs')).toMatchObject({ shouldStore: true, category: 'workout style' });
+  });
+
+  it('a chronic injury is stored even though soreness-today is not', () => {
+    expect(classifyMemory('torn rotator cuff').shouldStore).toBe(true);
+    expect(classifyMemory('a bit sore today').shouldStore).toBe(false);
   });
 });
 
