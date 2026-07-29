@@ -4,7 +4,7 @@ import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/i
 import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
 import { resolveExerciseAlias } from "../_shared/ai/exerciseResolver.ts";
-import { decideProgression, computeNutritionRemaining, NutritionInput } from "../_shared/ai/coachEngine.ts";
+import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from "../_shared/ai/coachMemory.ts";
 import { classifyMemory } from "../_shared/ai/memoryClassifier.ts";
@@ -67,21 +67,22 @@ async function loadNutritionContext(
     consumedCalories: 0, consumedProtein: 0, consumedCarbs: 0, consumedFat: 0,
   };
   try {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('daily_calorie_target,daily_protein_target,daily_carb_target,daily_fat_target')
-      .eq('id', userId).maybeSingle();
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    // Independent of each other — run in parallel (one round trip instead of two).
+    const [{ data: prof }, { data: logs }] = await Promise.all([
+      supabase.from('profiles')
+        .select('daily_calorie_target,daily_protein_target,daily_carb_target,daily_fat_target')
+        .eq('id', userId).maybeSingle(),
+      supabase.from('meal_logs')
+        .select('servings, food:foods(calories,protein,carbs,fat)')
+        .eq('user_id', userId).gte('logged_at', start.toISOString()),
+    ]);
     if (prof) {
       engine.calorieTarget = prof.daily_calorie_target ?? null;
       engine.proteinTarget = prof.daily_protein_target ?? null;
       engine.carbTarget = prof.daily_carb_target ?? null;
       engine.fatTarget = prof.daily_fat_target ?? null;
     }
-    const start = new Date(); start.setHours(0, 0, 0, 0);
-    const { data: logs } = await supabase
-      .from('meal_logs')
-      .select('servings, food:foods(calories,protein,carbs,fat)')
-      .eq('user_id', userId).gte('logged_at', start.toISOString());
     let c = 0, p = 0, cb = 0, f = 0;
     for (const l of logs || []) {
       const s = Number(l.servings) || 0; const fd = l.food || {};
@@ -142,25 +143,52 @@ async function loadProgressionForExercise(
     return { engineInput: null, context: `EXERCISE: ${ex.name}\nNo completed sessions logged yet.` };
   }
 
-  // 3. This lift's working sets within those sessions.
-  const { data: sets } = await supabase
-    .from('session_sets').select('weight, reps, session_id, completed_at')
-    .eq('exercise_id', ex.id).in('session_id', sessionIds);
+  // 3. This lift's working sets within those sessions, + PR history, plan
+  //    prescription and adherence — all independent of each other once
+  //    sessionIds/ex.id are known, so fetched in parallel (one round trip
+  //    instead of four sequential ones).
+  const [{ data: sets }, { data: prRows }, { data: pex }, adherenceRpc] = await Promise.all([
+    supabase.from('session_sets').select('weight, reps, session_id, completed_at')
+      .eq('exercise_id', ex.id).in('session_id', sessionIds),
+    supabase.from('personal_records').select('value')
+      .eq('athlete_id', userId).eq('exercise_id', ex.id).eq('record_type', 'max_weight')
+      .order('value', { ascending: false }).limit(1),
+    supabase.from('plan_exercises').select('sets, reps').eq('exercise_id', ex.id).limit(1),
+    // calculate_adherence is an established RPC (used by the coach dashboard);
+    // treated as optional/best-effort — a failure here must never break the
+    // reply, matching this function's existing fail-open pattern for such data.
+    supabase.rpc('calculate_adherence', { athlete_id_param: userId }).then((r: any) => r).catch(() => ({ data: null })),
+  ]);
   if (!sets || sets.length === 0) {
     return { engineInput: null, context: `EXERCISE: ${ex.name}\nNo completed sets logged for this lift yet.` };
   }
+  const personalRecordKg = prRows?.[0]?.value != null ? Number(prRows[0].value) : null;
+  const adherencePct = typeof adherenceRpc?.data === 'number' ? adherenceRpc.data : null;
 
-  // 4. Group by session, ordered by session recency; take the latest 3–5.
+  // 4. Group by session, ordered by session recency; take the latest 3–5 for
+  //    the current-session decision, but keep ALL fetched sessions for the
+  //    multi-session trend signals (plateau needs a real 3+ week window).
   const bySession: Record<string, any[]> = {};
   for (const s of sets) (bySession[s.session_id] ||= []).push(s);
-  const orderedIds = sessionIds.filter((id: string) => bySession[id]).slice(0, 5);
+  const sessionCompletedAt = new Map((sessions || []).map((s: any) => [s.id, s.completed_at]));
+  const orderedIds = sessionIds.filter((id: string) => bySession[id]);
   const latest = bySession[orderedIds[0]];
   const lastSetReps = latest.map((s: any) => Number(s.reps) || 0);
   const currentWeight = Math.max(...latest.map((s: any) => Number(s.weight) || 0));
 
+  // Estimated-1RM + volume per session (mirrors @yeti/training-engine's
+  // plateau/deload signals; RPE is omitted — not stored server-side).
+  const nowMs = Date.now();
+  const sessionHistory = orderedIds.map((id: string) => {
+    const sess = bySession[id];
+    const estimated1rm = Math.max(...sess.map((s: any) => estimateOneRepMax(Number(s.weight) || 0, Number(s.reps) || 0)));
+    const volumeKg = sess.reduce((sum: number, s: any) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0);
+    const completedAt = sessionCompletedAt.get(id);
+    const daysAgo = completedAt ? Math.max(0, Math.round((nowMs - new Date(completedAt).getTime()) / 86_400_000)) : 0;
+    return { daysAgo, estimated1rm, volumeKg };
+  });
+
   // 5. Target sets/reps from the plan prescription, if the lift is programmed.
-  const { data: pex } = await supabase
-    .from('plan_exercises').select('sets, reps').eq('exercise_id', ex.id).limit(1);
   const repMatch = String(pex?.[0]?.reps ?? '').match(/(\d+)\s*-\s*(\d+)/);
   const targetRepsLow = repMatch ? Number(repMatch[1]) : Math.min(...lastSetReps);
   const targetRepsHigh = repMatch ? Number(repMatch[2]) : Math.max(8, ...lastSetReps);
@@ -172,21 +200,27 @@ async function loadProgressionForExercise(
     targetRepsLow, targetRepsHigh, targetSets,
     lastSetReps,
     avgRpe: null,          // RPE is not recorded server-side — never fabricated
-    recoveryScore: null,
+    recoveryScore: null,   // no sleep/recovery data source exists yet — never fabricated
     isUpperBody: /\b(bench|press|row|curl|pulldown|fly|raise|dip|pull-?up|push-?up|shrug|extension|chin)\b/.test(ex.name.toLowerCase()),
+    adherencePct,
+    personalRecordKg,
+    sessionHistory,
   };
 
-  const histLines = orderedIds.map((id: string, i: number) => {
+  const histLines = orderedIds.slice(0, 5).map((id: string, i: number) => {
     const sess = bySession[id];
     const w = Math.max(...sess.map((s: any) => Number(s.weight) || 0));
     const reps = sess.map((s: any) => Number(s.reps) || 0).join(', ');
-    const when = sess[0]?.completed_at ? new Date(sess[0].completed_at).toLocaleDateString() : '';
+    const when = sessionCompletedAt.get(id) ? new Date(sessionCompletedAt.get(id)).toLocaleDateString() : '';
     return `  ${i === 0 ? 'latest' : `-${i}`} ${when}: ${w}kg x [${reps}]`;
   }).join('\n');
 
   const context =
     `EXERCISE: ${ex.name}\nTARGET: ${targetSets} x ${targetRepsLow}-${targetRepsHigh}\n` +
-    `RECENT SESSIONS (newest first):\n${histLines}\n(RPE is not recorded — do not reference RPE.)`;
+    `RECENT SESSIONS (newest first):\n${histLines}\n` +
+    (personalRecordKg != null ? `PERSONAL RECORD: ${personalRecordKg}kg\n` : '') +
+    (adherencePct != null ? `ADHERENCE (7-day): ${adherencePct}%\n` : '') +
+    `(RPE and recovery are not recorded — do not reference them.)`;
 
   return { engineInput, context };
 }
@@ -373,21 +407,38 @@ serve(async (req) => {
     let latestUserMessage = message || '';
     if (latestUserMessage.length > 1000) latestUserMessage = latestUserMessage.substring(0, 1000) + '... [truncated]';
 
-    // Entitlements + daily free-tier limit -------------------------------------
-    const { data: entitlements } = await supabaseClient
-      .from('user_entitlements').select('plan_id').eq('user_id', user.id).eq('status', 'active');
+    // Entitlements + beta config are independent of each other — parallel fetch.
+    const [{ data: entitlements }, { data: betaConfig }] = await Promise.all([
+      supabaseClient.from('user_entitlements').select('plan_id').eq('user_id', user.id).eq('status', 'active'),
+      supabaseClient.from('beta_mode_config').select('is_global_beta_active').single(),
+    ]);
     const isPremiumPlan = (entitlements || []).some((e: any) => e.plan_id === 'PRO' || e.plan_id === 'COACHING');
     const subscriptionTier = isPremiumPlan
       ? ((entitlements || []).find((e: any) => e.plan_id === 'COACHING') ? 'COACHING' : 'PRO') : 'FREE';
-    const { data: betaConfig } = await supabaseClient
-      .from('beta_mode_config').select('is_global_beta_active').single();
     const isPremium = isPremiumPlan || (betaConfig?.is_global_beta_active ?? false);
 
+    // Daily free-tier limit — ATOMIC increment-and-check (fixes a real race:
+    // the previous read-then-write of requests_count let concurrent requests
+    // all read the same stale count and all pass the `< 5` check before any
+    // of them committed, bypassing the cap entirely — each LLM call has a real
+    // $ cost). increment_ai_usage() does the upsert-and-increment as one
+    // statement; Postgres serializes concurrent writers on the unique
+    // (athlete_id, date) row, so under any amount of concurrency exactly 5
+    // requests can ever get new_count <= 5. Runs for every tier (premium usage
+    // is still tracked for analytics); only non-premium is capped.
+    // Fail-open on an RPC error, consistent with this function's existing
+    // tolerance for non-critical metadata lookups failing.
     const today = new Date().toISOString().split('T')[0];
-    const { data: usageData } = await supabaseClient
-      .from('ai_usage').select('requests_count').eq('athlete_id', user.id).eq('date', today).maybeSingle();
-    const currentRequests = usageData?.requests_count || 0;
-    if (!isPremium && currentRequests >= 5) {
+    let newRequestCount = 0;
+    try {
+      const { data: incremented, error: incErr } = await supabaseServiceRole
+        .rpc('increment_ai_usage', { p_athlete_id: user.id, p_date: today, p_tier: subscriptionTier });
+      if (incErr) throw incErr;
+      newRequestCount = Number(incremented) || 0;
+    } catch (_e) {
+      newRequestCount = 0; // fail-open — do not block the athlete on a metering hiccup
+    }
+    if (!isPremium && newRequestCount > 5) {
       await supabaseServiceRole.from('ai_request_logs').insert({
         athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
         error_reason: 'daily_limit_exceeded', message_length: message?.length ?? 0,
@@ -445,11 +496,12 @@ serve(async (req) => {
     //     facts, so Yeti remembers the athlete across the conversation.
     let memoryCard = '';
     try {
-      const { data: memoryRows } = await supabaseClient
-        .from('ai_memory').select('category, memory_key, memory_value').eq('athlete_id', user.id);
+      // Independent of each other — parallel fetch instead of sequential.
+      const [{ data: memoryRows }, { data: memProfile }] = await Promise.all([
+        supabaseClient.from('ai_memory').select('category, memory_key, memory_value').eq('athlete_id', user.id),
+        supabaseClient.from('profiles').select('goal, weight_kg').eq('id', user.id).maybeSingle(),
+      ]);
       let memory = foldMemoryRows(memoryRows || []);
-      const { data: memProfile } = await supabaseClient
-        .from('profiles').select('goal, weight_kg').eq('id', user.id).maybeSingle();
       if (memProfile) {
         memory = mergeCoachMemory(memory, {
           goal: memProfile.goal ?? memory.goal,
@@ -531,19 +583,15 @@ serve(async (req) => {
     }
 
     // 8. Log + return -----------------------------------------------------------
+    // ai_usage was already incremented atomically up-front — only the request
+    // log remains here (no more read-then-write race on the usage counter).
     const latencyMs = Date.now() - started;
-    await Promise.all([
-      supabaseServiceRole.from('ai_usage').upsert({
-        athlete_id: user.id, date: today, requests_count: currentRequests + 1,
-        subscription_tier: subscriptionTier, last_request_at: new Date().toISOString(),
-      }, { onConflict: 'athlete_id,date' }),
-      supabaseServiceRole.from('ai_request_logs').insert({
-        athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
-        coach_type: intent, provider, model,
-        input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
-        cost_usd: costUsd, latency_ms: latencyMs, message_length: latestUserMessage.length,
-      }),
-    ]).catch(() => {}); // non-blocking
+    await supabaseServiceRole.from('ai_request_logs').insert({
+      athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
+      coach_type: intent, provider, model,
+      input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
+      cost_usd: costUsd, latency_ms: latencyMs, message_length: latestUserMessage.length,
+    }).then(() => {}).catch(() => {}); // non-blocking
 
     const reply = toReply(resp);
     return new Response(JSON.stringify({ reply, response: reply, actions: [], intent, structured: resp }), {
@@ -551,7 +599,9 @@ serve(async (req) => {
     });
   } catch (error: any) {
     console.error('[ai-coach] error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    // Harden against a non-Error throw (e.g. malformed req.json()) where
+    // `error.message` would be undefined and JSON.stringify would omit the key.
+    return new Response(JSON.stringify({ error: error?.message || 'Unexpected error' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
     });
   }

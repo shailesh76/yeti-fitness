@@ -123,7 +123,11 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 ### AI coach system
 - **`ai_memory`** — persistent per-athlete key/value memory (`category`, `memory_key`, `memory_value`).
   Athletes have SELECT only; INSERT/UPDATE happen exclusively via the Edge Function's service-role client.
-- **`ai_usage`** — per-athlete-per-day request counter, used for tier rate-limiting.
+- **`ai_usage`** — per-athlete-per-day request counter, used for tier rate-limiting. Written only via
+  `increment_ai_usage(athlete_id, date, tier)` (SECURITY DEFINER, service_role only — see
+  [20260730_ai_usage_atomic_increment.sql](../supabase/migrations/20260730_ai_usage_atomic_increment.sql)),
+  an atomic upsert-and-increment; do not read-then-write `requests_count` from application code — that
+  was a real race allowing concurrent requests to bypass the free-tier cap.
 - **`ai_safety_logs`** — flags risky AI conversations (`MEDICAL_ADVICE`/`INJURY_REPORT`/etc.); athlete
   INSERT is deliberately not allowed (service-role only), so clients can't fabricate/suppress records.
 - **`ai_request_logs`** — token usage + cost per request (`provider`, `model`, `input_tokens`,
@@ -184,7 +188,7 @@ global beta-mode check (`beta_mode_config`, fails safe). See migration-audit.md 
 
 | Function | Purpose | Primary tables |
 |---|---|---|
-| `ai-coach` | Chat with the AI coach; tier/rate-limit gated | ai_memory, ai_usage, ai_safety_logs, ai_request_logs, progression_recommendations, user_entitlements |
+| `ai-coach` | Chat with the AI coach; tier/rate-limit gated. Deterministic engines decide progression/nutrition-remaining/plan edits (LLM only explains); writes plan_exercises for workout_plan_edit | ai_memory, ai_usage, ai_safety_logs, ai_request_logs, personal_records, workout_sessions, session_sets, plan_exercises, plan_days, workout_plans, meal_logs, profiles, user_entitlements |
 | `analyze-food-image` | Vision-based food logging | ai_request_logs, user_entitlements |
 | `calculate-adaptive-nutrition` | Adjusts nutrition targets from weight trend | profiles, weight_logs |
 | `exercise-guidance` | On-demand AI coaching text for a single exercise (form, mistakes, breathing, variants) | exercises, ai_usage, ai_request_logs, user_entitlements |
