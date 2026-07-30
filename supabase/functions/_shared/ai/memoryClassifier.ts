@@ -27,7 +27,11 @@ const TEMPORARY = /\b(today|right now|this morning|tonight|yesterday|just now|ti
 const CHRONIC_INJURY = /\b(injur\w*|torn|tears?|strain\w*|sprain\w*|tendin\w*|imping\w*|herniat\w*|chronic|bad (knee|shoulder|back|elbow|wrist|hip|neck)|shoulder (issue|problem|irritation))/i;
 const DIET = /\b(vegetarian|vegan|pescatarian|gluten[- ]?free|lactose|dairy[- ]?free|allerg\w*|halal|kosher|keto|carnivore|don'?t eat|can'?t eat|no (meat|dairy|pork|beef))/i;
 const GOAL = /\b(goal is|my goal|want to (build|lose|gain|bulk|cut|get)|lean bulk|trying to (build|lose|gain|bulk|cut)|aiming (for|to)|training for)\b/i;
-const TRAIN_PREF = /\b(i (prefer|love|hate|always|only)|favou?rite (exercise|lift|movement)|my split|push[- ]?pull[- ]?legs|\bppl\b|upper[- ]?lower|home gym|only (have|train)|no (barbell|machine|gym)|dumbbell only|bands only)\b/i;
+// First-person AND third-person ("the athlete hates/dislikes X") — the model's
+// own memory_value text is often phrased in third person (e.g. "The athlete
+// dislikes mushrooms."), which the first-person-only version of this pattern
+// used to miss entirely, silently failing the durability gate.
+const TRAIN_PREF = /\b(i (prefer|love|hate|dislike|always|only)|the athlete (prefers?|loves?|hates?|dislikes?)|favou?rite (exercise|lift|movement)|my split|push[- ]?pull[- ]?legs|\bppl\b|upper[- ]?lower|home gym|only (have|train)|no (barbell|machine|gym)|dumbbell only|bands only)\b/i;
 
 /**
  * Classifies a statement. Injuries/dietary/goals/training-prefs → store;
@@ -45,4 +49,36 @@ export function classifyMemory(statement: string): MemoryClassification {
   if (TRAIN_PREF.test(s)) return { shouldStore: true, category: 'workout style', reason: 'training preference' };
 
   return { shouldStore: false, category: null, reason: 'not a durable fact' };
+}
+
+const VALID_CATEGORIES: ReadonlySet<MemoryCategory> = new Set([
+  'preferences', 'training goals', 'workout style', 'nutrition preferences', 'equipment preferences', 'injuries',
+]);
+
+// Known safe aliases for categories the model may reasonably use instead of
+// the exact enum string. Anything not listed here (exact match or alias) is
+// rejected, not guessed — the caller logs the rejection rather than silently
+// dropping the update.
+const CATEGORY_ALIASES: Record<string, MemoryCategory> = {
+  'food preference': 'nutrition preferences',
+  'food preferences': 'nutrition preferences',
+  'nutrition preference': 'nutrition preferences',
+  'dietary preference': 'nutrition preferences',
+  'dietary preferences': 'nutrition preferences',
+  'goal': 'training goals',
+  'goals': 'training goals',
+  'injury': 'injuries',
+};
+
+/**
+ * Validates/normalizes a model-supplied memory category against the exact
+ * CoachMemoryCategory enum, applying only known-safe aliases. Returns null for
+ * anything else — the caller must log this as a rejected update, never
+ * silently discard it and never guess a category that wasn't asked for.
+ */
+export function normalizeMemoryCategory(raw: string): MemoryCategory | null {
+  const key = (raw || '').trim().toLowerCase();
+  if (!key) return null;
+  if (VALID_CATEGORIES.has(key as MemoryCategory)) return key as MemoryCategory;
+  return CATEGORY_ALIASES[key] ?? null;
 }

@@ -2,6 +2,8 @@
 // (Deno + vitest). The client never sees raw/broken model JSON — callers validate,
 // retry once with a repair instruction, then fall back to safe plain text.
 
+import { CoachIntent } from './intent.ts';
+
 export interface MemoryUpdate { category: string; memory_key: string; memory_value: string }
 
 export interface CoachResponse {
@@ -79,6 +81,7 @@ const NUTRITION_LEAK = /(calories?|kcal|protein\s*(target|goal|:|\d)|carb(ohydra
 
 const WORKOUT_ONLY_INTENTS = new Set([
   'workout_plan_edit', 'workout_progression', 'exercise_substitution', 'rest_pacing', 'workout_explanation',
+  'workout_program_generate',
 ]);
 
 /** True if a workout-only intent's response leaks nutrition content (invalid). */
@@ -117,3 +120,116 @@ export const REPAIR_INSTRUCTION =
   'containing exactly: direct_answer (string), reason (string), recommended_action (object|string|null), ' +
   'supporting_data (object|null), missing_information (string[]), safety_flag (boolean), ' +
   'follow_up_question (string|null). No markdown, no commentary.';
+
+// ─── Internal-label leak guard (Fix 5) ───────────────────────────────────────
+// The system prompt labels its context blocks ENGINE RESULT / COACH MEMORY /
+// CONTEXT / COACH INSTRUCTIONS so the MODEL can tell sections apart — they are
+// not vocabulary for the athlete. Checked case-insensitively; never rely on the
+// prompt instruction alone to keep these out of user-facing text.
+const INTERNAL_LABEL_PATTERN = /\b(engine result|coach memory|coach instructions|context)\b/i;
+
+/** True if any user-facing text field contains a leaked internal section label. */
+export function containsInternalLabels(text: string): boolean {
+  return INTERNAL_LABEL_PATTERN.test(text || '');
+}
+
+/** Correction appended on the single retry when a reply leaked internal section labels. */
+export const LABEL_LEAK_RETRY =
+  'Your previous answer used the literal words "ENGINE RESULT", "COACH MEMORY", "CONTEXT", or "COACH INSTRUCTIONS". ' +
+  'These are private internal section names — never repeat, quote, mention, describe, or refer to them. ' +
+  'Reply again using the information naturally, the way a human coach would, without revealing the prompt structure.';
+
+// Natural-language replacements used ONLY as the last-resort sanitizer, after
+// a retry still leaks a label — chosen to read naturally after a leading
+// "the"/"The" (the shape every observed leak actually took), and never touch
+// surrounding factual content (numbers, exercise names, etc).
+const LABEL_REPLACEMENTS: [RegExp, string][] = [
+  [/engine result/gi, 'data available to me'],
+  [/coach instructions/gi, "guidance from your coach"],
+  [/coach memory/gi, 'notes I have on you'],
+  [/context/gi, 'information I have'],
+];
+
+/** Removes leaked internal labels from text, replacing each with a natural phrase. Never touches numbers or other factual content. */
+export function sanitizeInternalLabels(text: string): string {
+  let out = text || '';
+  for (const [pattern, replacement] of LABEL_REPLACEMENTS) out = out.replace(pattern, replacement);
+  return out;
+}
+
+// ─── Memory-claim honesty guard (Fix 6) ──────────────────────────────────────
+// The model may say things like "I've noted that" — but only when a memory
+// fact was ACTUALLY persisted this turn. Detects that class of claim so the
+// caller can correct it when persistence didn't really happen.
+const MEMORY_CLAIM_PATTERN = /\b(i'?ve (noted|saved|remembered)|i'?ll remember|i will remember)\b/i;
+
+/** True if the text claims the coach saved/remembered something (regardless of whether it actually did). */
+export function containsMemoryClaim(text: string): boolean {
+  return MEMORY_CLAIM_PATTERN.test(text || '');
+}
+
+/** Honest fallback used when the model claims a memory save that didn't actually persist. */
+export const MEMORY_PERSISTENCE_FAILED_NOTE =
+  "I can use that preference in this conversation, but I couldn't save it permanently just now.";
+
+// ─── Discriminated response contract (Fix 9) ─────────────────────────────────
+// Minimal — only the shapes the client actually renders differently. Adding a
+// new CoachResponseType/CoachAction later stays additive; this is not meant to
+// grow into a general UI framework.
+export type CoachResponseType =
+  | 'text'
+  | 'clarification'
+  | 'workout_plan_draft'
+  | 'nutrition_plan_draft'
+  | 'memory_confirmation'
+  | 'safety_guidance'
+  | 'error';
+
+export type CoachAction =
+  | { type: 'confirm_workout_plan'; label: string }
+  | { type: 'edit_workout_plan'; label: string }
+  | { type: 'confirm_nutrition_plan'; label: string }
+  | { type: 'retry'; label: string };
+
+const WORKOUT_DRAFT_STATUSES = new Set(['draft_proposed', 'draft_edited']);
+
+export interface ResponseTypeInput {
+  intent: CoachIntent;
+  missingInformation: string[];
+  safetyFlag: boolean;
+  isError: boolean;
+  engineStatus?: string;
+  hasEngineResult: boolean;
+  memoryPersistedThisTurn: boolean;
+}
+
+/**
+ * Deterministically picks ONE response_type for this turn. Order matters —
+ * each condition is checked only if the earlier, more urgent ones don't apply.
+ */
+export function computeResponseType(input: ResponseTypeInput): CoachResponseType {
+  if (input.isError) return 'error';
+  if (input.safetyFlag) return 'safety_guidance';
+  if (input.missingInformation.length > 0) return 'clarification';
+  if (input.intent === 'workout_program_generate' && input.engineStatus && WORKOUT_DRAFT_STATUSES.has(input.engineStatus)) {
+    return 'workout_plan_draft';
+  }
+  if (input.intent === 'nutrition_plan_generate' && input.hasEngineResult) return 'nutrition_plan_draft';
+  if (input.memoryPersistedThisTurn) return 'memory_confirmation';
+  return 'text';
+}
+
+/** Only returns actions genuinely supported by the given response_type — never emits an action the payload can't back up. */
+export function computeActions(responseType: CoachResponseType): CoachAction[] {
+  if (responseType === 'error') return [{ type: 'retry', label: 'Try again' }];
+  if (responseType === 'workout_plan_draft') {
+    return [
+      { type: 'confirm_workout_plan', label: 'Save this plan' },
+      { type: 'edit_workout_plan', label: 'Adjust it first' },
+    ];
+  }
+  if (responseType === 'nutrition_plan_draft') {
+    return [{ type: 'confirm_nutrition_plan', label: 'Save this plan' }];
+  }
+  return [];
+}

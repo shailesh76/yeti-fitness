@@ -131,7 +131,13 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`ai_safety_logs`** — flags risky AI conversations (`MEDICAL_ADVICE`/`INJURY_REPORT`/etc.); athlete
   INSERT is deliberately not allowed (service-role only), so clients can't fabricate/suppress records.
 - **`ai_request_logs`** — token usage + cost per request (`provider`, `model`, `input_tokens`,
-  `output_tokens`, `cost_usd`) from the shared AI provider service.
+  `output_tokens`, `cost_usd`) from the shared AI provider service. Also `latency_ms`,
+  `conversation_id`, `engine` (which deterministic engine, if any, backed the reply), `fallback_triggered`,
+  `response_type`, `action_types` — added in `20260730_ai_request_logs_diagnostics_columns.sql` after
+  discovering `20260727_add_latency_ms_to_ai_request_logs.sql` was a no-op placeholder (comment-only, no
+  `ALTER TABLE`) that had silently broken success-path logging since that date. `request_id`/`user_id`/
+  `status`/`error_code`/`created_at` in the QA-audit spec map to the pre-existing `id`/`athlete_id`/
+  `success`+`error_reason`/`requested_at` columns rather than being duplicated under new names.
 
 ### Challenges & live metrics
 - **`challenges`** / **`challenge_participants`** — time-boxed step/workout/calorie challenges with a

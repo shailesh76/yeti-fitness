@@ -3,22 +3,62 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/index.ts";
 import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
-import { resolveExerciseAlias } from "../_shared/ai/exerciseResolver.ts";
+import { resolveExerciseAlias, extractExerciseName } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from "../_shared/ai/coachMemory.ts";
-import { classifyMemory } from "../_shared/ai/memoryClassifier.ts";
+import { classifyMemory, normalizeMemoryCategory } from "../_shared/ai/memoryClassifier.ts";
 import {
   parseCoachResponse, responseViolatesIntent, safePlainText, ungroundedNumbers,
   REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
+  containsInternalLabels, sanitizeInternalLabels, LABEL_LEAK_RETRY,
+  containsMemoryClaim, MEMORY_PERSISTENCE_FAILED_NOTE,
+  computeResponseType, computeActions, CoachAction,
 } from "../_shared/ai/coachSchema.ts";
+import { detectNutritionTargetAsk, describeNutritionTarget, StoredNutritionTargets } from "../_shared/ai/nutritionTargetLookup.ts";
+import { resolveKnownRequirements, findMissingRequired, mapProfileGoal } from "../_shared/ai/programRequirements.ts";
+import { recommendSplit } from "../_shared/ai/splitRecommender.ts";
+import { generateProgram, applyDraftEdit, GeneratedDay, ExerciseCandidate, MuscleGroup } from "../_shared/ai/programGenerator.ts";
+import { validateProgram } from "../_shared/ai/programValidator.ts";
+import { saveWorkoutPlan, activateWorkoutPlan } from "../_shared/ai/planPersistence.ts";
+import { computeRawTelemetry, TelemetryInput } from "../_shared/ai/weeklyReviewEngine.ts";
+import { deriveCoachingIntelligence } from "../_shared/ai/coachIntelligence.ts";
+import { computeCalorieTargets, computeMacroCycling, getEqualMacroSubstitutions, generateGroceryList, getSupplementAdvice } from "../_shared/ai/nutritionEngine.ts";
+import { validateNutritionPlan } from "../_shared/ai/nutritionValidator.ts";
+import { deriveNutritionIntelligence } from "../_shared/ai/nutritionIntelligence.ts";
+import { saveNutritionPlan } from "../_shared/ai/nutritionPlanPersistence.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const WORKOUT_INTENTS: CoachIntent[] = ['workout_plan_edit', 'workout_progression', 'exercise_substitution'];
+const WORKOUT_INTENTS: CoachIntent[] = ['workout_plan_edit', 'workout_progression', 'exercise_substitution', 'workout_program_generate', 'weekly_review', 'adaptive_coaching'];
+const NUTRITION_INTENTS: CoachIntent[] = ['nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review', 'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance', 'nutrition_status', 'nutrition_advice'];
+
+/** Readable engine label for diagnostics (Fix 10) — which deterministic engine (if any) backed this reply. */
+function engineNameForIntent(intent: CoachIntent): string {
+  switch (intent) {
+    case 'workout_progression': return 'progression_engine';
+    case 'workout_program_generate': return 'program_generator';
+    case 'workout_plan_edit': return 'plan_edit_engine';
+    case 'weekly_review':
+    case 'adaptive_coaching': return 'coaching_intelligence_engine';
+    case 'nutrition_target_lookup': return 'nutrition_target_lookup';
+    case 'nutrition_plan_generate':
+    case 'nutrition_plan_edit':
+    case 'nutrition_review':
+    case 'nutrition_status':
+    case 'nutrition_advice': return 'nutrition_engine';
+    case 'grocery_list': return 'grocery_engine';
+    case 'supplement_guidance': return 'supplement_engine';
+    case 'eating_out_guidance': return 'eating_out_engine';
+    default: return 'llm_only';
+  }
+}
+
+
+
 
 // ─── Intent-scoped context loaders (isolated — never cross domains) ──────────────
 
@@ -103,16 +143,8 @@ async function loadNutritionContext(
 // NO rpe/exercise_name/user_id. Ownership + completion come via
 // session_id → workout_sessions(athlete_id, completed_at). RPE is therefore never
 // fabricated (avgRpe stays null).
-
-/** Best-effort extraction of the target lift phrase from a progression question. */
-function extractExerciseName(message: string): string {
-  return (message || '')
-    .toLowerCase()
-    .replace(/[?.!,]/g, ' ')
-    .replace(/\b(should i|can i|do i|is it time to|ready to|time to|increase|go up|add (weight|load)|more weight|heavier|bump( up)?|progress(?:ion)?|the weight|weight|load|my|on|for|to|today|next session|next|reps?|sets?)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// extractExerciseName() lives in exerciseResolver.ts (imported above) so it's
+// unit-testable outside Deno.
 
 /**
  * Loads the last 3–5 completed working sets for the lift named in the message and
@@ -313,12 +345,30 @@ async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<
   }
 }
 
+/** True if any user-facing field of the response contains a leaked internal section label. */
+function responseLeaksInternalLabels(r: CoachResponse): boolean {
+  return containsInternalLabels(`${r.direct_answer} ${r.reason} ${r.follow_up_question || ''}`);
+}
+
+/** Sanitizes every user-facing field — never touches recommended_action/supporting_data (structured, not prose). */
+function sanitizeResponseLabels(r: CoachResponse): CoachResponse {
+  return {
+    ...r,
+    direct_answer: sanitizeInternalLabels(r.direct_answer),
+    reason: sanitizeInternalLabels(r.reason),
+    follow_up_question: r.follow_up_question ? sanitizeInternalLabels(r.follow_up_question) : r.follow_up_question,
+  };
+}
+
 // ─── Model execution + schema/cross-intent validation with one retry each ────────
 async function runCoach(
   baseMessages: { role: string; content: string }[],
   intent: CoachIntent,
   groundedSource: string,
-): Promise<{ resp: CoachResponse; provider: string; model: string; usage: any; costUsd: number }> {
+): Promise<{
+  resp: CoachResponse; provider: string; model: string; usage: any; costUsd: number;
+  labelLeakDetected: boolean; labelLeakSanitized: boolean;
+}> {
   const gen = (msgs: any[]) => generateChat({ messages: msgs, jsonMode: true, temperature: 0.2, maxTokens: 800 });
 
   let result = await gen(baseMessages);
@@ -357,7 +407,28 @@ async function runCoach(
     }
   }
 
-  return { resp, provider: result.provider, model: result.model, usage: result.usage, costUsd: result.costUsd };
+  // Internal-label leak guard: never rely on the prompt instruction alone.
+  // Retry once with an explicit correction; if it still leaks, sanitize
+  // deterministically rather than ship the raw label text to the athlete.
+  let labelLeakDetected = false;
+  let labelLeakSanitized = false;
+  if (responseLeaksInternalLabels(resp)) {
+    labelLeakDetected = true;
+    const retry = await gen([...baseMessages, { role: 'user', content: LABEL_LEAK_RETRY }]);
+    const reparsed = parseCoachResponse(retry.text);
+    const retryResp = reparsed.ok ? reparsed.value : resp;
+    if (!responseLeaksInternalLabels(retryResp)) {
+      resp = retryResp; result = retry;
+    } else {
+      resp = sanitizeResponseLabels(retryResp);
+      labelLeakSanitized = true;
+    }
+  }
+
+  return {
+    resp, provider: result.provider, model: result.model, usage: result.usage, costUsd: result.costUsd,
+    labelLeakDetected, labelLeakSanitized,
+  };
 }
 
 function toReply(resp: CoachResponse): string {
@@ -366,6 +437,140 @@ function toReply(resp: CoachResponse): string {
   if (typeof resp.recommended_action === 'string' && resp.recommended_action.trim()) parts.push(resp.recommended_action.trim());
   return parts.join('\n\n');
 }
+
+async function loadCandidatePool(supabase: any) {
+  const { data: catalog } = await supabase
+    .from('exercises')
+    .select('id, name, equipment, target_muscle, body_part, muscle_group');
+
+  const candidatesByGroup: Partial<Record<MuscleGroup, ExerciseCandidate[]>> = {};
+  const catalogMap: Record<string, { id: string; equipment: string | null }> = {};
+
+  for (const ex of catalog || []) {
+    catalogMap[ex.name] = { id: ex.id, equipment: ex.equipment };
+
+    const target = (ex.target_muscle || ex.muscle_group || ex.body_part || ex.name || '').toLowerCase();
+    let group: MuscleGroup = 'core';
+    if (/chest|pectoral|bench|fly/.test(target)) group = 'chest';
+    else if (/back|lat|trap|rhomboid|row|pull-?up|pulldown/.test(target)) group = 'back';
+    else if (/shoulder|deltoid|overhead press|lateral raise/.test(target)) group = 'shoulders';
+    else if (/bicep|brachialis|curl/.test(target)) group = 'biceps';
+    else if (/tricep|pushdown|dip/.test(target)) group = 'triceps';
+    else if (/quad|thigh|squat|lunge|leg press/.test(target)) group = 'quads';
+    else if (/hamstring|rdl|deadlift/.test(target)) group = 'hamstrings';
+    else if (/glute|hip thrust/.test(target)) group = 'glutes';
+    else if (/calf|calves|soleus/.test(target)) group = 'calves';
+    else if (/ab|core|oblique|plank|crunch/.test(target)) group = 'core';
+
+    (candidatesByGroup[group] ||= []).push({
+      name: ex.name,
+      equipment: ex.equipment,
+    });
+  }
+
+  return { candidatesByGroup, catalogMap };
+}
+
+async function loadAthleteTelemetry(supabase: any, userId: string): Promise<TelemetryInput> {
+  const start28DaysAgo = new Date(Date.now() - 28 * 86_400_000).toISOString();
+  const start7DaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+
+  try {
+    const [
+      { data: sessions },
+      { data: prs },
+      { data: weights },
+      { data: meals },
+      { data: profile },
+    ] = await Promise.all([
+      supabase.from('workout_sessions')
+        .select('id, completed_at, total_volume_kg, duration_seconds')
+        .eq('athlete_id', userId)
+        .not('completed_at', 'is', null)
+        .gte('completed_at', start28DaysAgo)
+        .order('completed_at', { ascending: false })
+        .limit(20),
+
+      supabase.from('personal_records')
+        .select('id, created_at')
+        .eq('athlete_id', userId)
+        .gte('created_at', start7DaysAgo)
+        .limit(20),
+
+      supabase.from('measurements')
+        .select('value, logged_at')
+        .eq('user_id', userId)
+        .eq('type', 'weight')
+        .gte('logged_at', start28DaysAgo)
+        .order('logged_at', { ascending: false })
+        .limit(20),
+
+      supabase.from('meal_logs')
+        .select('servings, food:foods(calories,protein)')
+        .eq('user_id', userId)
+        .gte('logged_at', start7DaysAgo)
+        .limit(50),
+
+      supabase.from('profiles')
+        .select('goal, daily_calorie_target, daily_protein_target')
+        .eq('id', userId)
+        .maybeSingle(),
+    ]);
+
+    const recent7DaysSessions = (sessions || []).filter((s: any) => new Date(s.completed_at) >= new Date(start7DaysAgo));
+    const completedWorkouts = recent7DaysSessions.length;
+    const daysSinceLastWorkout = sessions?.[0]?.completed_at
+      ? Math.max(0, Math.round((Date.now() - new Date(sessions[0].completed_at).getTime()) / 86_400_000))
+      : 7;
+
+    const recentSessionsVolumeKg = (sessions || []).map((s: any) => Number(s.total_volume_kg) || 0);
+
+    const nowMs = Date.now();
+    const bodyWeightLogsKg = (weights || []).map((w: any) => ({
+      daysAgo: Math.max(0, Math.round((nowMs - new Date(w.logged_at).getTime()) / 86_400_000)),
+      weightKg: Number(w.value) || 0,
+    }));
+
+    let totCals = 0, totProt = 0;
+    for (const m of meals || []) {
+      const s = Number(m.servings) || 0;
+      const fd = m.food || {};
+      totCals += (fd.calories || 0) * s;
+      totProt += (fd.protein || 0) * s;
+    }
+    const consumedCaloriesAvg = meals?.length ? Math.round(totCals / 7) : null;
+    const consumedProteinAvg = meals?.length ? Math.round(totProt / 7) : null;
+
+    return {
+      completedWorkouts,
+      prescribedWorkouts: 4,
+      recentSessionsVolumeKg,
+      recent1rmValues: [],
+      bodyWeightLogsKg,
+      consumedCaloriesAvg,
+      targetCalories: profile?.daily_calorie_target ?? null,
+      consumedProteinAvg,
+      targetProtein: profile?.daily_protein_target ?? null,
+      newPrsCount: prs?.length || 0,
+      daysSinceLastWorkout,
+      goal: mapProfileGoal(profile?.goal),
+    };
+  } catch (_err) {
+    // Graceful telemetry failure boundary
+    return {
+      completedWorkouts: 0,
+      prescribedWorkouts: 4,
+      recentSessionsVolumeKg: [],
+      recent1rmValues: [],
+      bodyWeightLogsKg: [],
+      newPrsCount: 0,
+      daysSinceLastWorkout: 7,
+    };
+  }
+}
+
+
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -442,6 +647,7 @@ serve(async (req) => {
       await supabaseServiceRole.from('ai_request_logs').insert({
         athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
         error_reason: 'daily_limit_exceeded', message_length: message?.length ?? 0,
+        conversation_id: conversationId || null,
       }).then(() => {}).catch(() => {});
       return new Response(JSON.stringify({ error: 'AI Coach daily limit reached for free tier. Upgrade to Yeti Pro for unlimited coaching!' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
@@ -460,10 +666,50 @@ serve(async (req) => {
       }).then(() => {}).catch(() => {});
     }
 
+    // 4b. Coach Memory — long-term ai_memory folded with deterministic profile
+    //     facts, so Yeti remembers the athlete across the conversation. Fetched
+    //     BEFORE intent dispatch (moved up from its original position after it)
+    //     because several branches below read memoryRows/memProfile directly —
+    //     declared with `let` in this outer scope (not `const` inside the try)
+    //     so they stay in scope for all of step 3, not just this block.
+    let memoryRows: any[] = [];
+    let memProfile: any = null;
+    let memoryCard = '';
+    try {
+      // Independent of each other — parallel fetch instead of sequential.
+      const [{ data: mRows }, { data: mProfile }] = await Promise.all([
+        supabaseClient.from('ai_memory')
+          .select('category, memory_key, memory_value')
+          .eq('athlete_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(30),
+        supabaseClient.from('profiles').select('goal, weight_kg').eq('id', user.id).maybeSingle(),
+      ]);
+      memoryRows = mRows || [];
+      memProfile = mProfile;
+
+      let memory = foldMemoryRows(memoryRows);
+      if (memProfile) {
+        memory = mergeCoachMemory(memory, {
+          goal: memProfile.goal ?? memory.goal,
+          currentWeightKg: memProfile.weight_kg ?? memory.currentWeightKg,
+        });
+      }
+      memoryCard = buildCoachMemoryCard(memory);
+    } catch (_e) { /* memory is best-effort — never blocks a reply */ }
+
     // 3. Intent-scoped context loading (STRICT isolation) -----------------------
     let contextBlock = '';
     let engineResult: unknown = undefined;
     let coachInstructions = '';
+    // Compound-request handling (smallest safe version — see Fix 7): a message
+    // can ask for a workout plan AND a stored nutrition value in one go
+    // ("create a PPL plan and tell me my protein target"). The primary intent
+    // stays workout_program_generate (classifyIntent already prioritises it),
+    // but this secondary ask is detected independently and its deterministic
+    // answer is appended to the final reply in code — never left to chance
+    // that the model happens to remember the second half of the question.
+    let compoundNutritionAnswer: string | null = null;
 
     if (WORKOUT_INTENTS.includes(intent)) {
       if (intent === 'workout_progression') {
@@ -479,37 +725,299 @@ serve(async (req) => {
         const edit = parsePlanEdit(latestUserMessage);
         engineResult = await applyPlanEdit(supabaseClient, user.id, edit);
         contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
+      } else if (intent === 'workout_program_generate') {
+        // Compound-request check (Fix 7): does this SAME message also ask for
+        // a stored nutrition target? Independent of which sub-path below
+        // handles the workout side.
+        const compoundAsk = detectNutritionTargetAsk(latestUserMessage);
+        if (compoundAsk) {
+          try {
+            const { data: cProf } = await supabaseClient
+              .from('profiles')
+              .select('daily_calorie_target,daily_protein_target,daily_carb_target,daily_fat_target')
+              .eq('id', user.id).maybeSingle();
+            const targets: StoredNutritionTargets = {
+              calorieTarget: cProf?.daily_calorie_target ?? null,
+              proteinTarget: cProf?.daily_protein_target ?? null,
+              carbTarget: cProf?.daily_carb_target ?? null,
+              fatTarget: cProf?.daily_fat_target ?? null,
+            };
+            compoundNutritionAnswer = describeNutritionTarget(targets, compoundAsk).text;
+          } catch (_e) { /* nutrition lookup is best-effort for the compound case; workout side still answers */ }
+        }
+
+        // Conversational Workout Program Generation Flow
+        const activationMatch = latestUserMessage.match(/\bactivate\s+(?:the\s+|my\s+|this\s+)?([a-z0-9_\s]+)\b/i);
+        if (activationMatch) {
+          const targetName = activationMatch[1].trim();
+          engineResult = await activateWorkoutPlan(supabaseClient, user.id, targetName);
+          contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+        } else {
+          const priorUserMsgs = (Array.isArray(messageHistory) ? messageHistory : [])
+            .filter((m: any) => m && m.role === 'user' && typeof m.content === 'string')
+            .map((m: any) => m.content);
+
+          const memoryEquipment = (memoryRows || []).find((m: any) => m.category === 'equipment preferences')?.memory_value;
+          const memoryExperience = (memoryRows || []).find((m: any) => m.category === 'workout style' || m.category === 'training goals')?.memory_value;
+          const memoryInjury = (memoryRows || []).find((m: any) => m.category === 'injuries')?.memory_value;
+          const memoryFav = (memoryRows || []).filter((m: any) => m.category === 'preferences').map((m: any) => m.memory_value);
+
+          const req = resolveKnownRequirements({
+            latestMessage: latestUserMessage,
+            recentMessages: priorUserMsgs,
+            profileGoal: memProfile?.goal,
+            memoryEquipment,
+            memoryExperience,
+            memoryInjury,
+            memoryFavouriteExercises: memoryFav,
+          });
+
+          const missing = findMissingRequired(req);
+
+          let historicalAverageDays: number | null = null;
+          try {
+            const { data: recentSessions } = await supabaseClient
+              .from('workout_sessions')
+              .select('completed_at')
+              .eq('athlete_id', user.id)
+              .not('completed_at', 'is', null)
+              .order('completed_at', { ascending: false })
+              .limit(28);
+            if (recentSessions && recentSessions.length > 0) {
+              historicalAverageDays = recentSessions.length / 4;
+            }
+          } catch (_e) { /* ignore */ }
+
+          const isSaveConfirmation = /\b(save\s*it|confirm\s*(plan)?|looks\s*good\s*(save)?|yes\s*(please)?\s*save|do\s*it|apply\s*plan)\b/i.test(latestUserMessage);
+          const parsedEdit = parsePlanEdit(latestUserMessage);
+
+          if (isSaveConfirmation) {
+            // Save versioned plan!
+            const recommendation = recommendSplit({
+              daysPerWeek: req.daysPerWeek || 4,
+              experience: req.experience || 'intermediate',
+              goal: req.goal,
+              requestedSplit: req.requestedSplit,
+              historicalAverageDays,
+            });
+            const pool = await loadCandidatePool(supabaseClient);
+            const gen = generateProgram({
+              dayNames: recommendation.dayNames,
+              experience: req.experience || 'intermediate',
+              goal: req.goal,
+              equipment: req.equipment,
+              candidatesByGroup: pool.candidatesByGroup,
+              excludedExerciseNames: req.dislikedExercises,
+              likedExerciseNames: req.likedExercises,
+              priorityMuscleGroups: req.priorityMuscleGroups as any,
+              injuryKeywords: req.injuries,
+            });
+
+            const planName = req.requestedSplit ? `${req.requestedSplit} Split` : 'Workout Program';
+            const saveRes = await saveWorkoutPlan(supabaseClient, user.id, planName, gen.days);
+            engineResult = {
+              status: saveRes.success ? 'saved' : 'save_failed',
+              planName: saveRes.planName,
+              version: saveRes.version,
+              message: saveRes.success
+                ? `Your plan ${saveRes.planName} has been saved to your profile and activated.`
+                : `Failed to save plan: ${saveRes.error}`,
+            };
+          } else if (parsedEdit && !parsedEdit.ambiguous) {
+            const pool = await loadCandidatePool(supabaseClient);
+            const recommendation = recommendSplit({
+              daysPerWeek: req.daysPerWeek || 4,
+              experience: req.experience || 'intermediate',
+              goal: req.goal,
+              requestedSplit: req.requestedSplit,
+              historicalAverageDays,
+            });
+            const base = generateProgram({
+              dayNames: recommendation.dayNames,
+              experience: req.experience || 'intermediate',
+              goal: req.goal,
+              equipment: req.equipment,
+              candidatesByGroup: pool.candidatesByGroup,
+              excludedExerciseNames: req.dislikedExercises,
+              likedExerciseNames: req.likedExercises,
+              priorityMuscleGroups: req.priorityMuscleGroups as any,
+              injuryKeywords: req.injuries,
+            });
+
+            const editedDays = applyDraftEdit(base.days, parsedEdit);
+            const validation = validateProgram(editedDays, req, pool.catalogMap);
+            engineResult = {
+              status: 'draft_edited',
+              editApplied: parsedEdit,
+              program: editedDays,
+              validation,
+              confirmation_required: true,
+            };
+          } else if (missing.length > 0) {
+            engineResult = {
+              status: 'missing_information',
+              known: req,
+              missing,
+            };
+          } else {
+            const recommendation = recommendSplit({
+              daysPerWeek: req.daysPerWeek!,
+              experience: req.experience!,
+              goal: req.goal,
+              requestedSplit: req.requestedSplit,
+              historicalAverageDays,
+            });
+
+            const pool = await loadCandidatePool(supabaseClient);
+            const generated = generateProgram({
+              dayNames: recommendation.dayNames,
+              experience: req.experience!,
+              goal: req.goal,
+              equipment: req.equipment,
+              candidatesByGroup: pool.candidatesByGroup,
+              excludedExerciseNames: req.dislikedExercises,
+              likedExerciseNames: req.likedExercises,
+              priorityMuscleGroups: req.priorityMuscleGroups as any,
+              injuryKeywords: req.injuries,
+            });
+
+            const validation = validateProgram(generated.days, req, pool.catalogMap);
+
+            engineResult = {
+              status: recommendation.adherenceCheckRequired ? 'adherence_check' : 'draft_proposed',
+              split: recommendation.split,
+              rationale: recommendation.rationale,
+              adherenceNote: recommendation.adherenceNote,
+              program: generated.days,
+              validation,
+              confirmation_required: true,
+            };
+          }
+
+          contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+        }
+      } else if (intent === 'weekly_review' || intent === 'adaptive_coaching') {
+        const telemetryInput = await loadAthleteTelemetry(supabaseClient, user.id);
+        const rawTelemetry = computeRawTelemetry(telemetryInput);
+
+        const memoryEquipment = (memoryRows || []).find((m: any) => m.category === 'equipment preferences')?.memory_value;
+        const memoryExperience = (memoryRows || []).find((m: any) => m.category === 'workout style' || m.category === 'training goals')?.memory_value;
+        const memoryInjury = (memoryRows || []).find((m: any) => m.category === 'injuries')?.memory_value;
+
+        const req = resolveKnownRequirements({
+          latestMessage: latestUserMessage,
+          profileGoal: memProfile?.goal,
+          memoryEquipment,
+          memoryExperience,
+          memoryInjury,
+        });
+
+        const intelligence = deriveCoachingIntelligence(rawTelemetry, req);
+        engineResult = intelligence;
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id);
       } else {
         contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
       }
-    } else if (intent === 'nutrition_status') {
-      const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id); // no workouts
+    } else if (NUTRITION_INTENTS.includes(intent)) {
+      const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id);
       contextBlock = nctx;
-      engineResult = computeNutritionRemaining(engine);
+
+      if (intent === 'nutrition_target_lookup') {
+        // Deterministic read-only lookup (Fix 8) — never computes a new value,
+        // only reports what's already stored, or an honest fallback.
+        const ask = detectNutritionTargetAsk(latestUserMessage) ?? 'macro';
+        const targets: StoredNutritionTargets = {
+          calorieTarget: engine.calorieTarget, proteinTarget: engine.proteinTarget,
+          carbTarget: engine.carbTarget, fatTarget: engine.fatTarget,
+        };
+        const described = describeNutritionTarget(targets, ask);
+        engineResult = { type: 'nutrition_target_lookup', ask, ...targets, hasValue: described.hasValue, answerText: described.text };
+      } else if (intent === 'grocery_list') {
+        const memoryPref = (memoryRows || []).find((m: any) => m.category === 'nutrition preferences')?.memory_value as any;
+        engineResult = {
+          type: 'grocery_list',
+          list: generateGroceryList(memoryPref || 'omnivore', 'moderate'),
+        };
+      } else if (intent === 'supplement_guidance') {
+        engineResult = {
+          type: 'supplement_guidance',
+          supplements: getSupplementAdvice(latestUserMessage),
+        };
+      } else if (intent === 'eating_out_guidance') {
+        engineResult = {
+          type: 'eating_out_guidance',
+          guidance: [
+            { venue: 'Fast Casual (Mexican/Bowls)', recommendation: 'Choose rice, black beans, double chicken/tofu, salsa, skip sour cream.' },
+            { venue: 'Japanese / Sushi', recommendation: 'Opt for sashimi, edamame, steamed rice, teriyaki chicken, miso soup.' },
+            { venue: 'Airport / Travel', recommendation: 'Grab hardboiled eggs, Greek yogurt, almonds, pre-packaged turkey sandwich, water.' },
+          ],
+        };
+      } else if (intent === 'nutrition_plan_edit') {
+        const swap = getEqualMacroSubstitutions(latestUserMessage, 100);
+        engineResult = {
+          type: 'nutrition_plan_edit',
+          swap,
+        };
+      } else {
+        // nutrition_plan_generate, nutrition_review, nutrition_status, nutrition_advice
+        const weightKg = memProfile?.weight_kg ? Number(memProfile.weight_kg) : 75;
+        const rawCalc = computeCalorieTargets({
+          weightKg,
+          goal: mapProfileGoal(memProfile?.goal) as any,
+          activityLevel: 'moderate',
+        });
+        const cycling = computeMacroCycling(rawCalc.dailyCalories, weightKg);
+
+        const sampleMeals = [
+          {
+            name: 'Breakfast',
+            targetCalories: Math.round(cycling.trainingDay.calories * 0.25),
+            items: [
+              { name: 'Oats / Cream of Rice', amountG: 60, calories: 220, proteinG: 7, carbsG: 40, fatG: 3, category: 'carbs' as const },
+              { name: 'Egg Whites / Tofu', amountG: 150, calories: 120, proteinG: 22, carbsG: 2, fatG: 2, category: 'protein' as const },
+            ],
+          },
+          {
+            name: 'Lunch',
+            targetCalories: Math.round(cycling.trainingDay.calories * 0.35),
+            items: [
+              { name: 'Chicken Breast / Paneer', amountG: 150, calories: 220, proteinG: 32, carbsG: 0, fatG: 6, category: 'protein' as const },
+              { name: 'Brown Rice', amountG: 150, calories: 200, proteinG: 4, carbsG: 42, fatG: 2, category: 'carbs' as const },
+            ],
+          },
+        ];
+
+        const rawResult = {
+          baseTdee: rawCalc.baseTdee,
+          dailyTargetCalories: rawCalc.dailyCalories,
+          trainingDayMacros: cycling.trainingDay,
+          restDayMacros: cycling.restDay,
+          currentPhase: rawCalc.phase,
+          meals: sampleMeals,
+          groceryList: generateGroceryList('omnivore', 'moderate'),
+        };
+
+        const validation = validateNutritionPlan(sampleMeals, {
+          targetCalories: rawCalc.dailyCalories,
+          targetProteinG: cycling.trainingDay.proteinG,
+          weightKg,
+        });
+
+        const intel = deriveNutritionIntelligence(rawResult, validation, {
+          consumedCaloriesAvg: engine.consumedCalories,
+          targetCalories: engine.calorieTarget,
+          consumedProteinAvg: engine.consumedProtein,
+          targetProtein: engine.proteinTarget,
+        }, { weightKg, goal: mapProfileGoal(memProfile?.goal) as any });
+
+        engineResult = intel;
+      }
     } else {
+
       // general_chat / explanation / recovery / advice / meal_suggestion / rest_pacing:
       // use only the light client-supplied context; NEVER default to nutrition.
       contextBlock = typeof context === 'string' ? context : '';
     }
-
-    // 4b. Coach Memory — long-term ai_memory folded with deterministic profile
-    //     facts, so Yeti remembers the athlete across the conversation.
-    let memoryCard = '';
-    try {
-      // Independent of each other — parallel fetch instead of sequential.
-      const [{ data: memoryRows }, { data: memProfile }] = await Promise.all([
-        supabaseClient.from('ai_memory').select('category, memory_key, memory_value').eq('athlete_id', user.id),
-        supabaseClient.from('profiles').select('goal, weight_kg').eq('id', user.id).maybeSingle(),
-      ]);
-      let memory = foldMemoryRows(memoryRows || []);
-      if (memProfile) {
-        memory = mergeCoachMemory(memory, {
-          goal: memProfile.goal ?? memory.goal,
-          currentWeightKg: memProfile.weight_kg ?? memory.currentWeightKg,
-        });
-      }
-      memoryCard = buildCoachMemoryCard(memory);
-    } catch (_e) { /* memory is best-effort — never blocks a reply */ }
 
     // 5. Grounded system prompt -------------------------------------------------
     const systemPrompt = buildCoachSystemPrompt({ intent, engineResult, context: contextBlock, memoryCard, coachInstructions, safetyTriggered });
@@ -539,11 +1047,13 @@ serve(async (req) => {
     // 6 + 7. Model execution + validation + retries -----------------------------
     const started = Date.now();
     let resp: CoachResponse, provider = 'unknown', model = 'unknown', usage = { inputTokens: 0, outputTokens: 0 }, costUsd = 0;
+    let labelLeakDetected = false, labelLeakSanitized = false;
     try {
       // Everything the answer may cite must appear here (engine result + context).
       const groundedSource = `${engineResult !== undefined ? JSON.stringify(engineResult) : ''}\n${contextBlock}`;
       const out = await runCoach(baseMessages, intent, groundedSource);
       resp = out.resp; provider = out.provider; model = out.model; usage = out.usage; costUsd = out.costUsd;
+      labelLeakDetected = out.labelLeakDetected; labelLeakSanitized = out.labelLeakSanitized;
     } catch (providerErr: any) {
       if (providerErr instanceof AINotConfiguredError) {
         return new Response(JSON.stringify({
@@ -554,47 +1064,145 @@ serve(async (req) => {
       await supabaseServiceRole.from('ai_request_logs').insert({
         athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
         error_reason: 'provider_error', coach_type: intent, message_length: latestUserMessage.length,
+        conversation_id: conversationId || null, engine: engineNameForIntent(intent),
+        fallback_triggered: false, response_type: 'error', action_types: ['retry'],
       }).then(() => {}).catch(() => {});
       return new Response(JSON.stringify({
         reply: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
         response: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
-        actions: [], intent,
+        actions: [], action_types: ['retry'], intent, response_type: 'error',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
 
-    // 7b. Persist durable facts the coach learned (restores ai_memory writes).
+    // 7a. Nutrition-target answer guarantee (Fix 8) — never trust the model's
+    // prose alone for a "never invent a value" requirement. If the reply
+    // doesn't actually contain the real stored number (or, when none exists,
+    // doesn't convey that honestly), replace it with the deterministic text.
+    // Skipped for the multi-value 'macro' ask — verifying four numbers by
+    // substring match isn't worth the complexity; grounding + retries cover it.
+    if (intent === 'nutrition_target_lookup') {
+      const er = engineResult as any;
+      if (er?.ask !== 'macro') {
+        const expectedValue = er?.ask === 'protein' ? er.proteinTarget
+          : er?.ask === 'calorie' ? er.calorieTarget
+          : er?.ask === 'carb' ? er.carbTarget
+          : er?.ask === 'fat' ? er.fatTarget
+          : null;
+        const answerIsGrounded = er?.hasValue
+          ? resp.direct_answer.includes(String(expectedValue))
+          : /don'?t (currently )?have|no saved|not (currently )?saved/i.test(resp.direct_answer);
+        if (!answerIsGrounded) resp = { ...resp, direct_answer: er.answerText };
+      }
+    }
+
+    // 7b. Persist durable facts the coach learned (Fix 6): category MUST match
+    // the exact whitelist (aliases normalized) — anything else is REJECTED and
+    // LOGGED, never silently dropped. Each successful write is verified with a
+    // read-back before it counts as "persisted".
+    let memoryPersistedThisTurn = false;
+    const rejectedMemoryUpdates: { category: string; memory_key: string; reason: string }[] = [];
     if (resp.memory_updates && resp.memory_updates.length) {
-      const allowed = ['preferences', 'training goals', 'workout style', 'nutrition preferences', 'equipment preferences', 'injuries'];
       for (const u of resp.memory_updates) {
-        if (!u?.memory_key || !allowed.includes(u.category)) continue;
+        if (!u?.memory_key) {
+          rejectedMemoryUpdates.push({ category: u?.category ?? '', memory_key: '', reason: 'missing memory_key' });
+          continue;
+        }
+        const category = normalizeMemoryCategory(u.category);
+        if (!category) {
+          rejectedMemoryUpdates.push({ category: u.category, memory_key: u.memory_key, reason: 'unrecognised category' });
+          continue;
+        }
         if (u.memory_value === '') {
           // Forgetting is always allowed.
           await supabaseServiceRole.from('ai_memory').delete()
             .eq('athlete_id', user.id).eq('memory_key', u.memory_key).then(() => {}).catch(() => {});
-        } else if (classifyMemory(u.memory_value).shouldStore) {
-          // Quality gate: only persist durable facts (goal/injury/diet/preference),
-          // never transient states ("tired today", "had pizza").
-          await supabaseServiceRole.from('ai_memory').upsert({
-            athlete_id: user.id, category: u.category, memory_key: u.memory_key,
+          continue;
+        }
+        if (!classifyMemory(u.memory_value).shouldStore) {
+          rejectedMemoryUpdates.push({ category, memory_key: u.memory_key, reason: 'not a durable fact' });
+          continue;
+        }
+        try {
+          const { error: upsertErr } = await supabaseServiceRole.from('ai_memory').upsert({
+            athlete_id: user.id, category, memory_key: u.memory_key,
             memory_value: u.memory_value, updated_at: new Date().toISOString(),
-          }, { onConflict: 'athlete_id,memory_key' }).then(() => {}).catch(() => {});
+          }, { onConflict: 'athlete_id,memory_key' });
+          if (upsertErr) throw upsertErr;
+          // Verify by reading the row back — never assume a write succeeded just because it didn't throw.
+          const { data: verifyRow } = await supabaseServiceRole.from('ai_memory')
+            .select('memory_value').eq('athlete_id', user.id).eq('memory_key', u.memory_key).maybeSingle();
+          if (verifyRow?.memory_value === u.memory_value) memoryPersistedThisTurn = true;
+          else rejectedMemoryUpdates.push({ category, memory_key: u.memory_key, reason: 'write verification failed' });
+        } catch (_e) {
+          rejectedMemoryUpdates.push({ category, memory_key: u.memory_key, reason: 'db_error' });
         }
       }
+      if (rejectedMemoryUpdates.length) console.log('[ai-coach:memory-rejected]', JSON.stringify(rejectedMemoryUpdates));
     }
+
+    // Memory-claim honesty (Fix 6): never let the reply claim a save that didn't happen.
+    if (containsMemoryClaim(resp.direct_answer) && !memoryPersistedThisTurn) {
+      resp = { ...resp, direct_answer: MEMORY_PERSISTENCE_FAILED_NOTE };
+    }
+
+    // 7c. Discriminated response contract (Fix 9).
+    const responseType = computeResponseType({
+      intent, missingInformation: resp.missing_information, safetyFlag: resp.safety_flag, isError: false,
+      engineStatus: (engineResult as any)?.status, hasEngineResult: engineResult != null,
+      memoryPersistedThisTurn,
+    });
+    const actions: CoachAction[] = computeActions(responseType);
 
     // 8. Log + return -----------------------------------------------------------
     // ai_usage was already incremented atomically up-front — only the request
     // log remains here (no more read-then-write race on the usage counter).
     const latencyMs = Date.now() - started;
+    // True when a non-primary provider ultimately answered (service.ts tries
+    // Gemini first) — i.e. a fallback occurred. `provider` is already resolved
+    // above from runCoach()'s result.
+    const fallbackTriggered = provider !== 'unknown' && provider !== 'gemini';
     await supabaseServiceRole.from('ai_request_logs').insert({
       athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
       coach_type: intent, provider, model,
       input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
       cost_usd: costUsd, latency_ms: latencyMs, message_length: latestUserMessage.length,
+      conversation_id: conversationId || null, engine: engineNameForIntent(intent),
+      fallback_triggered: fallbackTriggered, response_type: responseType,
+      action_types: actions.map((a) => a.type),
     }).then(() => {}).catch(() => {}); // non-blocking
 
+    // Privacy-Safe Diagnostics Logging (NO PII, NO message content, NO meal descriptions)
+    console.log('[ai-coach:diagnostics]', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      intent,
+      response_type: responseType,
+      action_types: actions.map((a) => a.type),
+      engine_executed: engineResult != null,
+      confidence_score: (engineResult as any)?.confidence?.score ?? 'n/a',
+      safety_blocks_triggered: (engineResult as any)?.safetyFlags?.length || (safetyTriggered ? 1 : 0),
+      recovery_status: (engineResult as any)?.telemetrySummary?.recoveryStatus ?? 'n/a',
+      progress_status: (engineResult as any)?.telemetrySummary?.progressStatus ?? 'n/a',
+      telemetry_completeness: (engineResult as any)?.telemetrySummary?.telemetryDataPointCount ?? 0,
+      memory_retrieval_count: memoryCard ? memoryCard.split('\n').length : 0,
+      memory_persisted: memoryPersistedThisTurn,
+      memory_rejected_count: rejectedMemoryUpdates.length,
+      label_leak_detected: labelLeakDetected,
+      label_leak_sanitized: labelLeakSanitized,
+      prompt_token_estimate: usage.inputTokens,
+      completion_token_estimate: usage.outputTokens,
+      total_execution_time_ms: latencyMs,
+      db_query_count: 5,
+      fallback_events: fallbackTriggered ? ['provider_fallback'] : [],
+    }));
+
     const reply = toReply(resp);
-    return new Response(JSON.stringify({ reply, response: reply, actions: [], intent, structured: resp }), {
+    // Compound-request guarantee (Fix 7): append the deterministic secondary
+    // answer in code — never rely on the model to remember it unprompted.
+    const finalReply = compoundNutritionAnswer ? `${reply}\n\n${compoundNutritionAnswer}` : reply;
+    return new Response(JSON.stringify({
+      reply: finalReply, response: finalReply, actions, action_types: actions.map((a) => a.type),
+      intent, response_type: responseType, structured: resp,
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
     });
   } catch (error: any) {
