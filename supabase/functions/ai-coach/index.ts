@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AINotConfiguredError, generateChat, healthCheck } from "../_shared/ai/index.ts";
+import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
 import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
 import { resolveExerciseAlias, extractExerciseName } from "../_shared/ai/exerciseResolver.ts";
@@ -16,6 +16,7 @@ import {
   computeResponseType, computeActions, CoachAction,
 } from "../_shared/ai/coachSchema.ts";
 import { detectNutritionTargetAsk, describeNutritionTarget, StoredNutritionTargets } from "../_shared/ai/nutritionTargetLookup.ts";
+import { detectExplicitMemoryCommand } from "../_shared/ai/explicitMemory.ts";
 import { resolveKnownRequirements, findMissingRequired, mapProfileGoal } from "../_shared/ai/programRequirements.ts";
 import { recommendSplit } from "../_shared/ai/splitRecommender.ts";
 import { generateProgram, applyDraftEdit, GeneratedDay, ExerciseCandidate, MuscleGroup } from "../_shared/ai/programGenerator.ts";
@@ -367,7 +368,7 @@ async function runCoach(
   groundedSource: string,
 ): Promise<{
   resp: CoachResponse; provider: string; model: string; usage: any; costUsd: number;
-  labelLeakDetected: boolean; labelLeakSanitized: boolean;
+  labelLeakDetected: boolean; labelLeakSanitized: boolean; providerAttempts: ProviderAttemptLog[];
 }> {
   const gen = (msgs: any[]) => generateChat({ messages: msgs, jsonMode: true, temperature: 0.2, maxTokens: 800 });
 
@@ -427,7 +428,7 @@ async function runCoach(
 
   return {
     resp, provider: result.provider, model: result.model, usage: result.usage, costUsd: result.costUsd,
-    labelLeakDetected, labelLeakSanitized,
+    labelLeakDetected, labelLeakSanitized, providerAttempts: result.providerAttempts,
   };
 }
 
@@ -698,10 +699,85 @@ serve(async (req) => {
       memoryCard = buildCoachMemoryCard(memory);
     } catch (_e) { /* memory is best-effort — never blocks a reply */ }
 
+    // Declared here (not at first use) because both the deterministic
+    // explicit-memory path below AND the LLM-driven memory_updates path
+    // (step 7b, further down) need to report into the same turn-level state —
+    // "was anything actually persisted this turn" must reflect either path,
+    // and rejections from either path go into the same log.
+    let memoryPersistedThisTurn = false;
+    const rejectedMemoryUpdates: { category: string; memory_key: string; reason: string }[] = [];
+
+    // 4c. Deterministic explicit-memory commands (Objective 2) — recognised
+    // independently of intent classification (a command can co-occur with any
+    // other request). Only HIGH-confidence detections are auto-persisted;
+    // anything hedged ("maybe I prefer...") is left alone rather than guessed
+    // at — the existing LLM-driven memory_updates path and its honesty guard
+    // (step 7b) remain the backstop either way.
+    const explicitMemory = detectExplicitMemoryCommand(latestUserMessage);
+    let explicitMemoryOutcome: 'saved' | 'deleted' | 'save_failed' | 'delete_failed' | null = null;
+    if (explicitMemory.detected && explicitMemory.confidence === 'high') {
+      if (explicitMemory.operation === 'upsert' && explicitMemory.memoryKey && explicitMemory.memoryValue && explicitMemory.category) {
+        try {
+          const { error: upsertErr } = await supabaseServiceRole.from('ai_memory').upsert({
+            athlete_id: user.id, category: explicitMemory.category, memory_key: explicitMemory.memoryKey,
+            memory_value: explicitMemory.memoryValue, updated_at: new Date().toISOString(),
+          }, { onConflict: 'athlete_id,memory_key' });
+          if (upsertErr) throw upsertErr;
+          // Read back — never assume a write succeeded just because it didn't throw.
+          const { data: verifyRow } = await supabaseServiceRole.from('ai_memory')
+            .select('memory_value').eq('athlete_id', user.id).eq('memory_key', explicitMemory.memoryKey).maybeSingle();
+          explicitMemoryOutcome = verifyRow?.memory_value === explicitMemory.memoryValue ? 'saved' : 'save_failed';
+        } catch (_e) {
+          explicitMemoryOutcome = 'save_failed';
+        }
+        if (explicitMemoryOutcome === 'saved') {
+          memoryPersistedThisTurn = true;
+          // Refresh the in-prompt memory card so THIS reply can reference the
+          // fact it just saved, instead of waiting for the next turn.
+          memoryRows = [...memoryRows.filter((m: any) => m.memory_key !== explicitMemory.memoryKey),
+            { category: explicitMemory.category, memory_key: explicitMemory.memoryKey, memory_value: explicitMemory.memoryValue }];
+        } else {
+          rejectedMemoryUpdates.push({ category: explicitMemory.category, memory_key: explicitMemory.memoryKey, reason: 'explicit_upsert_failed' });
+        }
+      } else if (explicitMemory.operation === 'delete' && explicitMemory.memoryKey) {
+        try {
+          const { error: delErr } = await supabaseServiceRole.from('ai_memory').delete()
+            .eq('athlete_id', user.id).eq('memory_key', explicitMemory.memoryKey);
+          if (delErr) throw delErr;
+          const { data: verifyGone } = await supabaseServiceRole.from('ai_memory')
+            .select('memory_key').eq('athlete_id', user.id).eq('memory_key', explicitMemory.memoryKey).maybeSingle();
+          explicitMemoryOutcome = !verifyGone ? 'deleted' : 'delete_failed';
+        } catch (_e) {
+          explicitMemoryOutcome = 'delete_failed';
+        }
+        if (explicitMemoryOutcome === 'deleted') {
+          memoryPersistedThisTurn = true; // a confirmed delete is also a confirmed memory action this turn
+          memoryRows = memoryRows.filter((m: any) => m.memory_key !== explicitMemory.memoryKey);
+        } else {
+          rejectedMemoryUpdates.push({ category: explicitMemory.category ?? '', memory_key: explicitMemory.memoryKey, reason: 'explicit_delete_failed' });
+        }
+      }
+      // Rebuild the memory card from the (possibly just-updated) rows so the
+      // system prompt reflects this turn's change, not last turn's.
+      let refreshedMemory = foldMemoryRows(memoryRows);
+      if (memProfile) refreshedMemory = mergeCoachMemory(refreshedMemory, { goal: memProfile.goal, currentWeightKg: memProfile.weight_kg });
+      memoryCard = buildCoachMemoryCard(refreshedMemory);
+    }
+
     // 3. Intent-scoped context loading (STRICT isolation) -----------------------
     let contextBlock = '';
     let engineResult: unknown = undefined;
-    let coachInstructions = '';
+    // Tell the model the CONFIRMED outcome of any explicit memory command so
+    // it can acknowledge it accurately — it must never guess or claim
+    // otherwise. The existing honesty guard (step 7b) still corrects it if it
+    // does, but this makes the correct phrasing the easy default.
+    let coachInstructions = explicitMemoryOutcome === 'saved'
+      ? `You just saved this to memory: "${explicitMemory.memoryValue}". Acknowledge it naturally and briefly — do not describe it as anything other than saved.`
+      : explicitMemoryOutcome === 'deleted'
+      ? `You just deleted a previously saved preference at the athlete's request. Acknowledge that it's forgotten.`
+      : explicitMemoryOutcome === 'save_failed' || explicitMemoryOutcome === 'delete_failed'
+      ? `The athlete asked you to remember/forget something, but the save did NOT go through due to a technical issue. Say so honestly — do not claim it was saved or forgotten.`
+      : '';
     // Compound-request handling (smallest safe version — see Fix 7): a message
     // can ask for a workout plan AND a stored nutrition value in one go
     // ("create a PPL plan and tell me my protein target"). The primary intent
@@ -1048,12 +1124,14 @@ serve(async (req) => {
     const started = Date.now();
     let resp: CoachResponse, provider = 'unknown', model = 'unknown', usage = { inputTokens: 0, outputTokens: 0 }, costUsd = 0;
     let labelLeakDetected = false, labelLeakSanitized = false;
+    let providerAttempts: ProviderAttemptLog[] = [];
     try {
       // Everything the answer may cite must appear here (engine result + context).
       const groundedSource = `${engineResult !== undefined ? JSON.stringify(engineResult) : ''}\n${contextBlock}`;
       const out = await runCoach(baseMessages, intent, groundedSource);
       resp = out.resp; provider = out.provider; model = out.model; usage = out.usage; costUsd = out.costUsd;
       labelLeakDetected = out.labelLeakDetected; labelLeakSanitized = out.labelLeakSanitized;
+      providerAttempts = out.providerAttempts;
     } catch (providerErr: any) {
       if (providerErr instanceof AINotConfiguredError) {
         return new Response(JSON.stringify({
@@ -1061,11 +1139,16 @@ serve(async (req) => {
           message: 'No AI provider is configured. Set GEMINI_API_KEY and/or GROQ_API_KEY.',
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 503 });
       }
+      // Even on total failure, surface WHY each provider didn't work — never
+      // just "provider_error" with no further detail.
+      const failedAttempts: ProviderAttemptLog[] = providerErr instanceof AllProvidersFailedError ? providerErr.providerAttempts : [];
+      const reasonSummary = summarizeFallbackReason(failedAttempts);
       await supabaseServiceRole.from('ai_request_logs').insert({
         athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
         error_reason: 'provider_error', coach_type: intent, message_length: latestUserMessage.length,
         conversation_id: conversationId || null, engine: engineNameForIntent(intent),
         fallback_triggered: false, response_type: 'error', action_types: ['retry'],
+        fallback_reason: reasonSummary,
       }).then(() => {}).catch(() => {});
       return new Response(JSON.stringify({
         reply: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
@@ -1098,9 +1181,9 @@ serve(async (req) => {
     // 7b. Persist durable facts the coach learned (Fix 6): category MUST match
     // the exact whitelist (aliases normalized) — anything else is REJECTED and
     // LOGGED, never silently dropped. Each successful write is verified with a
-    // read-back before it counts as "persisted".
-    let memoryPersistedThisTurn = false;
-    const rejectedMemoryUpdates: { category: string; memory_key: string; reason: string }[] = [];
+    // read-back before it counts as "persisted". (memoryPersistedThisTurn /
+    // rejectedMemoryUpdates are declared earlier, alongside the deterministic
+    // explicit-memory path, since both paths report into the same state.)
     if (resp.memory_updates && resp.memory_updates.length) {
       for (const u of resp.memory_updates) {
         if (!u?.memory_key) {
@@ -1161,6 +1244,11 @@ serve(async (req) => {
     // Gemini first) — i.e. a fallback occurred. `provider` is already resolved
     // above from runCoach()'s result.
     const fallbackTriggered = provider !== 'unknown' && provider !== 'gemini';
+    // Objective 1: a compact, queryable reason WHY the fallback happened —
+    // e.g. "gemini:rate_limited:429" — never null when fallbackTriggered is
+    // true, since providerAttempts records every attempt including skipped
+    // (not_configured) ones.
+    const fallbackReason = fallbackTriggered ? summarizeFallbackReason(providerAttempts) : null;
     await supabaseServiceRole.from('ai_request_logs').insert({
       athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
       coach_type: intent, provider, model,
@@ -1168,7 +1256,7 @@ serve(async (req) => {
       cost_usd: costUsd, latency_ms: latencyMs, message_length: latestUserMessage.length,
       conversation_id: conversationId || null, engine: engineNameForIntent(intent),
       fallback_triggered: fallbackTriggered, response_type: responseType,
-      action_types: actions.map((a) => a.type),
+      action_types: actions.map((a) => a.type), fallback_reason: fallbackReason,
     }).then(() => {}).catch(() => {}); // non-blocking
 
     // Privacy-Safe Diagnostics Logging (NO PII, NO message content, NO meal descriptions)
@@ -1193,6 +1281,13 @@ serve(async (req) => {
       total_execution_time_ms: latencyMs,
       db_query_count: 5,
       fallback_events: fallbackTriggered ? ['provider_fallback'] : [],
+      fallback_reason: fallbackReason,
+      // Redacted per-attempt trail: provider/model names + failure category +
+      // HTTP status + latency only — never a response body or error message.
+      provider_attempts: providerAttempts.map((a) => ({
+        provider: a.provider, model: a.model, succeeded: a.succeeded,
+        failure_category: a.failureCategory ?? null, http_status: a.httpStatus ?? null, latency_ms: a.latencyMs,
+      })),
     }));
 
     const reply = toReply(resp);

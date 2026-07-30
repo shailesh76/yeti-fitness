@@ -29,6 +29,28 @@ export interface ChatResult extends ProviderResult {
   model: string;
   costUsd: number;
   attempts: string[]; // provider names tried, in order
+  providerAttempts: ProviderAttemptLog[]; // per-attempt diagnostics — never includes keys, prompts, or response bodies
+}
+
+/** Why a provider attempt didn't produce a usable answer. No sensitive detail — safe to log/persist. */
+export type ProviderFailureCategory =
+  | 'not_configured'
+  | 'timeout'
+  | 'rate_limited'
+  | 'http_error'
+  | 'network_error'
+  | 'parse_error'
+  | 'empty_response'
+  | 'unknown';
+
+/** One provider attempt's outcome — provider/model names are not secrets; no key, prompt, or response body is ever included. */
+export interface ProviderAttemptLog {
+  provider: string;
+  model: string;
+  succeeded: boolean;
+  failureCategory?: ProviderFailureCategory;
+  httpStatus?: number;
+  latencyMs: number;
 }
 
 export interface AIProvider {
@@ -55,5 +77,13 @@ export class ProviderHttpError extends Error {
   }
   get retryable(): boolean {
     return this.status === 429 || this.status >= 500;
+  }
+}
+
+/** Thrown when every configured provider failed. Carries the full diagnostic trail so the caller can still log why, even on total failure. */
+export class AllProvidersFailedError extends Error {
+  constructor(public providerAttempts: ProviderAttemptLog[], cause?: unknown) {
+    super(`All AI providers failed: ${(cause as Error)?.message ?? 'unknown error'}`);
+    this.name = "AllProvidersFailedError";
   }
 }
