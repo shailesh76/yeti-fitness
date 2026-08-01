@@ -168,6 +168,77 @@ export function classifyIntent(message: string): CoachIntent {
   return 'general_chat';
 }
 
+/**
+ * Same as classifyIntent(), but when the current message ALONE falls through
+ * to 'general_chat' (nothing specific matched), walks backward through prior
+ * user messages to find the most recent one with a DEFINITE classification
+ * (i.e. not itself general_chat) and carries that intent forward if it's
+ * engine-backed.
+ *
+ * Root cause this fixes: a short reply answering the coach's own clarifying
+ * question ("Let's use barbell bench press, 60kg for 5 reps") almost never
+ * repeats the original request's keywords ("plan", "increase", "program"),
+ * so classifying it in isolation drops it to general_chat -> engine: llm_only
+ * — meaning no deterministic engine ever runs, and the model is left to
+ * freely improvise a "plan" in prose with no real numbers behind it,
+ * contradicting the deterministic-engine-first design. Live-observed: the
+ * model confidently stated "55kg for 5 reps in Week 1" with nothing
+ * computing or validating that figure.
+ *
+ * The backward walk (not just a single-hop look at the immediately prior
+ * message) fixes a live-observed multi-turn slot-filling case: "Create a
+ * 4-day PPL plan" (workout_program_generate) -> "I'm intermediate, full gym,
+ * Mon/Tue/Thu/Fri" (ambiguous alone, correctly inherits) -> "4 days per week
+ * total" (ALSO ambiguous alone). A single-hop lookback re-classifies only the
+ * immediately-prior message from scratch — since that message is itself
+ * ambiguous in isolation, the chain broke back to general_chat, silently
+ * disabling the deterministic engine mid slot-filling. Walking back past
+ * consecutive ambiguous replies to the most recent DEFINITE classification
+ * fixes this without changing single-hop behavior at all.
+ *
+ * Deliberately narrow: only kicks in when the CURRENT message has no
+ * specific classification of its own (never overrides a real match), and
+ * only carries forward an intent that's actually engine-backed (softer
+ * intents like workout_explanation/recovery don't need this — the LLM was
+ * always expected to free-answer those). A definite-but-non-engine-backed
+ * prior classification still stops the walk (so a genuine topic change to a
+ * soft intent correctly blocks inheriting an older engine-backed one).
+ *
+ * Bounded in two more ways, so an inherited intent cannot drift indefinitely
+ * into the past:
+ *
+ * 1. A prior message that CONFIRMS/saves or CANCELS an in-progress
+ *    engine-backed flow closes that episode — the walk stops there rather
+ *    than reaching past it. Without this, an athlete who already saved a
+ *    workout plan and later says something unrelated-but-ambiguous ("thanks",
+ *    "cool") would silently re-trigger program generation from scratch,
+ *    since every field it needs is still sitting earlier in the same
+ *    conversation history.
+ * 2. The walk only looks back MAX_INTENT_LOOKBACK messages. There is no
+ *    wall-clock timestamp available at this layer (the classifier only ever
+ *    sees message text, not send times), so a fixed lookback count is a
+ *    deliberate, simple proxy for a time-based cutoff — a handful of
+ *    genuinely ambiguous slot-filling replies is normal conversational flow;
+ *    reaching back through an entire conversation's history is not.
+ */
+const CONVERSATION_CLOSING_PATTERN =
+  /\b(save\s*it|confirm\s*(the\s*)?(plan|program)?\b|looks\s*good,?\s*save|yes\s*(please\s*)?save|do\s*it|apply\s*(the\s*)?plan|activate\s*(it|this|the\s*plan)|never\s*mind|nevermind|forget\s*it|cancel\s*(that|this|it)?|not\s*now|let'?s\s*stop\s*here)\b/i;
+
+const MAX_INTENT_LOOKBACK = 8;
+
+export function classifyIntentWithHistory(message: string, priorUserMessages: string[]): CoachIntent {
+  const direct = classifyIntent(message);
+  if (direct !== 'general_chat') return direct;
+  const oldestEligible = Math.max(0, priorUserMessages.length - MAX_INTENT_LOOKBACK);
+  for (let i = priorUserMessages.length - 1; i >= oldestEligible; i--) {
+    if (CONVERSATION_CLOSING_PATTERN.test(priorUserMessages[i])) return direct;
+    const priorIntent = classifyIntent(priorUserMessages[i]);
+    if (priorIntent === 'general_chat') continue;
+    return isEngineBacked(priorIntent) ? priorIntent : direct;
+  }
+  return direct;
+}
+
 /** Intents whose numeric answer comes from a deterministic Yeti engine, not the LLM. */
 export const ENGINE_BACKED_INTENTS: CoachIntent[] = ['workout_progression', 'nutrition_status', 'workout_program_generate', 'weekly_review', 'adaptive_coaching', 'nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review', 'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance'];
 

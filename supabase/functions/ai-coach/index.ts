@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
-import { classifyIntent, CoachIntent } from "../_shared/ai/intent.ts";
+import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, checkProviderCapacity, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
+import { classifyIntentWithHistory, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
 import { resolveExerciseAlias, extractExerciseName } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
@@ -13,10 +13,14 @@ import {
   REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
   containsInternalLabels, sanitizeInternalLabels, LABEL_LEAK_RETRY,
   containsMemoryClaim, MEMORY_PERSISTENCE_FAILED_NOTE,
-  computeResponseType, computeActions, CoachAction,
+  computeResponseType, computeActions, CoachAction, CoachResponseType,
+  unsupportedProseNumbers, buildProseGroundingRetryInstruction, ungroundedNumberFallbackResponse,
 } from "../_shared/ai/coachSchema.ts";
 import { detectNutritionTargetAsk, describeNutritionTarget, StoredNutritionTargets } from "../_shared/ai/nutritionTargetLookup.ts";
-import { detectExplicitMemoryCommand } from "../_shared/ai/explicitMemory.ts";
+import {
+  detectExplicitMemoryCommand, detectExplicitMemoryRetrieval,
+  buildSaveAcknowledgment, buildDeleteAcknowledgment, buildRetrievalAnswer,
+} from "../_shared/ai/explicitMemory.ts";
 import { resolveKnownRequirements, findMissingRequired, mapProfileGoal } from "../_shared/ai/programRequirements.ts";
 import { recommendSplit } from "../_shared/ai/splitRecommender.ts";
 import { generateProgram, applyDraftEdit, GeneratedDay, ExerciseCandidate, MuscleGroup } from "../_shared/ai/programGenerator.ts";
@@ -351,6 +355,28 @@ function responseLeaksInternalLabels(r: CoachResponse): boolean {
   return containsInternalLabels(`${r.direct_answer} ${r.reason} ${r.follow_up_question || ''}`);
 }
 
+/**
+ * Text to run the GROUNDING check against: direct_answer, reason,
+ * recommended_action, and follow_up_question. This is a strict superset of
+ * what toReply() actually renders to the athlete (toReply only includes
+ * recommended_action when it's a plain string, treating an object as
+ * structured data rather than prose) — deliberately broader here, because a
+ * live-observed case showed the model can dump an entire fabricated workout
+ * plan (specific sets/reps numbers included) into an OBJECT-shaped
+ * recommended_action when ungrounded. That object never reaches the athlete
+ * as rendered text today, but it's still returned in `structured` and
+ * persisted — the grounding guard must not treat "the model put it in a
+ * structured field instead of prose" as a loophole. supporting_data is
+ * intentionally excluded here — it already has its own dedicated grounding
+ * guard (ungroundedNumbers) with its own retry, checked separately above.
+ */
+function textForGroundingCheck(r: CoachResponse): string {
+  const actionText = typeof r.recommended_action === 'string'
+    ? r.recommended_action
+    : r.recommended_action != null ? JSON.stringify(r.recommended_action) : '';
+  return `${r.direct_answer} ${r.reason} ${actionText} ${r.follow_up_question || ''}`;
+}
+
 /** Sanitizes every user-facing field — never touches recommended_action/supporting_data (structured, not prose). */
 function sanitizeResponseLabels(r: CoachResponse): CoachResponse {
   return {
@@ -405,6 +431,32 @@ async function runCoach(
     } else {
       // Strip ungrounded supporting_data rather than surface invented numbers.
       resp = { ...resp, supporting_data: null };
+    }
+  }
+
+  // Prose-level hallucination guard (pre-beta blocker): the guard above only
+  // ever protected supporting_data. Live-observed failure — asked for a
+  // bench-press progression plan with no logged history, answered with "I
+  // estimate your current 1RM at around 93-95kg" stated directly in prose,
+  // which the supporting_data guard never sees. Extends the same
+  // grounded-or-reject principle to direct_answer/reason/recommended_action/
+  // follow_up_question (see textForGroundingCheck — a strict superset of the
+  // rendered reply, and ALSO covers an object-shaped recommended_action —
+  // see its own comment for why that matters).
+  const userMessagesText = baseMessages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
+  const groundingSources = { userMessagesText, groundedSource };
+  if (unsupportedProseNumbers(textForGroundingCheck(resp), groundingSources).length > 0) {
+    const unsupported = unsupportedProseNumbers(textForGroundingCheck(resp), groundingSources);
+    const retry = await gen([...baseMessages, { role: 'user', content: buildProseGroundingRetryInstruction(unsupported) }]);
+    const reparsed = parseCoachResponse(retry.text);
+    const retryResp = reparsed.ok ? reparsed.value : resp;
+    if (unsupportedProseNumbers(textForGroundingCheck(retryResp), groundingSources).length === 0) {
+      resp = retryResp; result = retry;
+    } else {
+      // Never merely strip the number — a sentence with its number deleted
+      // ("your 1RM is around kg") can silently change the advice's meaning.
+      // Replace the whole response with an honest, deterministic answer.
+      resp = ungroundedNumberFallbackResponse(resp.missing_information);
     }
   }
 
@@ -584,6 +636,12 @@ serve(async (req) => {
   }
 
   try {
+    // Used only by the fully-deterministic memory short-circuit (Step 4)
+    // further down — a separate, narrower timing than `started`/`latencyMs`
+    // below, which specifically measures the LLM call and isn't reached at
+    // all on that path.
+    const requestStartedAt = Date.now();
+
     // 1. Auth ------------------------------------------------------------------
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -597,6 +655,20 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
       });
     }
+
+    // Provider-capacity diagnostic (pre-beta blocker) — unlike ?health=1
+    // above (unauthenticated, and only ever checks each provider's cheapest
+    // endpoint), this makes the SAME real chat() call actual traffic makes,
+    // for every configured provider, so a "redundancy is healthy" claim can
+    // be backed by evidence instead of a lighter, misleading proxy check.
+    // Auth-gated (any signed-in user) since it spends a real provider request
+    // per call and must not be triggerable anonymously.
+    if (req.method === 'GET' && reqUrl.searchParams.get('providerCapacity') === '1') {
+      return new Response(JSON.stringify(await checkProviderCapacity()), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+      });
+    }
+
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabaseServiceRole = createClient(
       Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey,
@@ -655,8 +727,18 @@ serve(async (req) => {
       });
     }
 
-    // 2. Deterministic, stateless intent classification (latest message only) ---
-    const intent = classifyIntent(latestUserMessage);
+    // 2. Deterministic intent classification. Primarily driven by the latest
+    // message alone, but falls back to the most recent PRIOR user message's
+    // intent when the current one is ambiguous (general_chat) and that prior
+    // intent was engine-backed — otherwise a short reply answering the
+    // coach's own clarifying question ("60kg for 5 reps") loses the thread
+    // and gets an ungrounded, LLM-improvised answer instead of running the
+    // real engine. See classifyIntentWithHistory()'s own comment for the
+    // live-observed incident this fixes.
+    const priorUserMessagesForIntent = (Array.isArray(messageHistory) ? messageHistory : [])
+      .filter((m: any) => m && m.role === 'user' && typeof m.content === 'string' && m.content.trim() !== latestUserMessage.trim())
+      .map((m: any) => m.content);
+    const intent = classifyIntentWithHistory(latestUserMessage, priorUserMessagesForIntent);
 
     // Safety keyword scan (log injury reports).
     const safetyTriggered = /\b(pain|hurt|injured|sprain|tweak|ache|injury)\b/i.test(latestUserMessage) || intent === 'medical_safety';
@@ -762,6 +844,71 @@ serve(async (req) => {
       let refreshedMemory = foldMemoryRows(memoryRows);
       if (memProfile) refreshedMemory = mergeCoachMemory(refreshedMemory, { goal: memProfile.goal, currentWeightKg: memProfile.weight_kg });
       memoryCard = buildCoachMemoryCard(refreshedMemory);
+    }
+
+    // 4d. Fully deterministic short-circuit (Step 4) — explicit save/delete
+    // commands and the narrow set of "read back a specific fact" retrieval
+    // questions ("What foods did I tell you I avoid?", "What equipment do I
+    // prefer?") never need a model call at all: detect -> validate ->
+    // athlete-scoped write/read/delete (already done above) -> read-back
+    // verification (already done above) -> deterministic TS response ->
+    // return immediately. This is what makes these operations work even when
+    // every provider is down (see the outage regression test), and it means
+    // zero provider latency/cost for the most common memory interactions.
+    //
+    // Deliberately unconditional on `intent` — a compound message combining
+    // an explicit memory command with an unrelated ask (e.g. "remember I
+    // don't like mushrooms, also build me a workout") will, like the
+    // detector's own trigger-capture already did before this change, only
+    // fulfil the memory part deterministically. That's an accepted, narrow
+    // trade-off, not a new limitation this introduces — see the final report.
+    const explicitRetrieval = detectExplicitMemoryRetrieval(latestUserMessage);
+    const isDeterministicSaveOrDelete = explicitMemory.detected && explicitMemory.confidence === 'high' && explicitMemoryOutcome !== null;
+    if (isDeterministicSaveOrDelete || explicitRetrieval.detected) {
+      let deterministicReply: string;
+      let responseType: CoachResponseType;
+
+      if (explicitMemoryOutcome === 'saved') {
+        deterministicReply = buildSaveAcknowledgment(explicitMemory.memoryValue!);
+        responseType = 'memory_confirmation';
+      } else if (explicitMemoryOutcome === 'deleted') {
+        deterministicReply = buildDeleteAcknowledgment(explicitMemory.memoryValue!, explicitMemory.category);
+        responseType = 'memory_confirmation';
+      } else if (explicitMemoryOutcome === 'save_failed' || explicitMemoryOutcome === 'delete_failed') {
+        // Honest failure — never claims success just because the athlete asked nicely.
+        deterministicReply = MEMORY_PERSISTENCE_FAILED_NOTE;
+        responseType = 'text';
+      } else {
+        // Retrieval — read the CURRENT (possibly just-refreshed-above) memory.
+        const currentMemory = foldMemoryRows(memoryRows);
+        const factList = explicitRetrieval.retrievalType === 'disliked_foods' ? currentMemory.dislikedFoods
+          : explicitRetrieval.retrievalType === 'liked_foods' ? currentMemory.likedFoods
+          : currentMemory.equipmentPreferences;
+        deterministicReply = buildRetrievalAnswer(explicitRetrieval.retrievalType!, factList || []);
+        responseType = 'text';
+      }
+
+      const detActions: CoachAction[] = computeActions(responseType);
+      await supabaseServiceRole.from('ai_request_logs').insert({
+        athlete_id: user.id, subscription_tier: subscriptionTier, success: true,
+        coach_type: intent, provider: 'deterministic', model: 'none',
+        input_tokens: 0, output_tokens: 0, cost_usd: 0, latency_ms: Date.now() - requestStartedAt,
+        message_length: latestUserMessage.length, conversation_id: conversationId || null,
+        engine: 'explicit_memory', fallback_triggered: false, response_type: responseType,
+        action_types: detActions.map((a) => a.type), fallback_reason: null,
+      }).then(() => {}).catch(() => {});
+
+      return new Response(JSON.stringify({
+        reply: deterministicReply, response: deterministicReply,
+        actions: detActions, action_types: detActions.map((a) => a.type),
+        intent, response_type: responseType,
+        structured: {
+          direct_answer: deterministicReply,
+          reason: 'Deterministic memory operation — no model call was needed.',
+          recommended_action: null, supporting_data: null, missing_information: [],
+          safety_flag: false, follow_up_question: null,
+        },
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
 
     // 3. Intent-scoped context loading (STRICT isolation) -----------------------
