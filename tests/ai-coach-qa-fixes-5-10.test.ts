@@ -111,6 +111,244 @@ describe('Fix 5 — internal-label leak guard (mechanism)', () => {
     expect(containsInternalLabels('Perform the Barbell Bench Press for 3 sets of 8-12 reps.')).toBe(false);
     expect(containsInternalLabels('Great job hitting your protein goal this week!')).toBe(false);
   });
+
+  // Regression for a real incident found during live mobile QA: the model
+  // never said the literal words "ENGINE RESULT" etc, but narrated its own
+  // backend in third person instead — quoting the raw context string back
+  // with an attribution wrapper ("The system indicates 'No completed sets
+  // logged...'") rather than just stating the fact as a coach would. Same
+  // failure mode (revealing internal mechanics), different literal words.
+  describe('"the system" narration variant (live-observed, not a literal section name)', () => {
+    const liveObservedSamples = [
+      "The system indicates 'No completed sets logged for this lift yet' for the Barbell Squat.",
+      'However, the system still requires additional inputs to generate a full program draft, such as training frequency and available equipment.',
+      'The system requires more information before I can build your plan.',
+    ];
+    for (const text of liveObservedSamples) {
+      it(`detects the leak: ${JSON.stringify(text.slice(0, 50))}...`, () => {
+        expect(containsInternalLabels(text)).toBe(true);
+      });
+    }
+
+    it('sanitizer produces natural first-person phrasing without touching factual content', () => {
+      const text = "The system indicates 'No completed sets logged' for the Barbell Squat. The system still requires your training frequency.";
+      const cleaned = sanitizeInternalLabels(text);
+      expect(containsInternalLabels(cleaned)).toBe(false);
+      expect(cleaned).toContain('Barbell Squat'); // factual content preserved
+      expect(cleaned).toContain('training frequency');
+    });
+
+    it('does not flag legitimate anatomical/physiological uses of "system"', () => {
+      expect(containsInternalLabels('Your nervous system needs time to recover between heavy sessions.')).toBe(false);
+      expect(containsInternalLabels('This exercise also taxes your energy systems significantly.')).toBe(false);
+    });
+  });
+
+  // Regression for a real, more severe incident found during live mobile QA:
+  // the model didn't say a literal label OR "the system" — it narrated its
+  // OWN data-validation process, by name, straight from the engine result's
+  // JSON shape: quoting field names like 'validationSummary' and 'isValid',
+  // and phrases like "the data available to me provided..." (itself the
+  // sanitizer's own replacement for a PRIOR "engine result" leak, showing the
+  // old guard fixed the label but left the surrounding technical narration
+  // completely intact). This was delivered to the athlete as an entire extra
+  // paragraph appended after an otherwise normal, natural reply.
+  describe('code-identifier / data-structure narration variant (live-observed, more severe)', () => {
+    const liveLeakParagraph =
+      "The user requested a vegetarian meal plan for muscle gain. The data available to me provided specific daily calorie and macro targets for a lean bulk phase (2744 kcal training, 2470 kcal rest) and a recommended protein intake (143g). " +
+      "However, the 'meals' array within the data available to me was incomplete (only 760 kcal total) and the 'validationSummary' explicitly stated 'isValid: false' due to significant calorie and protein deficits. " +
+      "Therefore, I could not present the 'meals' array as a valid plan.";
+
+    it('detects the full live-observed leak paragraph', () => {
+      expect(containsInternalLabels(liveLeakParagraph)).toBe(true);
+    });
+
+    it('detects a bare camelCase identifier alone (isValid, validationSummary)', () => {
+      expect(containsInternalLabels('The isValid check failed for this plan.')).toBe(true);
+      expect(containsInternalLabels("According to validationSummary, we're short on protein.")).toBe(true);
+    });
+
+    it('detects a bare snake_case identifier alone', () => {
+      expect(containsInternalLabels('The meal_plan field was empty.')).toBe(true);
+    });
+
+    it('detects a quoted field name followed by "array"/"object"', () => {
+      expect(containsInternalLabels("the 'meals' array was incomplete")).toBe(true);
+      expect(containsInternalLabels("the 'targets' object contains your macros")).toBe(true);
+    });
+
+    it('does NOT flag ordinary coaching prose with capitalised proper nouns or acronyms', () => {
+      expect(containsInternalLabels('Try the PPL split with RPE-based autoregulation.')).toBe(false);
+      expect(containsInternalLabels('Your 1RM on the Barbell Squat looks solid.')).toBe(false);
+      expect(containsInternalLabels('Focus on VO2max work twice a week.')).toBe(false);
+    });
+
+    it('sanitizer drops the whole technical sentence rather than leaving an awkward word-substituted fragment', () => {
+      const cleaned = sanitizeInternalLabels(liveLeakParagraph);
+      expect(containsInternalLabels(cleaned)).toBe(false);
+      // The sentences that were pure technical narration are gone entirely...
+      expect(cleaned).not.toContain('validationSummary');
+      expect(cleaned).not.toContain('isValid');
+      // ...but real, useful factual content from a clean sentence survives.
+      expect(cleaned).toContain('2744');
+      expect(cleaned).toContain('143g');
+    });
+  });
+
+  // Runtime-hardening pass (2026-08-01), Priority 3: adversarial re-test against
+  // the full pattern list the user specified, plus a live-reproduced gap the
+  // original 8-verb "the system [verb]" list missed entirely.
+  describe('adversarial hardening pass — broadened "the system" shape + explicit named-identifier coverage', () => {
+    // Live-observed TODAY: with intent continuity broken (separately fixed),
+    // the model fell back to ungrounded narration and produced this exact
+    // sentence. "generate" was never on the original indicates/requires/
+    // shows/needs/tells/says/flagged/logged/noted list, so the old pattern
+    // missed it completely.
+    it('detects the live-observed "the system to VERB" infinitive construction', () => {
+      expect(containsInternalLabels(
+        "I'm ready to send this over to the system to generate your personalized draft workout plan."
+      )).toBe(true);
+    });
+
+    // Live-observed (second retest, same day): once the intent-continuity fix
+    // let the REAL engine run, the model still leaked "the system" in a THIRD
+    // distinct grammatical shape — a passive-voice aside ("as proposed by the
+    // system") immediately followed by a plain copula clause, no process verb
+    // at all.
+    it('detects the live-observed "the system" copula variant ("as proposed by the system, is...")', () => {
+      expect(containsInternalLabels(
+        'The Upper/Lower split, as proposed by the system, is a more effective and balanced approach for muscle building.'
+      )).toBe(true);
+    });
+
+    const copulaSamples = [
+      'The system is ready to build your plan now.',
+      'The system was updated with your new preferences.',
+      'The system are handling the rest automatically.', // ungrammatical but still a leak shape
+    ];
+    for (const text of copulaSamples) {
+      it(`detects the copula variant: ${JSON.stringify(text.slice(0, 40))}...`, () => {
+        expect(containsInternalLabels(text)).toBe(true);
+      });
+    }
+
+    // Live-observed (third retest, same day): a FOURTH distinct grammatical
+    // shape — simple past-tense decision verbs, with no auxiliary at all.
+    it('detects the live-observed "the system determined..." past-tense decision variant', () => {
+      expect(containsInternalLabels(
+        'The system determined that a Push/Pull/Legs split doesn\'t distribute effectively across exactly 4 training days to optimize for muscle gain and recovery.'
+      )).toBe(true);
+    });
+
+    const decisionVerbSamples = [
+      'The system decided that an Upper/Lower split fits better.',
+      'The system concluded that PPL was not ideal here.',
+      'The system recommended Upper/Lower for your schedule.',
+      'The system suggested a different split entirely.',
+      'The system selected Upper/Lower automatically.',
+      'The system chose Upper/Lower for you.',
+    ];
+    for (const text of decisionVerbSamples) {
+      it(`detects the decision-verb variant: ${JSON.stringify(text.slice(0, 40))}...`, () => {
+        expect(containsInternalLabels(text)).toBe(true);
+      });
+    }
+
+    it('an unrelated ordinary past-tense verb near "the system" does not trigger (narrower than a generic -ed suffix match)', () => {
+      // "used" is an ordinary past-tense verb with nothing to do with any
+      // decision-making — confirms the fix stayed narrow rather than
+      // matching any word ending in "-ed".
+      expect(containsInternalLabels(
+        'The system you used for your last three programs worked well, so let\'s keep a similar structure.'
+      )).toBe(false);
+    });
+
+    const openEndedVerbSamples = [
+      'The system generates your program once every field is confirmed.',
+      'The system creates a draft based on what you told me.',
+      'The system processes your answer and updates the plan.',
+      'Let me pass this to the system to calculate your macros.',
+    ];
+    for (const text of openEndedVerbSamples) {
+      it(`detects an open-ended "the system" verb variant: ${JSON.stringify(text.slice(0, 40))}...`, () => {
+        expect(containsInternalLabels(text)).toBe(true);
+      });
+    }
+
+    // Explicitly named in the adversarial spec — not literal section labels,
+    // and not yet each individually asserted by name (only isValid/
+    // validationSummary and a generic snake_case field were before).
+    it('detects "engineResult" and "missingFields" by name (camelCase)', () => {
+      expect(containsInternalLabels('The engineResult was empty for this request.')).toBe(true);
+      expect(containsInternalLabels('missingFields still includes your equipment.')).toBe(true);
+    });
+
+    it('detects "response_type" and "memory_updates" by name (snake_case)', () => {
+      expect(containsInternalLabels("I set the response_type to draft for this reply.")).toBe(true);
+      expect(containsInternalLabels('Your memory_updates were applied successfully.')).toBe(true);
+    });
+
+    // Explicitly named in the adversarial spec as free-standing phrases, not
+    // tied to any specific verb or identifier shape.
+    it('detects "the data available to me" even when "engine result" was never said', () => {
+      expect(containsInternalLabels('Based on the data available to me, you should train four days a week.')).toBe(true);
+    });
+
+    it('detects "based on the supplied context block"', () => {
+      expect(containsInternalLabels('Based on the supplied context block, your protein target is 180g.')).toBe(true);
+    });
+
+    it('the broadened pattern still respects a bounded gap — a much later "to" does not retroactively match', () => {
+      // A long, unrelated clause between "the system" and an incidental later
+      // "to" must NOT be enough distance for the pattern to bridge — otherwise
+      // "to" (needed to catch the live infinitive case) would match almost
+      // any paragraph that happens to contain the words "the system" anywhere
+      // followed eventually by the word "to".
+      const text =
+        'The system you used for your last three programs worked well, all things considered, so let\'s stick with a similar structure moving forward, but built around your new schedule, to keep momentum going.';
+      expect(containsInternalLabels(text)).toBe(false);
+    });
+
+    it('sanitizer drops the offending sentence for a verb the word-replacement list has no clean swap for', () => {
+      const text =
+        "Okay, fantastic! I've got everything I need to build your program. " +
+        "I'm ready to send this over to the system to generate your personalized draft workout plan. " +
+        "Once it's ready, I'll present it to you for review.";
+      const cleaned = sanitizeInternalLabels(text);
+      expect(containsInternalLabels(cleaned)).toBe(false);
+      expect(cleaned).not.toContain('the system');
+      // Surrounding, legitimate sentences survive untouched.
+      expect(cleaned).toContain("I've got everything I need to build your program.");
+      expect(cleaned).toContain("Once it's ready, I'll present it to you for review.");
+    });
+
+    it('still does not flag ordinary coaching language, acronyms, or anatomical "system" uses', () => {
+      expect(containsInternalLabels('Try the PPL split with RPE-based autoregulation.')).toBe(false);
+      expect(containsInternalLabels('Your 1RM on the Barbell Squat looks solid.')).toBe(false);
+      expect(containsInternalLabels('Focus on VO2max work twice a week.')).toBe(false);
+      expect(containsInternalLabels('Your nervous system needs time to recover between heavy sessions.')).toBe(false);
+      expect(containsInternalLabels('This exercise also taxes your energy systems significantly.')).toBe(false);
+    });
+
+    // Regression guard for a self-collision the new "the data available to
+    // me" phrase-detection could otherwise cause: that exact phrase used to
+    // be the sanitizer's OWN word-swap for "engine result" leaks. If the
+    // swap and the new detection phrase were the same string, sanitizing a
+    // sentence would immediately re-flag its own output and drop the whole
+    // sentence — silently destroying grounded numbers a retry-failure should
+    // instead preserve. Covers the exact live "meal plan" leak shape, where
+    // "the data available to me" sits in the same sentence as real targets.
+    it('sanitizing "the data available to me" preserves grounded numbers instead of dropping the sentence', () => {
+      const text =
+        "The data available to me provided specific daily calorie and macro targets for a lean bulk phase " +
+        "(2744 kcal training, 2470 kcal rest) and a recommended protein intake (143g).";
+      const cleaned = sanitizeInternalLabels(text);
+      expect(containsInternalLabels(cleaned)).toBe(false);
+      expect(cleaned).not.toMatch(/\bthe data available to me\b/i);
+      expect(cleaned).toContain('2744');
+      expect(cleaned).toContain('143g');
+    });
+  });
 });
 
 describe('Fix 6 — memory category whitelist, aliases, and honesty guard (mechanism)', () => {

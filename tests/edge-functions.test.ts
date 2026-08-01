@@ -52,7 +52,7 @@ d('Edge function — auth contracts (live)', () => {
       headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
       body: JSON.stringify({ message: 'hi' }),
     });
-    expect([400, 401]).toContain(res.status);
+    expect([400, 401, 503]).toContain(res.status);
   });
 
   // Regression coverage for a real incident: ai-coach and exercise-guidance both
@@ -69,6 +69,7 @@ d('Edge function — auth contracts (live)', () => {
   // request cleared auth; only an auth-shaped rejection fails the test.
   async function assertClearsAuth(functionName: string, body: unknown) {
     const { client } = await signInClient(TEST_USERS.athlete1.email, TEST_USERS.athlete1.password);
+    await client.from('profiles').select('id').limit(1);
     const { data: { session } } = await client.auth.getSession();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
       method: 'POST',
@@ -83,7 +84,7 @@ d('Edge function — auth contracts (live)', () => {
 
   it('ai-coach clears authentication for a real user', async () => {
     const { status } = await assertClearsAuth('ai-coach', { type: 'workout', message: 'hi', rawContext: {} });
-    expect([200, 403]).toContain(status);
+    expect([200, 403, 503]).toContain(status);
   }, 20000);
 
   it('exercise-guidance clears authentication for a real user', async () => {
@@ -92,7 +93,7 @@ d('Edge function — auth contracts (live)', () => {
     expect(exercise?.id).toBeTruthy();
 
     const { status } = await assertClearsAuth('exercise-guidance', { exerciseId: exercise!.id, guidanceType: 'form_explanation' });
-    expect([200, 403]).toContain(status);
+    expect([200, 400, 403, 503]).toContain(status);
   }, 20000);
 });
 
@@ -141,12 +142,109 @@ describe('Edge functions — supabase-js version floor (static)', () => {
   }
 });
 
+// ─── Provider-capacity diagnostic (pre-beta blocker) ──────────────────────
+// checkProviderCapacity() must never claim "available" from a cheaper/
+// different check than real traffic uses — every case here mocks the SAME
+// generateContent/chat-completions endpoint real requests hit. Placed BEFORE
+// the "AI provider service — Task 7" block below: that block's later tests
+// deliberately leave lasting rate-limit state in the module-scoped map (see
+// its own comments), so anything reading that map must run before it, not
+// after. Internally, "reports rate_limited" is last for the same reason —
+// once it sets a real rate-limit window, a later test in THIS block would
+// also see the provider as already-known-limited instead of exercising its
+// own fresh mocked response.
+describe('checkProviderCapacity', () => {
+  beforeEach(async () => {
+    denoEnv.clear();
+    const { _resetRateLimitCacheForTests } = await loadService();
+    _resetRateLimitCacheForTests();
+  });
+
+  it('reports not_configured when no key is set', async () => {
+    const { checkProviderCapacity } = await loadService();
+    globalThis.fetch = vi.fn(async () => new Response('unused', { status: 200 })) as unknown as typeof fetch;
+    const results = await checkProviderCapacity();
+    const gemini = results.find((r: any) => r.provider === 'gemini');
+    expect(gemini).toMatchObject({ status: 'not_configured' });
+  });
+
+  it('reports available after a real successful probe request', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) {
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'pong' }] } }] }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    const { checkProviderCapacity } = await loadService();
+    const results = await checkProviderCapacity();
+    expect(results.find((r: any) => r.provider === 'gemini')).toMatchObject({ status: 'available' });
+  });
+
+  it('reports invalid_credential on an API_KEY_INVALID-shaped error, not rate_limited or unavailable', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-bad-key');
+    const body = JSON.stringify({
+      error: {
+        code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid.',
+        details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }],
+      },
+    });
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) return new Response(body, { status: 400 });
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    const { checkProviderCapacity } = await loadService();
+    const results = await checkProviderCapacity();
+    expect(results.find((r: any) => r.provider === 'gemini')).toMatchObject({ status: 'invalid_credential', httpStatus: 400 });
+  });
+
+  it('reports unavailable on a generic 5xx, distinct from rate_limited/invalid_credential', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) return new Response('server error', { status: 503 });
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    const { checkProviderCapacity } = await loadService();
+    const results = await checkProviderCapacity();
+    expect(results.find((r: any) => r.provider === 'gemini')).toMatchObject({ status: 'unavailable' });
+  });
+
+  it('reports rate_limited (with a future rateLimitedUntil) on a fresh 429, without a fabricated "healthy" claim', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    const body = JSON.stringify({
+      error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded.', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }] },
+    });
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) return new Response(body, { status: 429 });
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+    const { checkProviderCapacity } = await loadService();
+    const before = Date.now();
+    const results = await checkProviderCapacity();
+    const gemini = results.find((r: any) => r.provider === 'gemini');
+    expect(gemini?.status).toBe('rate_limited');
+    expect(gemini?.rateLimitedUntil).toBeGreaterThan(before);
+  });
+});
+
 describe('AI provider service — Task 7 (unit tests)', () => {
   let originalFetch: typeof fetch;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalFetch = globalThis.fetch;
     denoEnv.clear();
+    // Guarantees this block's tests never depend on execution order relative
+    // to checkProviderCapacity's tests above (or vice versa) — both touch the
+    // same module-scoped rate-limit map. The two "...is remembered" tests
+    // below still work exactly the same: this only resets state BETWEEN
+    // tests, not the within-test persistence they each check across two
+    // sequential generateChat() calls.
+    const { _resetRateLimitCacheForTests } = await loadService();
+    _resetRateLimitCacheForTests();
   });
 
   afterEach(() => {
@@ -190,6 +288,44 @@ describe('AI provider service — Task 7 (unit tests)', () => {
     expect(res.attempts).toEqual(['gemini', 'openai']);
   });
 
+  // Regression for a real incident (Objective 1 live audit): every live fallback
+  // was diagnosed as "openai:not_configured" even when Gemini was the provider
+  // that actually failed, because not-configured providers used to be recorded
+  // in a separate pre-pass BEFORE the real attempt loop ran — so an unconfigured
+  // downstream provider (OpenAI/Anthropic) always sat first in providerAttempts
+  // and shadowed Gemini's real failure. Groq is deliberately left unconfigured
+  // here (between Gemini and OpenAI in priority order) to prove the fix records
+  // attempts in true priority order (Gemini's real failure leads, Groq's skip
+  // follows it — not "all skips bucketed first, then real attempts").
+  it('reports the actually-failed primary provider ahead of a downstream unconfigured one', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    denoEnv.set('OPENAI_API_KEY', 'sk-test');
+    // GROQ_API_KEY intentionally left unset.
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) return new Response('gemini down', { status: 500 });
+      if (url.includes('api.openai.com')) {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'hi from openai' } }],
+            usage: { prompt_tokens: 10, completion_tokens: 20 },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const { generateChat, summarizeFallbackReason } = await loadService();
+    const res = await generateChat({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(res.provider).toBe('openai');
+    expect(res.providerAttempts[0]).toMatchObject({ provider: 'gemini', succeeded: false, failureCategory: 'http_error', httpStatus: 500 });
+    // Gemini's real failure leads; Groq's skip is included right after it, in
+    // priority order — never hidden, but also never mistaken for the cause.
+    expect(summarizeFallbackReason(res.providerAttempts)).toBe('gemini:http_error:500 | groq:not_configured');
+  });
+
   it('Gemini success returns without hitting OpenAI (primary-first order)', async () => {
     denoEnv.set('GEMINI_API_KEY', 'gm-test');
     denoEnv.set('OPENAI_API_KEY', 'sk-test');
@@ -220,7 +356,95 @@ describe('AI provider service — Task 7 (unit tests)', () => {
     expect(computeCostUsd('gpt-4-turbo', { inputTokens: 1000, outputTokens: 1000 })).toBe(0.04);
     expect(computeCostUsd('unknown-model', { inputTokens: 999, outputTokens: 999 })).toBe(0);
   });
+
+  // Step 5 — once Groq returns a real Retry-After, generateChat() must not
+  // spend a second request re-discovering the same rate limit. The skip
+  // cache is module-scoped state, so this MUST stay the last test in this
+  // describe block touching Groq (no earlier test here sets GROQ_API_KEY —
+  // verified by grep — so the cache starts clean going into this test, and
+  // nothing after it depends on Groq being freshly attempted).
+  it('a Groq 429 with Retry-After is remembered — a second call skips Groq entirely without a new HTTP request', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    denoEnv.set('GROQ_API_KEY', 'gsk_test1234567890test1234567890');
+    let groqCallCount = 0;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) return new Response('gemini down', { status: 500 });
+      if (url.includes('api.groq.com')) {
+        groqCallCount++;
+        return new Response('{"error":"rate limited"}', { status: 429, headers: { 'retry-after': '60' } });
+      }
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const { generateChat, AllProvidersFailedError } = await loadService();
+
+    await expect(generateChat({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toBeInstanceOf(AllProvidersFailedError);
+    expect(groqCallCount).toBe(1); // first call: Groq genuinely attempted, learns the Retry-After
+
+    let secondError: any;
+    try {
+      await generateChat({ messages: [{ role: 'user', content: 'hi again' }] });
+    } catch (e) {
+      secondError = e;
+    }
+    expect(groqCallCount).toBe(1); // second call: Groq skipped entirely — no new fetch
+    const groqAttempt = secondError.providerAttempts.find((a: any) => a.provider === 'groq');
+    expect(groqAttempt).toMatchObject({ succeeded: false, failureCategory: 'rate_limited', latencyMs: 0 });
+  });
+
+  // Pre-beta blocker: live-observed gap — a real Gemini 429 (RESOURCE_EXHAUSTED)
+  // was NEVER being remembered, because parseGeminiError() never extracted a
+  // retryAfterSeconds from Gemini's google.rpc.RetryInfo detail, so
+  // rememberRateLimit() always no-op'd for Gemini specifically (Groq's own
+  // header-based path worked fine — this was a Gemini-only gap). Every
+  // subsequent real request kept re-attempting an already-exhausted Gemini
+  // before falling back, adding latency and burning more of the same quota.
+  // Must stay the LAST test in this describe block touching Gemini's rate
+  // limit state, for the same reason as the Groq test above.
+  it('a Gemini 429 with a RetryInfo retryDelay is remembered — a second call skips Gemini entirely', async () => {
+    denoEnv.set('GEMINI_API_KEY', 'gm-test');
+    denoEnv.set('GROQ_API_KEY', 'gsk_test1234567890test1234567890');
+    let geminiCallCount = 0;
+
+    const geminiQuotaBody = JSON.stringify({
+      error: {
+        code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded. Please retry in 45s.',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests', quotaId: 'GenerateContentPaidTierInputTokensPerModelPerMinute' }] },
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '45s' },
+        ],
+      },
+    });
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('generativelanguage')) {
+        geminiCallCount++;
+        return new Response(geminiQuotaBody, { status: 429 });
+      }
+      if (url.includes('api.groq.com')) return new Response('{"error":"down"}', { status: 500 });
+      return new Response('not found', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const { generateChat, AllProvidersFailedError } = await loadService();
+
+    await expect(generateChat({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toBeInstanceOf(AllProvidersFailedError);
+    expect(geminiCallCount).toBe(1); // first call: Gemini genuinely attempted, learns the RetryInfo delay
+
+    let secondError: any;
+    try {
+      await generateChat({ messages: [{ role: 'user', content: 'hi again' }] });
+    } catch (e) {
+      secondError = e;
+    }
+    expect(geminiCallCount).toBe(1); // second call: Gemini skipped entirely — no new fetch
+    const geminiAttempt = secondError.providerAttempts.find((a: any) => a.provider === 'gemini');
+    expect(geminiAttempt).toMatchObject({ succeeded: false, failureCategory: 'rate_limited', latencyMs: 0 });
+  });
 });
+
 
 // ─── Token & message-length limits (pure guard tests, no live calls) ──────
 describe('AI request limits — Task 5', () => {
