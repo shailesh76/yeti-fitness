@@ -146,7 +146,7 @@ export function detectWorkoutPlanEdit(message: string): boolean {
 
 // Exercise/set logging: "I just did 3x8 at 80kg", "log my squat", "log that set"
 const EXERCISE_LOGGING_PATTERN =
-  /\b(log (that|this|my|a)?\s*(set|rep|lift|exercise|workout|session)|i (just|did|completed|finished)\s+(\d+\s*x\s*\d+|\d+\s+sets?|\d+\s+reps?)|just (did|finished|completed)|mark (it|that|this)\s+as\s+(done|complete)|record (my|this|that)\s+(set|rep|workout)|done with (my|today'?s)?\s+(sets?|workout))\b/i;
+  /\b(log\s+.*(sets?|reps?|lifts?|exercises?|workouts?|sessions?)|i (just|did|completed|finished)\s+(\d+\s*x\s*\d+|\d+\s+sets?|\d+\s+reps?)|just (did|finished|completed)|mark (it|that|this)\s+as\s+(done|complete)|record\s+.*(sets?|reps?|lifts?|exercises?|workouts?|sessions?)|done with (my|today'?s)?\s+(sets?|workout))\b/i;
 
 // Goal adjustment: "change my goal", "I want to focus on strength now", "switch to fat loss"
 const GOAL_ADJUSTMENT_PATTERN =
@@ -171,6 +171,8 @@ const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
   { intent: 'weekly_review', patterns: [WEEKLY_REVIEW_PATTERN] },
   { intent: 'adaptive_coaching', patterns: [ADAPTIVE_COACHING_PATTERN] },
   { intent: 'workout_program_generate', patterns: [WORKOUT_PROGRAM_GENERATE_PATTERN] },
+  // app_navigation checked before rest_pacing so "where do I find the rest timer?" gets navigation help
+  { intent: 'app_navigation', patterns: [APP_NAVIGATION_PATTERN] },
   // exercise_logging checked before exercise_substitution so "log that set" doesn't
   // accidentally hit the substitution rule's "can't do" branch.
   { intent: 'exercise_logging', patterns: [EXERCISE_LOGGING_PATTERN] },
@@ -183,7 +185,7 @@ const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
   },
   { intent: 'goal_adjustment', patterns: [GOAL_ADJUSTMENT_PATTERN] },
   { intent: 'schedule_adjustment', patterns: [SCHEDULE_ADJUSTMENT_PATTERN] },
-  { intent: 'app_navigation', patterns: [APP_NAVIGATION_PATTERN] },
+
   { intent: 'nutrition_status', patterns: [/\b((how (much|many)|what'?s|whats) .*(protein|carb|calorie|kcal|fat|macro).* (left|remaining|today)|remaining (protein|carbs?|calories|macros)|left to eat|hit my (protein|macros|calories))\b/] },
   { intent: 'meal_suggestion', patterns: [/\b(what should i eat|meal (idea|suggestion|option)|recipe|something to eat|snack idea|(vegetarian|vegan|high[- ]protein|low[- ]carb|keto) (meal|option|snack|food)|foods? (with|high in))\b/] },
   { intent: 'nutrition_advice', patterns: [/\b(bulk(?:ing)?|cut(?:ting)?|maintenance calories|diet|nutrition|how (much|many) (protein|calories) (should|do) i|macro split|deficit|surplus)\b/] },

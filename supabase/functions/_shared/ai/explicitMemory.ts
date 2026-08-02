@@ -103,10 +103,124 @@ export function detectExplicitMemoryCommand(message: string): ExplicitMemoryResu
       operation,
       category,
       memoryKey,
-      memoryValue: operation === 'upsert' ? core : undefined,
+      // Populated for BOTH operations — a delete needs the fact's own text
+      // too (for a deterministic "mushrooms are no longer saved" reply, not
+      // just the key to delete by). Previously undefined for delete since
+      // nothing read it yet; still means "the fact this command is about",
+      // not "the value being written".
+      memoryValue: core,
       confidence: isHedged ? 'low' : 'high',
       requiresClarification: isHedged || undefined,
     };
   }
   return NOT_DETECTED;
+}
+
+// ── Deterministic retrieval questions ───────────────────────────────────────
+// A NARROW, separate detector from the write-command one above: recognises
+// only direct questions asking to read back a specific fact category already
+// covered by explicit memory (disliked/liked foods, equipment). Deliberately
+// conservative and anchored on "what ... do/did I" — ordinary requests
+// ("make me a meal plan") never start this way, so this cannot hijack a real
+// nutrition/workout ask into a memory-only answer.
+
+export type ExplicitMemoryRetrievalType = 'disliked_foods' | 'liked_foods' | 'equipment_preferences';
+
+export interface ExplicitMemoryRetrievalResult {
+  detected: boolean;
+  retrievalType?: ExplicitMemoryRetrievalType;
+}
+
+// Order matters, same adjacency-strictness lesson as the write-command
+// triggers above: "What foods don't I like?" has a negation ("don't")
+// separated from "like" by "I" — a naive .{0,N}\b(like)\b gap-match for
+// liked_foods would find "like" regardless of the negation sitting right
+// before it and misclassify a DISLIKE question as a LIKE one. The negated
+// pattern is checked BEFORE the plain "like/prefer/enjoy" pattern so it wins
+// first on exactly this phrasing.
+const RETRIEVAL_PATTERNS: { pattern: RegExp; type: ExplicitMemoryRetrievalType }[] = [
+  { pattern: /\bwhat (?:foods?|do i eat).{0,40}\b(avoid|dislikes?)\b/i, type: 'disliked_foods' },
+  { pattern: /\bwhat (?:foods?).{0,40}\b(?:don'?t|doesn'?t|can'?t|won'?t|not)\b.{0,15}\b(?:like|eat)\b/i, type: 'disliked_foods' },
+  { pattern: /\bwhat (?:foods?).{0,20}\b(like|prefer|enjoy)\b/i, type: 'liked_foods' },
+  { pattern: /\bwhat equipment.{0,20}\b(prefer|have|like|use)\b/i, type: 'equipment_preferences' },
+];
+
+const NOT_DETECTED_RETRIEVAL: ExplicitMemoryRetrievalResult = { detected: false };
+
+export function detectExplicitMemoryRetrieval(message: string): ExplicitMemoryRetrievalResult {
+  const raw = message || '';
+  for (const { pattern, type } of RETRIEVAL_PATTERNS) {
+    if (pattern.test(raw)) return { detected: true, retrievalType: type };
+  }
+  return NOT_DETECTED_RETRIEVAL;
+}
+
+// ── Deterministic response text (no LLM involved) ───────────────────────────
+// Renders plain, natural-sounding sentences directly from a stored fact or a
+// folded memory list — used only for the narrow set of operations above, so
+// a save/delete/retrieval turn never needs a provider call at all.
+
+/** "I don't like mushrooms" -> "mushrooms"; falls back to the full fact if no lead-in phrase matches. */
+export function extractFactSubject(fact: string): string {
+  const stripped = fact
+    .replace(/^i\s+(?:don'?t like|dislikes?|hate|am allergic to|can'?t eat|no longer eat|prefer|love|enjoy|like)\s+/i, '')
+    .trim();
+  return stripped || fact;
+}
+
+/** "I don't like mushrooms" -> "you don't like mushrooms"; "My usual split..." -> "Your usual split...". Best-effort — falls back to the original text for phrasing it doesn't recognise. */
+export function toSecondPerson(fact: string): string {
+  let out = fact;
+  if (/^i\b/i.test(out)) out = out.replace(/^i\b/i, 'you').replace(/\bam\b/i, 'are');
+  out = out.replace(/\bmy\b/gi, 'your');
+  return out;
+}
+
+function joinNaturally(items: string[]): string {
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+function article(phrase: string): string {
+  return /^[aeiou]/i.test(phrase) ? 'an' : 'a';
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  'nutrition preferences': 'disliked food',
+  'equipment preferences': 'equipment preference',
+  injuries: 'injury',
+  'workout style': 'preference',
+  'training goals': 'preference',
+  preferences: 'preference',
+};
+
+/** "Remembered — you don't like mushrooms." */
+export function buildSaveAcknowledgment(fact: string): string {
+  return `Remembered — ${toSecondPerson(fact)}.`;
+}
+
+/** "Removed — mushrooms are no longer saved as a disliked food." */
+export function buildDeleteAcknowledgment(fact: string, category?: string): string {
+  const subject = extractFactSubject(fact);
+  const categoryLabel = (category && CATEGORY_LABELS[category]) || 'preference';
+  const verb = subject.trim().toLowerCase().endsWith('s') ? 'are' : 'is';
+  return `Removed — ${subject} ${verb} no longer saved as ${article(categoryLabel)} ${categoryLabel}.`;
+}
+
+/**
+ * "You've told me you avoid mushrooms and pickles." / a durable, honest
+ * fallback when nothing is stored yet — never fabricates a fact.
+ */
+export function buildRetrievalAnswer(type: ExplicitMemoryRetrievalType, facts: string[]): string {
+  const subjects = [...new Set(facts.map(extractFactSubject))];
+  if (!subjects.length) {
+    if (type === 'disliked_foods') return "You haven't told me about any foods to avoid yet.";
+    if (type === 'liked_foods') return "You haven't told me about any foods you like yet.";
+    return "You haven't told me about any equipment preferences yet.";
+  }
+  const list = joinNaturally(subjects);
+  if (type === 'disliked_foods') return `You've told me you avoid ${list}.`;
+  if (type === 'liked_foods') return `You've told me you like ${list}.`;
+  return `You prefer ${list}.`;
 }

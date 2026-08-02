@@ -3,11 +3,13 @@
 import { TokenUsage } from "./types.ts";
 
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "gpt-4-turbo":      { input: 10.0,  output: 30.0 },
-  "gpt-4o":           { input: 2.5,   output: 10.0 },
-  "gemini-2.5-flash": { input: 0.30,  output: 2.50 },
-  "gemini-1.5-flash": { input: 0.075, output: 0.30 },
-  "claude-sonnet-5":  { input: 3.0,   output: 15.0 },
+  "gpt-4-turbo":             { input: 10.0,  output: 30.0 },
+  "gpt-4o":                  { input: 2.5,   output: 10.0 },
+  "gemini-2.5-flash":        { input: 0.30,  output: 2.50 },
+  "gemini-1.5-flash":        { input: 0.075, output: 0.30 },
+  "claude-sonnet-5":         { input: 3.0,   output: 15.0 },
+  "llama-3.3-70b-versatile": { input: 0.59,  output: 0.79 },
+  "llama-3.1-8b-instant":    { input: 0.05,  output: 0.08 },
 };
 
 export function computeCostUsd(model: string, usage: TokenUsage): number {
