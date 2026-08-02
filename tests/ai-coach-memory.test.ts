@@ -59,6 +59,39 @@ describe('Coach Memory — folding ai_memory rows', () => {
     expect(merged.goal).toBe('Lean Bulk');
     expect(merged.currentWeightKg).toBe(71);
   });
+
+  it('a diet-type fact and a food-dislike fact both share the "nutrition preferences" category but must not overwrite each other', () => {
+    // Regression: explicitMemory.ts saves food likes/dislikes under the same
+    // 'nutrition preferences' category as diet-type facts (vegetarian/vegan),
+    // since it uses the same category whitelist. foldMemoryRows used to route
+    // the whole category to a single scalar `m.nutrition` field, so whichever
+    // row was folded last silently clobbered the other — a newly-saved
+    // "I don't like mushrooms" fact could vanish behind an older "vegetarian"
+    // fact (or vice versa) purely based on row order.
+    const m = foldMemoryRows([
+      { category: 'nutrition preferences', memory_key: 'dont_like_mushrooms', memory_value: "I don't like mushrooms" },
+      { category: 'nutrition preferences', memory_key: 'diet_type', memory_value: 'I am vegetarian' },
+    ]);
+    expect(m.nutrition).toBe('I am vegetarian');
+    expect(m.dislikedFoods).toContain("I don't like mushrooms");
+  });
+
+  it('order-independent: the diet-type row folded first still survives a later dislike row', () => {
+    const m = foldMemoryRows([
+      { category: 'nutrition preferences', memory_key: 'diet_type', memory_value: 'I am vegetarian' },
+      { category: 'nutrition preferences', memory_key: 'dont_like_mushrooms', memory_value: "I don't like mushrooms" },
+    ]);
+    expect(m.nutrition).toBe('I am vegetarian');
+    expect(m.dislikedFoods).toContain("I don't like mushrooms");
+  });
+
+  it('a food-like fact under "nutrition preferences" is routed to likedFoods, not the scalar nutrition field', () => {
+    const m = foldMemoryRows([
+      { category: 'nutrition preferences', memory_key: 'love_chicken', memory_value: 'I love chicken' },
+    ]);
+    expect(m.likedFoods).toContain('I love chicken');
+    expect(m.nutrition).toBeUndefined();
+  });
 });
 
 describe('Conversational prompt (coach-v3)', () => {
@@ -69,11 +102,11 @@ describe('Conversational prompt (coach-v3)', () => {
       memoryCard: 'Current Injury: Left Shoulder Irritation',
       safetyTriggered: false,
     });
-    expect(COACH_PROMPT_VERSION).toBe('coach-v3');
+    expect(COACH_PROMPT_VERSION).toBe('coach-v4');
     expect(prompt).toContain('COACH MEMORY');
     expect(prompt).toContain('Left Shoulder Irritation');
     expect(prompt).toMatch(/not a chatbot|NOT a chatbot/i);
-    expect(prompt).toMatch(/NOT bullet lists/i);
+    expect(prompt).toMatch(/calm, knowledgeable, direct/i);
     expect(prompt).toMatch(/follow-up/i);
     expect(prompt).toMatch(/NEVER invent/i);
   });
