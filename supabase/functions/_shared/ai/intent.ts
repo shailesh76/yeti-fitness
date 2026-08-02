@@ -24,11 +24,50 @@ export type CoachIntent =
   | 'meal_suggestion'
   | 'rest_pacing'
   | 'recovery'
+  | 'exercise_logging'       // logging a set, reps, or completed workout
+  | 'goal_adjustment'        // changing a training or body-composition goal
+  | 'app_navigation'         // help finding a feature in the Yeti app
+  | 'schedule_adjustment'    // moving/skipping a session in the schedule
   | 'general_chat'
   | 'medical_safety';
 
 // Safety is always checked first (overrides everything).
 const MEDICAL_SAFETY_PATTERN = /\b(pain|hurts?|hurting|injur(?:e|y|ed|ies)|sprain|strain|tweak|pull(?:ed)? (a )?(muscle|something)|ache|aching|sore joint|sharp|numb|swollen|swelling)\b/;
+
+// MEDICAL_SAFETY_PATTERN has no negation awareness on its own, so a natural,
+// reassuring reply ("no shoulder pain", "doesn't hurt") trips the exact same
+// keyword match as an actual complaint ("I have shoulder pain") — live-observed
+// to derail an otherwise-normal workout-plan conversation into a false
+// medical_safety classification. Curated (not a generic clause-negation
+// parser) — same false-positive-risk tradeoff as the decision-verb list in
+// coachSchema.ts: broad enough to cover the specified exact phrases and their
+// direct paraphrases, narrow enough not to swallow an unrelated affirmed
+// complaint elsewhere in the same message.
+const MEDICAL_NEGATION_STRIP_PATTERN =
+  /\bno\s+(?:\w+\s+){0,2}(?:injur(?:y|ies)|pain)\b|\bnot\s+(?:currently\s+)?injured\b|\b(?:doesn'?t|does\s+not|didn'?t|did\s+not)\s+hurt(?:s|ing)?\b|\b(?:don'?t|do\s+not|doesn'?t|does\s+not|didn'?t|did\s+not)\s+have\s+(?:any\s+)?(?:pain|injur(?:y|ies))\b|\bno\s+medical\s+(?:limitations?|issues?|concerns?|restrictions?)\b|\bnothing\s+(?:hurts?|is\s+sore)\b|\b(?:pain|injury)[\s-]free\b|\bno\s+current\s+injur(?:y|ies)\b/gi;
+
+// A PAST complaint the athlete explicitly says has since resolved ("I had
+// shoulder pain last week but it's gone now", "I used to have knee pain but
+// it's fine now") is historical context, not a CURRENT acute-safety signal.
+// Bounded gaps (not unbounded ".*") so this can't reach across an unrelated
+// later clause and misfire.
+const MEDICAL_RESOLVED_PAST_STRIP_PATTERN =
+  /\b(?:had|experienced|was\s+dealing\s+with|used\s+to\s+have)\b[^.!?;]{0,40}\b(?:pain|injur(?:y|ies)|ache|soreness|discomfort)\b[^.!?;]{0,40}\b(?:but\s+)?(?:it'?s|it\s+is|it\s+was|that'?s)?\s*(?:now\s+)?(?:gone|healed|resolved|fine|better|not\s+(?:an\s+issue|a\s+problem)|no\s+longer\s+(?:an\s+issue|a\s+problem|there|bothering\s+me))\b/gi;
+
+/**
+ * True only when at least one CURRENT, un-negated pain/injury mention
+ * survives stripping every explicitly-negated or explicitly-resolved-past
+ * span. A mixed message ("no knee pain but sharp shoulder pain") still
+ * correctly returns true, since only the negated span is consumed —
+ * current acute pain always takes precedence over workout generation.
+ */
+function hasUnnegatedMedicalConcern(m: string): boolean {
+  if (!MEDICAL_SAFETY_PATTERN.test(m)) return false;
+  const stripped = m
+    .replace(MEDICAL_RESOLVED_PAST_STRIP_PATTERN, ' ')
+    .replace(MEDICAL_NEGATION_STRIP_PATTERN, ' ');
+  return MEDICAL_SAFETY_PATTERN.test(stripped);
+}
 
 const WORKOUT_PROGRAM_GENERATE_PATTERN =
   /\b(make|create|generate|build|design|write|set up|give me|change|switch|activate|start)\s+(me\s+)?(a\s+)?(new\s+)?(workout\s+)?(plan|program|routine|split)\b|\bi want to train (\d+|one|two|three|four|five|six|seven)\s+days?\b|\bcan you change my split\b|\b(push[\s-]?pull[\s-]?legs|ppl|upper[\s-]?lower|full[\s-]?body|bro split)\s+(workout\s+|training\s+)?(plan|program|routine|split)\b|\bactivate\s+(this|my|the|[a-z0-9_\s]+)\s+(plan|program|v\d+)\b|\b(make|create|generate|build|design)\s+\d+\s*days?\s+workout\s+(plan|program|routine)\b|\b(make|create|generate|build|design|write|set up|give me|change|switch|activate|start)\s+(me\s+)?(a\s+)?(new\s+)?(chest|back|leg|legs|shoulder|shoulders|arm|arms|push|pull|glute|glutes|core|abs?)\s+(day\s+)?workout\b/i;
@@ -103,6 +142,24 @@ export function detectWorkoutPlanEdit(message: string): boolean {
   return PLAN_EDIT_ACTION.test(m) && EXERCISE_OR_TRAINING_TERM.test(m);
 }
 
+// ── New intent patterns ───────────────────────────────────────────────────────
+
+// Exercise/set logging: "I just did 3x8 at 80kg", "log my squat", "log that set"
+const EXERCISE_LOGGING_PATTERN =
+  /\b(log (that|this|my|a)?\s*(set|rep|lift|exercise|workout|session)|i (just|did|completed|finished)\s+(\d+\s*x\s*\d+|\d+\s+sets?|\d+\s+reps?)|just (did|finished|completed)|mark (it|that|this)\s+as\s+(done|complete)|record (my|this|that)\s+(set|rep|workout)|done with (my|today'?s)?\s+(sets?|workout))\b/i;
+
+// Goal adjustment: "change my goal", "I want to focus on strength now", "switch to fat loss"
+const GOAL_ADJUSTMENT_PATTERN =
+  /\b(change (my )?goal|update (my )?goal|switch (my )?goal|new goal|i want to (focus on|work on|prioritise?|prioritize)|my goal (is|has changed)|i'?m (now )?focused on|shift(?:ing)? (my )?focus to|pivot (to|toward))\b/i;
+
+// App navigation/feature help: "where do I log food?", "how do I use the planner?"
+const APP_NAVIGATION_PATTERN =
+  /\b(where (do i|can i|is the)|how do i (use|find|access|open|get to|navigate)|how (does|do) (the|this) (app|yeti|feature|screen|tab) work|find (the|my) (plan|program|log|diary|history|settings)|can'?t find|what (is|are) (the )?feature|how (to|do i) (log|track|record|view|see) (my )?(meal|food|workout|weight|progress|body|measurements|steps))\b/i;
+
+// Schedule adjustment: "can I move Thursday's workout to Friday?", "skip leg day this week"
+const SCHEDULE_ADJUSTMENT_PATTERN =
+  /\b(move (my |the )?(\w+ ?'?s? )?(workout|session|training|day)|skip (the |this |my )?(\w+ ?'?s? )?(workout|session|training|day|week)|reschedule|swap (my )?(training |workout )?days?|can i train (on |a )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|i'?m (training|working out) (on|tomorrow|today)|shift (my )?(workout|session|training))\b/i;
+
 // Ordered soft rules — earlier wins. `exclude`, when present, skips this rule
 // (falling through to later rules / general_chat) even if a pattern matches.
 const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
@@ -114,6 +171,9 @@ const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
   { intent: 'weekly_review', patterns: [WEEKLY_REVIEW_PATTERN] },
   { intent: 'adaptive_coaching', patterns: [ADAPTIVE_COACHING_PATTERN] },
   { intent: 'workout_program_generate', patterns: [WORKOUT_PROGRAM_GENERATE_PATTERN] },
+  // exercise_logging checked before exercise_substitution so "log that set" doesn't
+  // accidentally hit the substitution rule's "can't do" branch.
+  { intent: 'exercise_logging', patterns: [EXERCISE_LOGGING_PATTERN] },
   { intent: 'rest_pacing', patterns: [/\b(rest\s*(time|timer|period)|how long (should i )?rest|between sets|rest between|how much rest)\b/] },
   { intent: 'exercise_substitution', patterns: [/\b(replace|substitut|instead of|alternative(s)? (to|for)|swap|sub(?:stitute)? out|can'?t do|don'?t have (a|the)?)\b/] },
   {
@@ -121,6 +181,9 @@ const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
     patterns: [/\b(increase|go up|add (weight|load)|heavier|more weight|progress(?:ion)?|plateau|stuck|stall(?:ed|ing)?|move up|bump (the )?weight|ready to add)\b/],
     exclude: NUTRITION_CONTEXT_EXCLUSION,
   },
+  { intent: 'goal_adjustment', patterns: [GOAL_ADJUSTMENT_PATTERN] },
+  { intent: 'schedule_adjustment', patterns: [SCHEDULE_ADJUSTMENT_PATTERN] },
+  { intent: 'app_navigation', patterns: [APP_NAVIGATION_PATTERN] },
   { intent: 'nutrition_status', patterns: [/\b((how (much|many)|what'?s|whats) .*(protein|carb|calorie|kcal|fat|macro).* (left|remaining|today)|remaining (protein|carbs?|calories|macros)|left to eat|hit my (protein|macros|calories))\b/] },
   { intent: 'meal_suggestion', patterns: [/\b(what should i eat|meal (idea|suggestion|option)|recipe|something to eat|snack idea|(vegetarian|vegan|high[- ]protein|low[- ]carb|keto) (meal|option|snack|food)|foods? (with|high in))\b/] },
   { intent: 'nutrition_advice', patterns: [/\b(bulk(?:ing)?|cut(?:ting)?|maintenance calories|diet|nutrition|how (much|many) (protein|calories) (should|do) i|macro split|deficit|surplus)\b/] },
@@ -134,8 +197,10 @@ const RULES: { intent: CoachIntent; patterns: RegExp[]; exclude?: RegExp }[] = [
  */
 export function classifyIntent(message: string): CoachIntent {
   const m = (message || '').toLowerCase();
-  // 1. Safety always wins.
-  if (MEDICAL_SAFETY_PATTERN.test(m)) return 'medical_safety';
+  // 1. Safety always wins — unless every pain/injury mention present is
+  //    explicitly negated or explicitly resolved-past (see
+  //    hasUnnegatedMedicalConcern above).
+  if (hasUnnegatedMedicalConcern(m)) return 'medical_safety';
   // 2. Grocery list guard.
   if (GROCERY_LIST_PATTERN.test(m)) return 'grocery_list';
   // 3. Eating out guard.
@@ -240,10 +305,18 @@ export function classifyIntentWithHistory(message: string, priorUserMessages: st
 }
 
 /** Intents whose numeric answer comes from a deterministic Yeti engine, not the LLM. */
-export const ENGINE_BACKED_INTENTS: CoachIntent[] = ['workout_progression', 'nutrition_status', 'workout_program_generate', 'weekly_review', 'adaptive_coaching', 'nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review', 'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance'];
+export const ENGINE_BACKED_INTENTS: CoachIntent[] = [
+  'workout_progression', 'nutrition_status', 'workout_program_generate', 'weekly_review',
+  'adaptive_coaching', 'nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review',
+  'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance',
+  'exercise_logging',  // set-logging writes must be deterministic (DB verify before confirming)
+];
 
 /** Simple/fast intents that Groq's small model may handle as primary or fallback. */
-export const SIMPLE_INTENTS: CoachIntent[] = ['rest_pacing', 'general_chat', 'workout_explanation'];
+export const SIMPLE_INTENTS: CoachIntent[] = [
+  'rest_pacing', 'general_chat', 'workout_explanation', 'app_navigation',
+  'schedule_adjustment', 'goal_adjustment',
+];
 
 export function isEngineBacked(intent: CoachIntent): boolean {
   return ENGINE_BACKED_INTENTS.includes(intent);

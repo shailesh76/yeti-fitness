@@ -241,6 +241,149 @@ export function ungroundedNumberFallbackResponse(missingInformation: string[]): 
   };
 }
 
+// ─── Non-numeric personal-claim grounding (final closed-beta gate) ──────────
+// The numeric guard above only ever covered NUMBERS. The model can just as
+// easily state an invented athlete-specific FACT with the same confident
+// phrasing — a claimed preference, dislike, injury, training schedule,
+// dietary pattern, recovery pattern, adherence behaviour, favourite exercise,
+// weak muscle group, or previous performance the athlete never actually
+// stated and that isn't in Coach Memory, profile, engine output, or
+// telemetry either. Deliberately bounded — a curated, second-person trigger
+// phrase per category (same style as MEDICAL_SAFETY_PATTERN/
+// EXERCISE_OR_TRAINING_TERM in intent.ts), NOT unrestricted semantic fact
+// checking or a general NLU/entity-extraction pipeline.
+
+export type PersonalClaimCategory =
+  | 'preference' | 'dislike' | 'injury' | 'training_schedule' | 'dietary_pattern'
+  | 'recovery_pattern' | 'adherence_behaviour' | 'favourite_exercise'
+  | 'weak_muscle_group' | 'previous_performance';
+
+export interface PersonalClaim { category: PersonalClaimCategory; sentence: string; claimedText: string }
+
+// Ordered most-specific first — extractPersonalClaims takes the first match
+// per sentence, so a sentence like "you prefer training on Mondays" is read
+// as training_schedule (specific) rather than the generic preference catch-all.
+const PERSONAL_CLAIM_PATTERNS: { category: PersonalClaimCategory; pattern: RegExp }[] = [
+  { category: 'favourite_exercise', pattern: /\byour favou?rite (?:exercise|lift)s?\s+(?:is|are)\s+([a-z0-9 '-]{2,40})/i },
+  { category: 'weak_muscle_group', pattern: /\byour weak(?:est)?\s*(?:point|muscle groups?|area)?s?\s*(?:is|are)\s+([a-z0-9 '-]{2,40})/i },
+  { category: 'injury', pattern: /\byour\s+([a-z0-9 '-]{2,30})\s+injury\b|\byou\s+injured\s+your\s+([a-z0-9 '-]{2,30})|\bgiven\s+your\s+([a-z0-9 '-]{2,30})\s+(?:injury|pain)\b/i },
+  { category: 'training_schedule', pattern: /\byou\s+train\s+on\s+([a-z0-9 ,'-]{2,40})|\byour\s+training\s+days?\s+(?:is|are)\s+([a-z0-9 ,'-]{2,40})/i },
+  { category: 'dietary_pattern', pattern: /\bsince\s+you(?:'re|\s+are)\s+([a-z0-9 '-]{2,30})|\bgiven\s+your\s+([a-z0-9 '-]{2,30})\s+diet\b|\bas\s+a\s+([a-z0-9 '-]{2,30})\s+you\b/i },
+  { category: 'recovery_pattern', pattern: /\byou\s+(?:tend to|typically|usually)\s+recover\s+([a-z0-9 '-]{2,40})/i },
+  { category: 'adherence_behaviour', pattern: /\byou'?ve\s+been\s+(?:missing|skipping)\s+([a-z0-9 '-]{2,40})|\byour\s+adherence\s+has\s+been\s+([a-z0-9 '-]{2,30})/i },
+  { category: 'previous_performance', pattern: /\b(?:last time|previously|in your last session)\b[^.!?;]{0,15}you\s+(?:did|lifted|completed|hit)\s+([a-z0-9 '-]{2,40})/i },
+  { category: 'dislike', pattern: /\byou\s+(?:dislike|hate|avoid|can'?t stand)\s+([a-z0-9 '-]{2,40})|\byou\s+don'?t\s+like\s+([a-z0-9 '-]{2,40})/i },
+  { category: 'preference', pattern: /\byou\s+(?:prefer|love|enjoy)\s+([a-z0-9 '-]{2,40})/i },
+];
+
+const CLAIM_STOPWORDS = new Set([
+  'the', 'and', 'but', 'nor', 'yet', 'for', 'so', 'because', 'since', 'although', 'though',
+  'to', 'of', 'in', 'on', 'at', 'by', 'from', 'into', 'onto', 'over', 'under', 'after', 'before',
+  'during', 'between', 'through', 'about', 'above', 'below', 'across', 'around', 'with', 'without',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'do', 'does', 'did',
+  'your', 'you', 'yours', 'it', 'its', 'that', 'this', 'these', 'those', 'their', 'them', 'they',
+  'today', 'now', 'then', 'when', 'than', 'very', 'really', 'right', 'just', 'still', 'also',
+  'not', 'no', 'yes', 'some', 'any', 'all', 'each', 'every', 'more', 'most', 'much', 'many',
+]);
+
+/** The meaningful (non-trivial, non-stopword) words in a claimed fact's captured text. */
+function claimContentWords(claimedText: string): string[] {
+  return (claimedText || '').toLowerCase().split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !CLAIM_STOPWORDS.has(w));
+}
+
+function firstDefinedGroup(match: RegExpMatchArray): string {
+  for (let i = 1; i < match.length; i++) {
+    if (match[i]) return match[i].trim();
+  }
+  return '';
+}
+
+/**
+ * Extracts every athlete-specific personal-fact claim from user-visible
+ * prose, sentence-scoped (same rationale as classifyProseNumbers — a
+ * grounded sentence must not launder an unrelated invented claim sitting in
+ * the next one). Bounded to the curated categories/triggers above.
+ */
+export function extractPersonalClaims(text: string): PersonalClaim[] {
+  const claims: PersonalClaim[] = [];
+  for (const sentence of splitIntoSentences(text)) {
+    for (const { category, pattern } of PERSONAL_CLAIM_PATTERNS) {
+      const match = sentence.match(pattern);
+      if (match) {
+        claims.push({ category, sentence, claimedText: firstDefinedGroup(match) });
+        break;
+      }
+    }
+  }
+  return claims;
+}
+
+/**
+ * A personal claim is grounded when at least one of its meaningful content
+ * words appears in the current/recent user messages, Coach Memory, profile
+ * data, deterministic engine output, or retrieved telemetry (the caller folds
+ * all of these into `sources` — see ai-coach/index.ts's groundedSource, which
+ * includes the memory card text). A claim with no extractable content word
+ * (too weak a capture to confidently call fabricated) is not flagged.
+ */
+export function unsupportedPersonalClaims(text: string, sources: GroundingSources): PersonalClaim[] {
+  const corpus = `${sources.userMessagesText}\n${sources.groundedSource}`.toLowerCase();
+  return extractPersonalClaims(text).filter((claim) => {
+    const words = claimContentWords(claim.claimedText);
+    if (words.length === 0) return false;
+    return !words.some((w) => corpus.includes(w));
+  });
+}
+
+/** Correction appended on the single retry when prose stated unsupported personal facts. */
+export function buildPersonalClaimRetryInstruction(claims: PersonalClaim[]): string {
+  const listed = claims.map((c) => `"${c.sentence.trim()}"`).join('; ');
+  return `Your previous answer stated these personal facts about the athlete as if they were known, but none of them come ` +
+    `from what the athlete told you, Coach Memory, their profile, engine output, or telemetry: ${listed}. Reply again ` +
+    `WITHOUT stating any personal fact you cannot ground this way — general coaching advice and universal fitness ` +
+    `knowledge is fine, but do not invent a specific preference, dislike, injury, schedule, dietary pattern, recovery ` +
+    `pattern, adherence detail, favourite exercise, weak point, or past performance you don't actually have.`;
+}
+
+/**
+ * Removes only the offending sentence(s) from a field, re-deriving
+ * unsupported claims PER FIELD (not reusing a claims list computed against
+ * the concatenated all-fields text) so sentence boundaries stay correctly
+ * scoped to their own field — concatenating direct_answer/reason/etc. with
+ * plain spaces for detection can otherwise fuse a trailing unpunctuated
+ * fragment from one field with the next field's first sentence.
+ *
+ * Sentence-level removal is safe here — unlike a fabricated NUMBER embedded
+ * mid-sentence (where deleting just the digit can silently change the
+ * advice's meaning, per ungroundedNumberFallbackResponse's own reasoning), a
+ * fabricated personal-fact claim is normally a self-contained aside whose
+ * removal leaves the rest of the advice intact. recommended_action is only
+ * edited in place when it's a plain string; an object-shaped action found to
+ * contain an unsupported claim is nulled out rather than risk corrupting its
+ * JSON structure by editing "a sentence" inside it.
+ */
+export function stripUnsupportedPersonalClaims(resp: CoachResponse, sources: GroundingSources): CoachResponse {
+  const stripField = (fieldText: string): string => {
+    if (!fieldText) return fieldText;
+    const unsupported = new Set(unsupportedPersonalClaims(fieldText, sources).map((c) => c.sentence));
+    if (unsupported.size === 0) return fieldText;
+    return splitIntoSentences(fieldText).filter((s) => !unsupported.has(s)).join(' ').trim();
+  };
+
+  const direct = stripField(resp.direct_answer) ||
+    "I don't have a confirmed detail for part of that, so I'll stick to what I actually know.";
+  const reason = stripField(resp.reason);
+  const followUp = resp.follow_up_question ? (stripField(resp.follow_up_question) || null) : resp.follow_up_question;
+  const recommendedAction = typeof resp.recommended_action === 'string'
+    ? (stripField(resp.recommended_action) || null)
+    : (unsupportedPersonalClaims(JSON.stringify(resp.recommended_action ?? ''), sources).length > 0
+      ? null
+      : resp.recommended_action);
+
+  return { ...resp, direct_answer: direct, reason, follow_up_question: followUp, recommended_action: recommendedAction };
+}
+
 /** Strict correction appended on the single retry when a workout answer leaked nutrition. */
 export const INTENT_ISOLATION_RETRY =
   'Your previous answer included nutrition content, which is not allowed for this workout request. ' +
