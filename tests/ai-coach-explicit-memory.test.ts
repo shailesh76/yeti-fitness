@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { detectExplicitMemoryCommand } from '../supabase/functions/_shared/ai/explicitMemory.ts';
+import {
+  detectExplicitMemoryCommand,
+  detectExplicitMemoryRetrieval,
+  buildSaveAcknowledgment,
+  buildDeleteAcknowledgment,
+  buildRetrievalAnswer,
+  extractFactSubject,
+  toSecondPerson,
+} from '../supabase/functions/_shared/ai/explicitMemory.ts';
 
 // Objective 2 — deterministic explicit-memory command detection. Covers every
 // required test case exactly, plus the trigger-overlap bug found while
@@ -145,5 +153,148 @@ describe('Category keyword ordering avoids the "like/dislike" cross-domain risk'
     const r = detectExplicitMemoryCommand('Remember that I prefer to avoid exercises that hurt my shoulder.');
     expect(r.detected).toBe(true);
     expect(r.category).toBe('injuries');
+  });
+});
+
+// Step 4 — deterministic retrieval-question detection. Narrow and
+// question-anchored ("what ... do/did I ...") so it can never hijack an
+// ordinary nutrition/workout request into a memory-only answer.
+describe('detectExplicitMemoryRetrieval', () => {
+  it('"What foods did I tell you I avoid?" -> disliked_foods', () => {
+    expect(detectExplicitMemoryRetrieval('What foods did I tell you I avoid?')).toEqual({ detected: true, retrievalType: 'disliked_foods' });
+  });
+
+  it('"What foods do I avoid?" -> disliked_foods', () => {
+    expect(detectExplicitMemoryRetrieval('What foods do I avoid?')).toEqual({ detected: true, retrievalType: 'disliked_foods' });
+  });
+
+  // Regression: the negation ("don't") and the verb ("like") are separated by
+  // "I" here, unlike "What foods do I avoid?" where the disliking word sits
+  // right after "do I". A naive gap-match for the LIKED-foods pattern
+  // (.{0,20}\b(like)\b) would find "like" regardless of the negation right
+  // before it and misclassify this as asking about LIKED foods — the exact
+  // opposite of what's being asked.
+  it('"What foods don\'t I like?" -> disliked_foods (not liked_foods — the type name in the old test was aspirational, not actually checked)', () => {
+    expect(detectExplicitMemoryRetrieval("What foods don't I like?")).toEqual({ detected: true, retrievalType: 'disliked_foods' });
+  });
+
+  it('"What foods do I not like?" -> disliked_foods (negation before "like", different word order)', () => {
+    expect(detectExplicitMemoryRetrieval('What foods do I not like?').retrievalType).toBe('disliked_foods');
+  });
+
+  it('"What foods can\'t I eat?" -> disliked_foods', () => {
+    expect(detectExplicitMemoryRetrieval("What foods can't I eat?").retrievalType).toBe('disliked_foods');
+  });
+
+  it('"What foods doesn\'t the athlete like?" -> disliked_foods (third person negation)', () => {
+    expect(detectExplicitMemoryRetrieval("What foods doesn't the athlete like?").retrievalType).toBe('disliked_foods');
+  });
+
+  it('"What equipment do I prefer?" -> equipment_preferences', () => {
+    expect(detectExplicitMemoryRetrieval('What equipment do I prefer?')).toEqual({ detected: true, retrievalType: 'equipment_preferences' });
+  });
+
+  it('"What equipment do I have?" -> equipment_preferences', () => {
+    expect(detectExplicitMemoryRetrieval('What equipment do I have?').detected).toBe(true);
+  });
+
+  it('"What foods do I like?" -> liked_foods', () => {
+    expect(detectExplicitMemoryRetrieval('What foods do I like?')).toEqual({ detected: true, retrievalType: 'liked_foods' });
+  });
+
+  it('an ordinary meal-plan request is not detected as a retrieval question', () => {
+    expect(detectExplicitMemoryRetrieval('I am vegetarian and have a low food budget. Make me a muscle-gain meal plan.').detected).toBe(false);
+  });
+
+  it('an ordinary workout request is not detected', () => {
+    expect(detectExplicitMemoryRetrieval('Create a 4-day PPL workout plan for me.').detected).toBe(false);
+  });
+
+  it('a save command is not detected as a retrieval question', () => {
+    expect(detectExplicitMemoryRetrieval("Remember that I don't like mushrooms.").detected).toBe(false);
+  });
+});
+
+describe('extractFactSubject — strips the lead-in phrase, keeps the subject', () => {
+  it.each([
+    ["I don't like mushrooms", 'mushrooms'],
+    ['I hate mushrooms', 'mushrooms'],
+    ['I am allergic to peanuts', 'peanuts'],
+    ['I prefer dumbbells', 'dumbbells'],
+    ['I love chicken', 'chicken'],
+  ])('%s -> %s', (input, expected) => {
+    expect(extractFactSubject(input)).toBe(expected);
+  });
+
+  it('falls back to the full fact when no lead-in phrase matches', () => {
+    expect(extractFactSubject('push pull legs')).toBe('push pull legs');
+  });
+});
+
+describe('toSecondPerson — first-person fact to second-person acknowledgment', () => {
+  it("I don't like mushrooms -> you don't like mushrooms", () => {
+    expect(toSecondPerson("I don't like mushrooms")).toBe("you don't like mushrooms");
+  });
+
+  it('I prefer dumbbells -> you prefer dumbbells', () => {
+    expect(toSecondPerson('I prefer dumbbells')).toBe('you prefer dumbbells');
+  });
+
+  it('I am allergic to peanuts -> you are allergic to peanuts', () => {
+    expect(toSecondPerson('I am allergic to peanuts')).toBe('you are allergic to peanuts');
+  });
+
+  it('My usual split is push pull legs -> your usual split is push pull legs (lowercase — always used after "Remembered — ")', () => {
+    expect(toSecondPerson('My usual split is push pull legs')).toBe('your usual split is push pull legs');
+  });
+});
+
+describe('buildSaveAcknowledgment — exact required wording', () => {
+  it('"Remembered — you don\'t like mushrooms."', () => {
+    expect(buildSaveAcknowledgment("I don't like mushrooms")).toBe("Remembered — you don't like mushrooms.");
+  });
+
+  it('"Remembered — you prefer dumbbells."', () => {
+    expect(buildSaveAcknowledgment('I prefer dumbbells')).toBe('Remembered — you prefer dumbbells.');
+  });
+});
+
+describe('buildDeleteAcknowledgment — exact required wording', () => {
+  it('"Removed — mushrooms are no longer saved as a disliked food."', () => {
+    expect(buildDeleteAcknowledgment("I don't like mushrooms", 'nutrition preferences')).toBe('Removed — mushrooms are no longer saved as a disliked food.');
+  });
+
+  it('equipment preference uses "an" (vowel-initial category label)', () => {
+    expect(buildDeleteAcknowledgment('I prefer dumbbells', 'equipment preferences')).toBe('Removed — dumbbells are no longer saved as an equipment preference.');
+  });
+
+  it('falls back to a generic "preference" label for an unrecognised category', () => {
+    expect(buildDeleteAcknowledgment('I prefer mornings', undefined)).toMatch(/no longer saved as a preference\.$/);
+  });
+});
+
+describe('buildRetrievalAnswer — exact required wording + honest empty state', () => {
+  it('"You\'ve told me you avoid mushrooms and pickles."', () => {
+    expect(buildRetrievalAnswer('disliked_foods', ["I don't like mushrooms", "I don't like pickles"]))
+      .toBe("You've told me you avoid mushrooms and pickles.");
+  });
+
+  it('dedupes the same underlying subject stored under two different keys/phrasings', () => {
+    expect(buildRetrievalAnswer('disliked_foods', ['I hate mushrooms', "I don't like mushrooms"]))
+      .toBe("You've told me you avoid mushrooms.");
+  });
+
+  it('"You prefer dumbbells."', () => {
+    expect(buildRetrievalAnswer('equipment_preferences', ['I prefer dumbbells'])).toBe('You prefer dumbbells.');
+  });
+
+  it('three or more items use an Oxford-comma list', () => {
+    expect(buildRetrievalAnswer('disliked_foods', ['I hate mushrooms', "I don't like pickles", 'I dislike olives']))
+      .toBe("You've told me you avoid mushrooms, pickles, and olives.");
+  });
+
+  it('never fabricates a fact — honest empty state when nothing is stored', () => {
+    expect(buildRetrievalAnswer('disliked_foods', [])).toBe("You haven't told me about any foods to avoid yet.");
+    expect(buildRetrievalAnswer('equipment_preferences', [])).toBe("You haven't told me about any equipment preferences yet.");
   });
 });
