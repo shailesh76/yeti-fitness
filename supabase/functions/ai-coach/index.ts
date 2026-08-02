@@ -15,6 +15,7 @@ import {
   containsMemoryClaim, MEMORY_PERSISTENCE_FAILED_NOTE,
   computeResponseType, computeActions, CoachAction, CoachResponseType,
   unsupportedProseNumbers, buildProseGroundingRetryInstruction, ungroundedNumberFallbackResponse,
+  unsupportedPersonalClaims, buildPersonalClaimRetryInstruction, stripUnsupportedPersonalClaims,
 } from "../_shared/ai/coachSchema.ts";
 import { detectNutritionTargetAsk, describeNutritionTarget, StoredNutritionTargets } from "../_shared/ai/nutritionTargetLookup.ts";
 import {
@@ -38,8 +39,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const WORKOUT_INTENTS: CoachIntent[] = ['workout_plan_edit', 'workout_progression', 'exercise_substitution', 'workout_program_generate', 'weekly_review', 'adaptive_coaching'];
+const WORKOUT_INTENTS: CoachIntent[] = [
+  'workout_plan_edit', 'workout_progression', 'exercise_substitution',
+  'workout_program_generate', 'weekly_review', 'adaptive_coaching',
+  'exercise_logging', 'schedule_adjustment',
+];
 const NUTRITION_INTENTS: CoachIntent[] = ['nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review', 'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance', 'nutrition_status', 'nutrition_advice'];
+// Intents that receive the personal coaching context (profile + memory) but no
+// engine computation.
+const PERSONAL_CONTEXT_INTENTS: CoachIntent[] = [
+  'workout_explanation', 'rest_pacing', 'recovery',
+  'general_chat', 'goal_adjustment', 'app_navigation',
+];
 
 /** Readable engine label for diagnostics (Fix 10) — which deterministic engine (if any) backed this reply. */
 function engineNameForIntent(intent: CoachIntent): string {
@@ -460,6 +471,26 @@ async function runCoach(
     }
   }
 
+  // Non-numeric personal-claim grounding guard (final closed-beta gate):
+  // covers invented athlete-specific FACTS (preference, dislike, injury,
+  // schedule, dietary/recovery pattern, adherence, favourite exercise, weak
+  // muscle group, previous performance) — a different failure shape than the
+  // numeric guard above, so it needs its own detect -> retry -> resolve pass.
+  // Unlike a fabricated number, a fabricated personal-fact aside is normally
+  // a self-contained sentence — safe to remove in place rather than replace
+  // the whole response (see stripUnsupportedPersonalClaims for why).
+  if (unsupportedPersonalClaims(textForGroundingCheck(resp), groundingSources).length > 0) {
+    const unsupportedClaims = unsupportedPersonalClaims(textForGroundingCheck(resp), groundingSources);
+    const retry = await gen([...baseMessages, { role: 'user', content: buildPersonalClaimRetryInstruction(unsupportedClaims) }]);
+    const reparsed = parseCoachResponse(retry.text);
+    const retryResp = reparsed.ok ? reparsed.value : resp;
+    if (unsupportedPersonalClaims(textForGroundingCheck(retryResp), groundingSources).length === 0) {
+      resp = retryResp; result = retry;
+    } else {
+      resp = stripUnsupportedPersonalClaims(retryResp, groundingSources);
+    }
+  }
+
   // Internal-label leak guard: never rely on the prompt instruction alone.
   // Retry once with an explicit correction; if it still leaks, sanitize
   // deterministically rather than ship the raw label text to the athlete.
@@ -685,15 +716,14 @@ serve(async (req) => {
     let latestUserMessage = message || '';
     if (latestUserMessage.length > 1000) latestUserMessage = latestUserMessage.substring(0, 1000) + '... [truncated]';
 
-    // Entitlements + beta config are independent of each other — parallel fetch.
-    const [{ data: entitlements }, { data: betaConfig }] = await Promise.all([
-      supabaseClient.from('user_entitlements').select('plan_id').eq('user_id', user.id).eq('status', 'active'),
-      supabaseClient.from('beta_mode_config').select('is_global_beta_active').single(),
-    ]);
+    // Entitlements fetch — beta_mode_config was removed (table does not exist in
+    // production and caused a logged DB error on every request).
+    const { data: entitlements } = await supabaseClient
+      .from('user_entitlements').select('plan_id').eq('user_id', user.id).eq('status', 'active');
     const isPremiumPlan = (entitlements || []).some((e: any) => e.plan_id === 'PRO' || e.plan_id === 'COACHING');
     const subscriptionTier = isPremiumPlan
       ? ((entitlements || []).find((e: any) => e.plan_id === 'COACHING') ? 'COACHING' : 'PRO') : 'FREE';
-    const isPremium = isPremiumPlan || (betaConfig?.is_global_beta_active ?? false);
+    const isPremium = isPremiumPlan;
 
     // Daily free-tier limit — ATOMIC increment-and-check (fixes a real race:
     // the previous read-then-write of requests_count let concurrent requests
@@ -1138,15 +1168,203 @@ serve(async (req) => {
         const intelligence = deriveCoachingIntelligence(rawTelemetry, req);
         engineResult = intelligence;
         contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+
+        // After a weekly/adaptive review, generate and persist a compact coaching
+        // summary to ai_memory so future sessions have longitudinal context.
+        try {
+          const summaryDate = new Date().toISOString().split('T')[0];
+          const adherenceLabel = rawTelemetry.adherencePct != null ? `${rawTelemetry.adherencePct}% adherence` : '';
+          const prsLabel = rawTelemetry.newPrsCount > 0 ? `${rawTelemetry.newPrsCount} PR(s)` : '';
+          const limitingFactor = (intelligence as any).biggestLimitingFactor ?? null;
+          const summaryParts = [adherenceLabel, prsLabel, limitingFactor].filter(Boolean);
+          if (summaryParts.length > 0) {
+            const summaryText = `[session_summary] ${summaryDate}: ${summaryParts.join(', ')}.`;
+            await supabaseServiceRole.from('ai_memory').upsert({
+              athlete_id: user.id,
+              category: 'coaching observations',
+              memory_key: `session_summary_${summaryDate}`,
+              memory_value: summaryText,
+            }, { onConflict: 'athlete_id,memory_key' }).then(() => {}).catch(() => {});
+          }
+        } catch (_e) { /* non-critical — never block the reply */ }
+
+      } else if (intent === 'exercise_substitution') {
+        // Biomechanical substitution context: resolve the target exercise, find
+        // catalogue alternatives ranked by muscle/movement/equipment match, and
+        // respect user injury and equipment memory.
+        const targetExerciseName = resolveExerciseAlias(latestUserMessage);
+        const userEquipmentPrefs = (memoryRows || [])
+          .filter((m: any) => m.category === 'equipment preferences')
+          .map((m: any) => m.memory_value as string);
+        const userInjury = (memoryRows || []).find((m: any) => m.category === 'injuries')?.memory_value ?? null;
+
+        try {
+          // 1. Find the exercise being asked about.
+          const { data: sourceExs } = await supabaseClient
+            .from('exercises')
+            .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral')
+            .ilike('name', `%${targetExerciseName}%`)
+            .eq('source_type', 'yeti_v2')
+            .limit(1);
+          const sourceEx = sourceExs?.[0];
+
+          let substitutionLines: string[] = [];
+
+          if (sourceEx) {
+            // 2. Query exercise_alternatives (pre-mapped curated swaps) first.
+            const { data: mappedAlts } = await supabaseClient
+              .from('exercise_alternatives')
+              .select('alternative_exercise_id, similarity_score, swap_reason, exercises!exercise_alternatives_alternative_exercise_id_fkey(id, name, primary_muscle, movement_pattern, equipment, difficulty, unilateral)')
+              .eq('exercise_id', sourceEx.id)
+              .order('similarity_score', { ascending: false })
+              .limit(6);
+
+            // 3. Fallback: find by same muscle + movement pattern from catalogue.
+            let catalogAlts: any[] = [];
+            if (!mappedAlts || mappedAlts.length < 3) {
+              const { data: byMuscle } = await supabaseClient
+                .from('exercises')
+                .select('id, name, primary_muscle, movement_pattern, equipment, difficulty, unilateral')
+                .eq('primary_muscle', sourceEx.primary_muscle)
+                .eq('movement_pattern', sourceEx.movement_pattern)
+                .eq('source_type', 'yeti_v2')
+                .neq('id', sourceEx.id)
+                .limit(8);
+              catalogAlts = byMuscle || [];
+            }
+
+            // 4. Score and rank alternatives (prefer matching equipment if user has preferences).
+            const allAlts = [
+              ...((mappedAlts || []).map((a: any) => ({ ...((a as any).exercises || {}), swap_reason: (a as any).swap_reason, similarity_score: (a as any).similarity_score ?? 0.8 }))),
+              ...catalogAlts.map((a: any) => ({ ...a, swap_reason: null, similarity_score: 0.6 })),
+            ].filter((a: any) => a.id && a.id !== sourceEx.id);
+
+            const scored = allAlts.map((a: any) => {
+              let score = a.similarity_score || 0;
+              if (userEquipmentPrefs.length > 0) {
+                const eqLower = (a.equipment || '').toLowerCase();
+                if (userEquipmentPrefs.some((p: string) => eqLower.includes(p.toLowerCase()))) score += 0.15;
+              }
+              if (userInjury) {
+                const injLower = userInjury.toLowerCase();
+                // Penalise exercises that share a joint keyword with the injury.
+                const riskMatch = ['knee', 'shoulder', 'lower back', 'elbow', 'wrist'].find(
+                  (j) => injLower.includes(j) && (a.name || '').toLowerCase().includes(j)
+                );
+                if (riskMatch) score -= 0.3;
+              }
+              return { ...a, finalScore: score };
+            }).sort((a: any, b: any) => b.finalScore - a.finalScore).slice(0, 3);
+
+            // 5. Build a structured context block for the prompt.
+            substitutionLines = [
+              `SOURCE EXERCISE: ${sourceEx.name} (${sourceEx.primary_muscle} / ${sourceEx.movement_pattern} / ${sourceEx.equipment || 'any equipment'})`,
+              ...(userEquipmentPrefs.length > 0 ? [`USER EQUIPMENT PREFERENCES: ${userEquipmentPrefs.join(', ')}`] : []),
+              ...(userInjury ? [`USER INJURY/LIMITATION: ${userInjury}`] : []),
+              `SUBSTITUTION OPTIONS (ranked by suitability):`,
+              ...scored.map((a: any, i: number) =>
+                `  ${i + 1}. ${a.name} — ${a.primary_muscle}, ${a.movement_pattern}, ${a.equipment || 'any equipment'}${
+                  a.swap_reason ? ` (${a.swap_reason})` : ''
+                }${ userInjury && a.finalScore < 0.5 ? ' [may aggravate injury — use with caution]' : '' }`
+              ),
+              scored.length === 0
+                ? 'NO_ALTERNATIVES_FOUND: Inform the athlete honestly and suggest general movement pattern alternatives.'
+                : '',
+            ].filter(Boolean);
+
+            engineResult = {
+              type: 'exercise_substitution',
+              source: sourceEx.name,
+              substitution_options: scored.map((a: any) => ({
+                name: a.name,
+                primary_muscle: a.primary_muscle,
+                movement_pattern: a.movement_pattern,
+                equipment: a.equipment,
+                difficulty: a.difficulty,
+                swap_reason: a.swap_reason,
+              })),
+              user_equipment_preferences: userEquipmentPrefs,
+              user_injury: userInjury,
+            };
+          } else {
+            substitutionLines = [`EXERCISE NOT IN CATALOGUE: "${targetExerciseName}" was not found in the Yeti exercise library.`, 'Use general biomechanical principles and ask the athlete for clarification.'];
+          }
+
+          contextBlock = substitutionLines.join('\n');
+        } catch (_e) {
+          contextBlock = `Could not load exercise substitution context: ${(_e as Error).message}`;
+        }
+
+      } else if (intent === 'exercise_logging') {
+        // Exercise logging intent: provide workout context so the coach can
+        // help the athlete record or confirm their set.
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+        engineResult = { type: 'exercise_logging', note: 'Ask the athlete which exercise, weight, and reps to confirm before logging.' };
+
+      } else if (intent === 'schedule_adjustment') {
+        // Schedule adjustment: load the current plan structure.
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+        engineResult = { type: 'schedule_adjustment', note: 'Review the current plan days and help the athlete adjust their schedule.' };
+
       } else {
         contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
+      }
+    } else if (PERSONAL_CONTEXT_INTENTS.includes(intent)) {
+      // Personal coaching context: for technique, recovery, rest, general chat,
+      // goal adjustment, and app navigation — load profile + memory instead of
+      // the client-supplied context string (which could be stale or empty).
+      try {
+        const [{ data: prof }, recentSessionsResult] = await Promise.all([
+          supabaseClient.from('profiles')
+            .select('goal, weight_kg, height_cm, experience_level, daily_calorie_target, daily_protein_target')
+            .eq('id', user.id).maybeSingle(),
+          supabaseClient.from('workout_sessions')
+            .select('id, started_at, completed_at')
+            .eq('user_id', user.id)
+            .not('completed_at', 'is', null)
+            .order('completed_at', { ascending: false })
+            .limit(3),
+        ]);
+
+        const equipmentPrefs = (memoryRows || [])
+          .filter((m: any) => m.category === 'equipment preferences')
+          .map((m: any) => m.memory_value as string);
+        const injuries = (memoryRows || [])
+          .filter((m: any) => m.category === 'injuries')
+          .map((m: any) => m.memory_value as string);
+        const recentSessions = recentSessionsResult.data || [];
+
+        const personalLines: string[] = [];
+        if (prof?.goal) personalLines.push(`TRAINING GOAL: ${prof.goal}`);
+        if (prof?.experience_level) personalLines.push(`EXPERIENCE LEVEL: ${prof.experience_level}`);
+        if (prof?.weight_kg) personalLines.push(`BODY WEIGHT: ${Number(prof.weight_kg).toFixed(1)} kg`);
+        if (equipmentPrefs.length > 0) personalLines.push(`AVAILABLE EQUIPMENT: ${equipmentPrefs.join(', ')}`);
+        if (injuries.length > 0) personalLines.push(`KNOWN INJURIES / LIMITATIONS: ${injuries.join('; ')}`);
+        if (recentSessions.length > 0) {
+          const lastDate = recentSessions[0].completed_at
+            ? new Date(recentSessions[0].completed_at).toLocaleDateString()
+            : 'unknown';
+          personalLines.push(`LAST WORKOUT: ${lastDate} (${recentSessions.length} sessions in recent history)`);
+        }
+        if (intent === 'goal_adjustment') {
+          personalLines.push('USER WANTS TO ADJUST THEIR TRAINING GOAL. Confirm the new goal and update memory.');
+        } else if (intent === 'app_navigation') {
+          personalLines.push('USER NEEDS HELP NAVIGATING THE YETI APP. Provide brief, accurate guidance about where features are located.');
+        }
+        // Fall back to client-supplied context if profile is empty
+        contextBlock = personalLines.length > 0
+          ? personalLines.join('\n')
+          : (typeof context === 'string' ? context : '(no profile data available)');
+      } catch (_e) {
+        // Fail-open: use client context if profile fetch errors
+        contextBlock = typeof context === 'string' ? context : '';
       }
     } else if (NUTRITION_INTENTS.includes(intent)) {
       const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id);
       contextBlock = nctx;
 
       if (intent === 'nutrition_target_lookup') {
-        // Deterministic read-only lookup (Fix 8) — never computes a new value,
+        // Deterministic read-only lookup — never computes a new value,
         // only reports what's already stored, or an honest fallback.
         const ask = detectNutritionTargetAsk(latestUserMessage) ?? 'macro';
         const targets: StoredNutritionTargets = {
@@ -1157,15 +1375,9 @@ serve(async (req) => {
         engineResult = { type: 'nutrition_target_lookup', ask, ...targets, hasValue: described.hasValue, answerText: described.text };
       } else if (intent === 'grocery_list') {
         const memoryPref = (memoryRows || []).find((m: any) => m.category === 'nutrition preferences')?.memory_value as any;
-        engineResult = {
-          type: 'grocery_list',
-          list: generateGroceryList(memoryPref || 'omnivore', 'moderate'),
-        };
+        engineResult = { type: 'grocery_list', list: generateGroceryList(memoryPref || 'omnivore', 'moderate') };
       } else if (intent === 'supplement_guidance') {
-        engineResult = {
-          type: 'supplement_guidance',
-          supplements: getSupplementAdvice(latestUserMessage),
-        };
+        engineResult = { type: 'supplement_guidance', supplements: getSupplementAdvice(latestUserMessage) };
       } else if (intent === 'eating_out_guidance') {
         engineResult = {
           type: 'eating_out_guidance',
@@ -1177,10 +1389,7 @@ serve(async (req) => {
         };
       } else if (intent === 'nutrition_plan_edit') {
         const swap = getEqualMacroSubstitutions(latestUserMessage, 100);
-        engineResult = {
-          type: 'nutrition_plan_edit',
-          swap,
-        };
+        engineResult = { type: 'nutrition_plan_edit', swap };
       } else {
         // nutrition_plan_generate, nutrition_review, nutrition_status, nutrition_advice
         const weightKg = memProfile?.weight_kg ? Number(memProfile.weight_kg) : 75;
@@ -1190,7 +1399,6 @@ serve(async (req) => {
           activityLevel: 'moderate',
         });
         const cycling = computeMacroCycling(rawCalc.dailyCalories, weightKg);
-
         const sampleMeals = [
           {
             name: 'Breakfast',
@@ -1209,35 +1417,23 @@ serve(async (req) => {
             ],
           },
         ];
-
         const rawResult = {
-          baseTdee: rawCalc.baseTdee,
-          dailyTargetCalories: rawCalc.dailyCalories,
-          trainingDayMacros: cycling.trainingDay,
-          restDayMacros: cycling.restDay,
-          currentPhase: rawCalc.phase,
-          meals: sampleMeals,
+          baseTdee: rawCalc.baseTdee, dailyTargetCalories: rawCalc.dailyCalories,
+          trainingDayMacros: cycling.trainingDay, restDayMacros: cycling.restDay,
+          currentPhase: rawCalc.phase, meals: sampleMeals,
           groceryList: generateGroceryList('omnivore', 'moderate'),
         };
-
         const validation = validateNutritionPlan(sampleMeals, {
-          targetCalories: rawCalc.dailyCalories,
-          targetProteinG: cycling.trainingDay.proteinG,
-          weightKg,
+          targetCalories: rawCalc.dailyCalories, targetProteinG: cycling.trainingDay.proteinG, weightKg,
         });
-
         const intel = deriveNutritionIntelligence(rawResult, validation, {
-          consumedCaloriesAvg: engine.consumedCalories,
-          targetCalories: engine.calorieTarget,
-          consumedProteinAvg: engine.consumedProtein,
-          targetProtein: engine.proteinTarget,
+          consumedCaloriesAvg: engine.consumedCalories, targetCalories: engine.calorieTarget,
+          consumedProteinAvg: engine.consumedProtein, targetProtein: engine.proteinTarget,
         }, { weightKg, goal: mapProfileGoal(memProfile?.goal) as any });
-
         engineResult = intel;
       }
     } else {
-
-      // general_chat / explanation / recovery / advice / meal_suggestion / rest_pacing:
+      // meal_suggestion / and any future unclassified intents:
       // use only the light client-supplied context; NEVER default to nutrition.
       contextBlock = typeof context === 'string' ? context : '';
     }
@@ -1273,8 +1469,10 @@ serve(async (req) => {
     let labelLeakDetected = false, labelLeakSanitized = false;
     let providerAttempts: ProviderAttemptLog[] = [];
     try {
-      // Everything the answer may cite must appear here (engine result + context).
-      const groundedSource = `${engineResult !== undefined ? JSON.stringify(engineResult) : ''}\n${contextBlock}`;
+      // Everything the answer may cite must appear here (engine result + context
+      // + Coach Memory — the personal-claim guard needs memory-sourced facts
+      // like favourite exercises or training days to ground as legitimate).
+      const groundedSource = `${engineResult !== undefined ? JSON.stringify(engineResult) : ''}\n${contextBlock}\n${memoryCard}`;
       const out = await runCoach(baseMessages, intent, groundedSource);
       resp = out.resp; provider = out.provider; model = out.model; usage = out.usage; costUsd = out.costUsd;
       labelLeakDetected = out.labelLeakDetected; labelLeakSanitized = out.labelLeakSanitized;
