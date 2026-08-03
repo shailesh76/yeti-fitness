@@ -1,9 +1,4 @@
 {
-  "cleanUrls": true,
-  "outputDirectory": "dist",
-  "buildCommand": "npx expo export --platform web",
-  "installCommand": "npm install --ignore-scripts --legacy-peer-deps",
-  "rewrites": [
-    { "source": "/:path*", "destination": "/index" }
-  ]
+  "framework": "nextjs",
+  "rootDirectory": "apps/coach-dashboard"
 }

@@ -1,19 +1,29 @@
 "use client";
 
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { LayoutDashboard, Users, NotebookPen, Dumbbell, MessageSquare, LogOut, Settings, ChevronLeft, ChevronRight, Menu, ShieldAlert } from "lucide-react";
+import { 
+  LayoutDashboard, Users, Calendar, Dumbbell, Utensils, MessageSquare, 
+  ClipboardCheck, BarChart3, BookOpen, Bot, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, FileText, Activity
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 
 const NAV_ITEMS = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Clients", href: "/dashboard", icon: Users },
-  { name: "Plan Builder", href: "/plans/builder", icon: NotebookPen },
-  { name: "Exercise Library", href: "/exercises", icon: Dumbbell },
+  { name: "Athletes", href: "/dashboard/athletes", icon: Users },
+  { name: "Programs", href: "/dashboard/templates", icon: FileText },
+  { name: "Workouts", href: "/dashboard/live", icon: Dumbbell },
+  { name: "Nutrition", href: "/dashboard/nutrition", icon: Utensils },
+  { name: "AI Overrides", href: "/dashboard/ai-overrides", icon: Bot },
+  { name: "Check-ins", href: "/dashboard/checkins", icon: ClipboardCheck },
+  { name: "Assessments", href: "/dashboard/assessments", icon: Activity },
+  { name: "Calendar", href: "/dashboard/calendar", icon: Calendar },
+  { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { name: "Health Audit", href: "/admin/health", icon: ShieldAlert },
+  { name: "Library", href: "/exercises", icon: BookOpen, badge: "220 Yeti" },
   { name: "Settings", href: "/settings", icon: Settings },
-  { name: "Messages", href: "#", icon: MessageSquare },
 ];
 
 export function Sidebar() {
@@ -22,8 +32,9 @@ export function Sidebar() {
   const [coachName, setCoachName] = useState<string>("...");
   const [userRole, setUserRole] = useState<string>("coach");
   const [loggingOut, setLoggingOut] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+
 
   useEffect(() => {
     setIsMounted(true);
@@ -66,32 +77,38 @@ export function Sidebar() {
 
   const isNavActive = (name: string, href: string) => {
     if (href === "#") return false;
-    if (name === "Clients" || name === "Dashboard") {
-      return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+    if (name === "Dashboard") {
+      return pathname === "/dashboard" || pathname === "/dashboard/";
+    }
+    if (name === "Athletes") {
+      return pathname.startsWith("/dashboard/athletes") || (
+        pathname.startsWith("/dashboard/") && 
+        pathname !== "/dashboard" && 
+        pathname !== "/dashboard/" && 
+        !pathname.startsWith("/dashboard/live") && 
+        !pathname.startsWith("/dashboard/templates") &&
+        !pathname.startsWith("/dashboard/subscription") &&
+        !pathname.startsWith("/dashboard/nutrition") &&
+        !pathname.startsWith("/dashboard/checkins") &&
+        !pathname.startsWith("/dashboard/analytics") &&
+        !pathname.startsWith("/dashboard/assessments") &&
+        !pathname.startsWith("/dashboard/calendar")
+      );
+    }
+    if (name === "Programs") {
+      return pathname.startsWith("/dashboard/templates") || pathname.startsWith("/plans/builder");
     }
     return pathname.startsWith(href);
   };
 
   const initials = coachName
     .split(" ")
-    .map((n) => n[0])
+    .map((n: string) => n[0])
     .join("")
     .substring(0, 2)
     .toUpperCase();
 
-  if (!isMounted) {
-    return (
-      <aside className="flex h-screen w-64 flex-col bg-[#0a0a0a] border-r border-white/5 px-4 py-6 sticky top-0 shrink-0">
-        <div className="flex items-center gap-3 px-2 mb-10">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <span className="text-[#0a0a0a] font-black text-xl">Y</span>
-          </div>
-          <span className="text-xl font-black tracking-tight text-white">Yeti Coach</span>
-        </div>
-        <nav className="flex flex-1 flex-col gap-2" />
-      </aside>
-    );
-  }
+
 
   return (
     <>
@@ -182,7 +199,16 @@ export function Sidebar() {
                 )}
               >
                 <Icon className="h-5 w-5 shrink-0" />
-                {!isCollapsed && <span className="transition-opacity duration-300">{item.name}</span>}
+                {!isCollapsed && (
+                  <div className="flex items-center justify-between flex-1">
+                    <span className="transition-opacity duration-300">{item.name}</span>
+                    {item.badge ? (
+                      <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full ml-auto">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
               </Link>
             );
           })}
@@ -190,13 +216,13 @@ export function Sidebar() {
 
         <div className={cn("mt-auto px-2 border-t border-white/5 pt-6 transition-all duration-300", isCollapsed ? "mx-auto px-0" : "")}>
           <div className={cn("flex items-center", isCollapsed ? "flex-col gap-3" : "gap-3")}>
-            <div className="h-10 w-10 rounded-full bg-surface-highlight flex items-center justify-center border border-white/10 shrink-0">
-              <span className="font-bold text-xs text-white">{initials || "CO"}</span>
+            <div className="h-10 w-10 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center shrink-0">
+              <span className="font-bold text-xs text-blue-400">{initials || "CA"}</span>
             </div>
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-bold text-white truncate">{coachName}</span>
-                <span className="text-xs text-gray-500 font-semibold capitalize">{userRole}</span>
+                <span className="text-sm font-bold text-white truncate">{coachName === "..." ? "Coach Alex" : coachName}</span>
+                <span className="text-xs text-blue-400 font-semibold">Premium Coach</span>
               </div>
             )}
           </div>

@@ -30,7 +30,7 @@ export default function NewExercise() {
         setCoachId(session.user.id);
       }
     });
-  }, []);
+  }, [router]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'gif' | 'video') => {
     const file = e.target.files?.[0];
@@ -55,7 +55,7 @@ export default function NewExercise() {
   const uploadToStorage = async (file: File, folder: string): Promise<string> => {
     // Simulate upload progress since we don't have direct progress events in the Edge function upload
     const interval = setInterval(() => {
-      setUploadProgress(prev => Math.min(prev + 10, 90));
+      setUploadProgress((prev: number) => Math.min(prev + 10, 90));
     }, 150);
 
     try {
