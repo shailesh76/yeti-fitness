@@ -102,7 +102,7 @@ describe('Conversational prompt (coach-v3)', () => {
       memoryCard: 'Current Injury: Left Shoulder Irritation',
       safetyTriggered: false,
     });
-    expect(COACH_PROMPT_VERSION).toBe('coach-v4');
+    expect(COACH_PROMPT_VERSION).toBe('coach-v4.1');
     expect(prompt).toContain('COACH MEMORY');
     expect(prompt).toContain('Left Shoulder Irritation');
     expect(prompt).toMatch(/not a chatbot|NOT a chatbot/i);

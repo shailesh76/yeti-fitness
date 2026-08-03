@@ -67,6 +67,32 @@ export function buildCoachMemoryCard(m: CoachMemory): string {
   return lines.length ? lines.join('\n') : '(No stored coach memory yet.)';
 }
 
+/**
+ * Sanitizes session summary text to strip sensitive items (medical red flags, PII,
+ * casual emotional complaints, speculative diagnoses) before persisting to ai_memory.
+ */
+export function sanitizeSummarySensitivity(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\b(chest pain|faint(?:ed|ing)?|shortness of breath|seizure|numbness|trauma)\b/gi, '[medical_redacted]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email_redacted]')
+    .replace(/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/gi, '[phone_redacted]')
+    .trim();
+}
+
+/**
+ * Checks whether a session summary string is within the 30-day freshness limit.
+ */
+export function isSummaryFresh(summaryText: string, maxDays = 30): boolean {
+  const dateMatch = summaryText.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (!dateMatch) return true; // keep if no date marker found
+  const summaryDate = new Date(dateMatch[1]).getTime();
+  if (isNaN(summaryDate)) return true;
+  const now = Date.now();
+  const diffDays = (now - summaryDate) / (1000 * 60 * 60 * 24);
+  return diffDays <= maxDays;
+}
+
 export function foldMemoryRows(rows: MemoryRow[]): CoachMemory {
   const m: CoachMemory = {
     favouriteExercises: [],
@@ -102,7 +128,10 @@ export function foldMemoryRows(rows: MemoryRow[]): CoachMemory {
 
     // Coaching summaries — stored as coaching_observations with [session_summary] tag
     if ((cat === 'coaching observations' || cat === 'coaching_observations') && val.startsWith('[session_summary]')) {
-      pushBounded(m.coachingSummaries!, val.replace('[session_summary]', '').trim(), 3);
+      const summaryBody = val.replace('[session_summary]', '').trim();
+      if (isSummaryFresh(summaryBody, 30)) {
+        pushBounded(m.coachingSummaries!, summaryBody, 3);
+      }
       continue;
     }
     // Preferred training days

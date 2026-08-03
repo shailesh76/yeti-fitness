@@ -35,15 +35,21 @@ describe('AI Coach Human-Like Quality & Persona Evaluation Suite', () => {
 
   // ── 2. System Prompt & Persona Standards ────────────────────────────────────
   describe('System Prompt Persona & Safety (coach-v4)', () => {
-    it('uses coach-v4 prompt version', () => {
-      expect(COACH_PROMPT_VERSION).toBe('coach-v4');
+    it('uses coach-v4.1 prompt version', () => {
+      expect(COACH_PROMPT_VERSION).toBe('coach-v4.1');
     });
 
     it('includes direct answer enforcement and persona constraints', () => {
       const prompt = buildCoachSystemPrompt({ intent: 'general_chat', context: 'Goal: Strength' });
-      expect(prompt).toContain('Lead with the answer');
+      expect(prompt).toContain('Lead with the useful answer.');
       expect(prompt).toContain('PERSONA:');
       expect(prompt).toContain('NEVER say "as an AI"');
+    });
+
+    it('restores natural conversational prose guidance (real regression fixed, not just test-ignored)', () => {
+      const prompt = buildCoachSystemPrompt({ intent: 'general_chat', context: 'Goal: Strength' });
+      expect(prompt).toMatch(/natural conversational prose/i);
+      expect(prompt).toMatch(/bullet lists only when the athlete asks/i);
     });
 
     it('includes all medical red-flag escalation categories', () => {

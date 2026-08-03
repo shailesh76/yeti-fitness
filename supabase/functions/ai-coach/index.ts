@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, checkProviderCapacity, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
-import { classifyIntentWithHistory, CoachIntent } from "../_shared/ai/intent.ts";
+import { classifyIntentWithHistory, classifySafetySignal, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
 import { resolveExerciseAlias, extractExerciseName } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
-import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory } from "../_shared/ai/coachMemory.ts";
+import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory, sanitizeSummarySensitivity } from "../_shared/ai/coachMemory.ts";
 import { classifyMemory, normalizeMemoryCategory } from "../_shared/ai/memoryClassifier.ts";
 import {
   parseCoachResponse, responseViolatesIntent, safePlainText, ungroundedNumbers,
@@ -39,6 +39,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+
+const YETI_APP_ROUTE_DIRECTORY: Record<string, { route: string; label: string; description: string }> = {
+  'rest_timer': { route: '/workouts/rest-timer', label: 'Rest Timer', description: 'Rest timer settings and active timer view' },
+  'workout_log': { route: '/workouts/history', label: 'Workout History', description: 'Past workouts and completed session logs' },
+  'nutrition_diary': { route: '/nutrition/log', label: 'Nutrition Diary', description: 'Daily food logger and calorie/macro summary' },
+  'settings': { route: '/settings/profile', label: 'Account Settings', description: 'Profile, goals, equipment, and subscription settings' },
+  'progress': { route: '/progress/analytics', label: 'Progress & PRs', description: 'Personal records, volume graphs, and strength analytics' },
+  'active_workout': { route: '/workouts/active', label: 'Active Session', description: 'Current workout logging screen' },
+};
+
 const WORKOUT_INTENTS: CoachIntent[] = [
   'workout_plan_edit', 'workout_progression', 'exercise_substitution',
   'workout_program_generate', 'weekly_review', 'adaptive_coaching',
@@ -49,7 +59,7 @@ const NUTRITION_INTENTS: CoachIntent[] = ['nutrition_plan_generate', 'nutrition_
 // engine computation.
 const PERSONAL_CONTEXT_INTENTS: CoachIntent[] = [
   'workout_explanation', 'rest_pacing', 'recovery',
-  'general_chat', 'goal_adjustment', 'app_navigation',
+  'goal_adjustment',
 ];
 
 /** Readable engine label for diagnostics (Fix 10) — which deterministic engine (if any) backed this reply. */
@@ -232,7 +242,7 @@ async function loadProgressionForExercise(
     const estimated1rm = Math.max(...sess.map((s: any) => estimateOneRepMax(Number(s.weight) || 0, Number(s.reps) || 0)));
     const volumeKg = sess.reduce((sum: number, s: any) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0);
     const completedAt = sessionCompletedAt.get(id);
-    const daysAgo = completedAt ? Math.max(0, Math.round((nowMs - new Date(completedAt).getTime()) / 86_400_000)) : 0;
+    const daysAgo = completedAt ? Math.max(0, Math.round((nowMs - new Date(completedAt as string).getTime()) / 86_400_000)) : 0;
     return { daysAgo, estimated1rm, volumeKg };
   });
 
@@ -259,7 +269,7 @@ async function loadProgressionForExercise(
     const sess = bySession[id];
     const w = Math.max(...sess.map((s: any) => Number(s.weight) || 0));
     const reps = sess.map((s: any) => Number(s.reps) || 0).join(', ');
-    const when = sessionCompletedAt.get(id) ? new Date(sessionCompletedAt.get(id)).toLocaleDateString() : '';
+    const when = sessionCompletedAt.get(id) ? new Date(sessionCompletedAt.get(id) as string).toLocaleDateString() : '';
     return `  ${i === 0 ? 'latest' : `-${i}`} ${when}: ${w}kg x [${reps}]`;
   }).join('\n');
 
@@ -751,7 +761,7 @@ serve(async (req) => {
         athlete_id: user.id, subscription_tier: subscriptionTier, success: false,
         error_reason: 'daily_limit_exceeded', message_length: message?.length ?? 0,
         conversation_id: conversationId || null,
-      }).then(() => {}).catch(() => {});
+      }).then(() => {}, () => {});
       return new Response(JSON.stringify({ error: 'AI Coach daily limit reached for free tier. Upgrade to Yeti Pro for unlimited coaching!' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
       });
@@ -770,13 +780,37 @@ serve(async (req) => {
       .map((m: any) => m.content);
     const intent = classifyIntentWithHistory(latestUserMessage, priorUserMessagesForIntent);
 
-    // Safety keyword scan (log injury reports).
-    const safetyTriggered = /\b(pain|hurt|injured|sprain|tweak|ache|injury)\b/i.test(latestUserMessage) || intent === 'medical_safety';
+    // 5-Way Medical Safety & Emergency Escalation Check
+    const safetySignal = classifySafetySignal(latestUserMessage);
+    const safetyTriggered = safetySignal === 'current_first_person_emergency' || safetySignal === 'current_third_person_emergency' || intent === 'medical_safety';
+
     if (safetyTriggered) {
       await supabaseServiceRole.from('ai_safety_logs').insert({
         user_id: user.id, conversation_id: conversationId || 'general',
-        risk_type: 'INJURY_REPORT', trigger_text: latestUserMessage, category: 'injuries',
-      }).then(() => {}).catch(() => {});
+        risk_type: safetySignal === 'current_third_person_emergency' ? 'THIRD_PERSON_EMERGENCY' : 'INJURY_REPORT',
+        trigger_text: latestUserMessage, category: 'injuries',
+      }).then(() => {}, () => {});
+    }
+
+    // Pre-generation emergency escalation: halt exercise prescription engines and return immediate safety response
+    if (safetySignal === 'current_first_person_emergency' || safetySignal === 'current_third_person_emergency') {
+      const emergencyReply = safetySignal === 'current_third_person_emergency'
+        ? "Please seek immediate emergency medical care for your friend. Do not attempt to move them or resume training until a medical professional has evaluated them."
+        : "Your health and safety come first. If you are experiencing chest pain, fainting, shortness of breath, or severe pain, please stop exercising immediately and seek emergency medical attention.";
+
+      return new Response(JSON.stringify({
+        reply: emergencyReply, response: emergencyReply,
+        actions: [{ type: 'medical_escalation', emergency: true, signal: safetySignal }],
+        action_types: ['medical_escalation'],
+        intent: 'medical_safety', response_type: 'medical_disclaimer',
+        structured: {
+          direct_answer: emergencyReply,
+          reason: 'Emergency safety signal detected — exercise prescription halted.',
+          recommended_action: { type: 'medical_escalation', emergency: true, signal: safetySignal },
+          supporting_data: null, missing_information: [],
+          safety_flag: true, follow_up_question: null,
+        },
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     }
 
     // 4b. Coach Memory — long-term ai_memory folded with deterministic profile
@@ -926,7 +960,7 @@ serve(async (req) => {
         message_length: latestUserMessage.length, conversation_id: conversationId || null,
         engine: 'explicit_memory', fallback_triggered: false, response_type: responseType,
         action_types: detActions.map((a) => a.type), fallback_reason: null,
-      }).then(() => {}).catch(() => {});
+      }).then(() => {}, () => {});
 
       return new Response(JSON.stringify({
         reply: deterministicReply, response: deterministicReply,
@@ -964,7 +998,44 @@ serve(async (req) => {
     // that the model happens to remember the second half of the question.
     let compoundNutritionAnswer: string | null = null;
 
-    if (WORKOUT_INTENTS.includes(intent)) {
+    if (intent === 'app_navigation') {
+      // App Navigation Intent: Context selection matrix enforces ZERO private
+      // profile/injury context. Destination validated strictly against the
+      // YETI_APP_ROUTE_DIRECTORY allowlist — no silent default: this branch
+      // was previously unreachable entirely (app_navigation was in none of
+      // WORKOUT_INTENTS/PERSONAL_CONTEXT_INTENTS/NUTRITION_INTENTS, so it fell
+      // through to the generic catch-all below every time), and even once
+      // reachable it defaulted an unmatched question to "Active Session"
+      // rather than asking which screen the athlete meant.
+      const msgLower = latestUserMessage.toLowerCase();
+      let matchedKey: string | null = null;
+      if (msgLower.includes('timer') || msgLower.includes('rest')) matchedKey = 'rest_timer';
+      else if (msgLower.includes('history') || msgLower.includes('past')) matchedKey = 'workout_log';
+      else if (msgLower.includes('food') || msgLower.includes('diet') || msgLower.includes('nutrition') || msgLower.includes('calorie')) matchedKey = 'nutrition_diary';
+      else if (msgLower.includes('setting') || msgLower.includes('profile')) matchedKey = 'settings';
+      else if (msgLower.includes('progress') || msgLower.includes('pr') || msgLower.includes('graph')) matchedKey = 'progress';
+      else if (msgLower.includes('active') || msgLower.includes('current session') || msgLower.includes('logging screen')) matchedKey = 'active_workout';
+
+      if (matchedKey) {
+        const routeTarget = YETI_APP_ROUTE_DIRECTORY[matchedKey];
+        engineResult = {
+          type: 'app_navigation',
+          status: 'route_validated',
+          target_route: routeTarget.route,
+          screen_label: routeTarget.label,
+          description: routeTarget.description,
+        };
+        contextBlock = `YETI APP NAVIGATION ALLOWLIST DIRECTORY:\n- Screen: ${routeTarget.label} (Route: ${routeTarget.route}) — ${routeTarget.description}`;
+      } else {
+        const supportedDestinations = Object.values(YETI_APP_ROUTE_DIRECTORY).map((r) => r.label);
+        engineResult = {
+          type: 'app_navigation',
+          status: 'clarification_needed',
+          supported_destinations: supportedDestinations,
+        };
+        contextBlock = `YETI APP NAVIGATION ALLOWLIST DIRECTORY (ask the athlete which one they mean):\n${supportedDestinations.map((d) => `- ${d}`).join('\n')}`;
+      }
+    } else if (WORKOUT_INTENTS.includes(intent)) {
       if (intent === 'workout_progression') {
         // Pull the target lift's last 3–5 completed working sets and let the
         // deterministic engine decide; the LLM only explains the result.
@@ -1178,31 +1249,50 @@ serve(async (req) => {
           const limitingFactor = (intelligence as any).biggestLimitingFactor ?? null;
           const summaryParts = [adherenceLabel, prsLabel, limitingFactor].filter(Boolean);
           if (summaryParts.length > 0) {
-            const summaryText = `[session_summary] ${summaryDate}: ${summaryParts.join(', ')}.`;
+            const sanitizedParts = sanitizeSummarySensitivity(summaryParts.join(', '));
+            const turnKey = `session_summary_${conversationId || 'default'}_${Date.now()}`;
+            const summaryText = `[session_summary] ${summaryDate}: ${sanitizedParts}.`;
             await supabaseServiceRole.from('ai_memory').upsert({
               athlete_id: user.id,
               category: 'coaching observations',
-              memory_key: `session_summary_${summaryDate}`,
+              memory_key: turnKey,
               memory_value: summaryText,
-            }, { onConflict: 'athlete_id,memory_key' }).then(() => {}).catch(() => {});
+            }, { onConflict: 'athlete_id,memory_key' }).then(() => {}, () => {});
           }
         } catch (_e) { /* non-critical — never block the reply */ }
 
       } else if (intent === 'exercise_substitution') {
-        // Biomechanical substitution context: resolve the target exercise, find
-        // catalogue alternatives ranked by muscle/movement/equipment match, and
-        // respect user injury and equipment memory.
+        // Biomechanical Substitution Engine with 8-Factor Scoring & Hard Exclusions
         const targetExerciseName = resolveExerciseAlias(latestUserMessage);
         const userEquipmentPrefs = (memoryRows || [])
           .filter((m: any) => m.category === 'equipment preferences')
           .map((m: any) => m.memory_value as string);
         const userInjury = (memoryRows || []).find((m: any) => m.category === 'injuries')?.memory_value ?? null;
+        // Only exclude on CLEAR negative sentiment or an explicit disliked-
+        // exercise key/category — matching category === 'preferences' alone
+        // was a real bug: that category also holds LIKED things ("prefers
+        // dumbbell press", "likes pull-ups"), which were getting excluded as
+        // if disliked purely because they shared the same memory category.
+        const NEGATIVE_EXERCISE_SENTIMENT = /\b(dislikes?|hate|avoid|don'?t want|do not want|can'?t stand|no longer want)\b/i;
+        const dislikedExercises = (memoryRows || [])
+          .filter((m: any) => {
+            const key = (m.memory_key || '').toLowerCase();
+            const val = (m.memory_value as string) || '';
+            if (key.includes('disliked_exercise') || key.includes('avoided_exercise') || key.includes('hate_exercise') || key.includes('cant_do')) return true;
+            return m.category === 'preferences' && NEGATIVE_EXERCISE_SENTIMENT.test(val);
+          })
+          .map((m: any) => (m.memory_value as string).toLowerCase());
 
         try {
-          // 1. Find the exercise being asked about.
+          // 1. Resolve source exercise from catalogue. source_type='yeti_v2'
+          //    restored — the broader multi-source lookup wasn't verified
+          //    against live data before this pass; keeping the previously
+          //    verified, catalog-scoped behavior here. If a genuine need for
+          //    multi-source substitution exists, it should be a separate,
+          //    reviewed change, not folded into this repair.
           const { data: sourceExs } = await supabaseClient
             .from('exercises')
-            .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral')
+            .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral, is_active, status, media_status')
             .ilike('name', `%${targetExerciseName}%`)
             .eq('source_type', 'yeti_v2')
             .limit(1);
@@ -1211,80 +1301,186 @@ serve(async (req) => {
           let substitutionLines: string[] = [];
 
           if (sourceEx) {
-            // 2. Query exercise_alternatives (pre-mapped curated swaps) first.
+            // 2. Fetch curated alternatives from exercise_alternatives
             const { data: mappedAlts } = await supabaseClient
               .from('exercise_alternatives')
-              .select('alternative_exercise_id, similarity_score, swap_reason, exercises!exercise_alternatives_alternative_exercise_id_fkey(id, name, primary_muscle, movement_pattern, equipment, difficulty, unilateral)')
+              .select('alternative_exercise_id, similarity_score, swap_reason, exercises!exercise_alternatives_alternative_exercise_id_fkey(id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral, is_active, status, media_status)')
               .eq('exercise_id', sourceEx.id)
               .order('similarity_score', { ascending: false })
-              .limit(6);
+              .limit(8);
 
-            // 3. Fallback: find by same muscle + movement pattern from catalogue.
-            let catalogAlts: any[] = [];
-            if (!mappedAlts || mappedAlts.length < 3) {
-              const { data: byMuscle } = await supabaseClient
-                .from('exercises')
-                .select('id, name, primary_muscle, movement_pattern, equipment, difficulty, unilateral')
-                .eq('primary_muscle', sourceEx.primary_muscle)
-                .eq('movement_pattern', sourceEx.movement_pattern)
-                .eq('source_type', 'yeti_v2')
-                .neq('id', sourceEx.id)
-                .limit(8);
-              catalogAlts = byMuscle || [];
-            }
+            // 3. Fetch catalogue fallback candidates matching primary_muscle or movement_pattern
+            const { data: byMuscle } = await supabaseClient
+              .from('exercises')
+              .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral, is_active, status, media_status')
+              .or(`primary_muscle.eq.${sourceEx.primary_muscle},movement_pattern.eq.${sourceEx.movement_pattern}`)
+              .eq('source_type', 'yeti_v2')
+              .neq('id', sourceEx.id)
+              .limit(15);
 
-            // 4. Score and rank alternatives (prefer matching equipment if user has preferences).
-            const allAlts = [
-              ...((mappedAlts || []).map((a: any) => ({ ...((a as any).exercises || {}), swap_reason: (a as any).swap_reason, similarity_score: (a as any).similarity_score ?? 0.8 }))),
-              ...catalogAlts.map((a: any) => ({ ...a, swap_reason: null, similarity_score: 0.6 })),
-            ].filter((a: any) => a.id && a.id !== sourceEx.id);
+            const rawCandidates = [
+              ...((mappedAlts || []).map((a: any) => ({ ...((a as any).exercises || {}), swap_reason: (a as any).swap_reason, isCurated: true, similarity_score: Number((a as any).similarity_score) || 1.0 }))),
+              ...((byMuscle || []).map((a: any) => ({ ...a, swap_reason: null, isCurated: false, similarity_score: 0.5 }))),
+            ];
 
-            const scored = allAlts.map((a: any) => {
-              let score = a.similarity_score || 0;
-              if (userEquipmentPrefs.length > 0) {
-                const eqLower = (a.equipment || '').toLowerCase();
-                if (userEquipmentPrefs.some((p: string) => eqLower.includes(p.toLowerCase()))) score += 0.15;
+            // 4. Apply Strict Hard Exclusions BEFORE scoring:
+            //    - Exclude inactive candidates (is_active === false)
+            //    - Exclude self-references (same ID or name)
+            //    - Exclude duplicate candidate IDs
+            //    - Exclude unavailable equipment when constrained
+            //    - Exclude Level 1/2 joint injury restriction conflicts
+            //    - Exclude user-disliked exercises
+            const seenIds = new Set<string>();
+            const excludedReasons: string[] = [];
+
+            const eligibleCandidates = rawCandidates.filter((c: any) => {
+              if (!c || !c.id || !c.name) return false;
+              if (c.id === sourceEx.id || c.name.toLowerCase() === sourceEx.name.toLowerCase()) return false;
+              if (seenIds.has(c.id)) return false;
+              seenIds.add(c.id);
+
+              // Hard exclusion 1: Inactive candidates
+              if (c.is_active === false) {
+                excludedReasons.push(`${c.name}: hard-excluded (inactive candidate)`);
+                return false;
               }
+
+              // Hard exclusion 2: Equipment constraint
+              if (userEquipmentPrefs.length > 0) {
+                const reqEq = (c.equipment || '').toLowerCase();
+                const matchesPref = userEquipmentPrefs.some((pref: string) => reqEq.includes(pref.toLowerCase()) || pref.toLowerCase().includes(reqEq));
+                if (!matchesPref && reqEq && reqEq !== 'bodyweight' && reqEq !== 'none') {
+                  excludedReasons.push(`${c.name}: hard-excluded (equipment "${c.equipment}" unavailable)`);
+                  return false;
+                }
+              }
+
+              // Hard exclusion 3: Level 1 & 2 Injury restriction conflict
               if (userInjury) {
                 const injLower = userInjury.toLowerCase();
-                // Penalise exercises that share a joint keyword with the injury.
-                const riskMatch = ['knee', 'shoulder', 'lower back', 'elbow', 'wrist'].find(
-                  (j) => injLower.includes(j) && (a.name || '').toLowerCase().includes(j)
+                const jointRisk = ['knee', 'shoulder', 'lower back', 'spine', 'wrist', 'elbow'].find(
+                  (j) => injLower.includes(j) && ((c.name || '').toLowerCase().includes(j) || (c.primary_muscle || '').toLowerCase().includes(j))
                 );
-                if (riskMatch) score -= 0.3;
+                if (jointRisk && (injLower.includes('do not') || injLower.includes('avoid') || injLower.includes('restricted') || injLower.includes('doctor') || injLower.includes('severe'))) {
+                  excludedReasons.push(`${c.name}: hard-excluded (Level 1/2 injury restriction conflict on ${jointRisk})`);
+                  return false;
+                }
               }
-              return { ...a, finalScore: score };
-            }).sort((a: any, b: any) => b.finalScore - a.finalScore).slice(0, 3);
 
-            // 5. Build a structured context block for the prompt.
-            substitutionLines = [
-              `SOURCE EXERCISE: ${sourceEx.name} (${sourceEx.primary_muscle} / ${sourceEx.movement_pattern} / ${sourceEx.equipment || 'any equipment'})`,
-              ...(userEquipmentPrefs.length > 0 ? [`USER EQUIPMENT PREFERENCES: ${userEquipmentPrefs.join(', ')}`] : []),
-              ...(userInjury ? [`USER INJURY/LIMITATION: ${userInjury}`] : []),
-              `SUBSTITUTION OPTIONS (ranked by suitability):`,
-              ...scored.map((a: any, i: number) =>
-                `  ${i + 1}. ${a.name} — ${a.primary_muscle}, ${a.movement_pattern}, ${a.equipment || 'any equipment'}${
-                  a.swap_reason ? ` (${a.swap_reason})` : ''
-                }${ userInjury && a.finalScore < 0.5 ? ' [may aggravate injury — use with caution]' : '' }`
-              ),
-              scored.length === 0
-                ? 'NO_ALTERNATIVES_FOUND: Inform the athlete honestly and suggest general movement pattern alternatives.'
-                : '',
-            ].filter(Boolean);
+              // Hard exclusion 4: User-disliked exercises
+              if (dislikedExercises.some((d: string) => c.name.toLowerCase().includes(d) || d.includes(c.name.toLowerCase()))) {
+                excludedReasons.push(`${c.name}: hard-excluded (user disliked exercise preference)`);
+                return false;
+              }
+
+              return true;
+            });
+
+            // 5. Calculate Multi-Factor Score S (0.0 to 1.0) and Deterministic Tie-Breaking
+            const scoredCandidates = eligibleCandidates.map((c: any) => {
+              const curatedScore = c.isCurated ? (c.similarity_score ?? 1.0) : 0.0;
+              const primaryMuscleScore = c.primary_muscle === sourceEx.primary_muscle ? 1.0 : 0.5;
+              const movementPatternScore = c.movement_pattern === sourceEx.movement_pattern ? 1.0 : 0.0;
+              
+              // Secondary muscle overlap
+              const srcSec = Array.isArray(sourceEx.secondary_muscles) ? sourceEx.secondary_muscles : [];
+              const candSec = Array.isArray(c.secondary_muscles) ? c.secondary_muscles : [];
+              const overlapCount = candSec.filter((m: string) => srcSec.includes(m)).length;
+              const secondaryOverlap = srcSec.length > 0 ? (overlapCount / srcSec.length) : 0.5;
+
+              // Equipment score
+              const equipmentScore = userEquipmentPrefs.some((p: string) => (c.equipment || '').toLowerCase().includes(p.toLowerCase())) ? 1.0 : 0.5;
+
+              // Mechanic score (compound vs isolation)
+              const mechanicScore = c.category === sourceEx.category ? 1.0 : 0.7;
+
+              // Unilateral match
+              const unilateralScore = Boolean(c.unilateral) === Boolean(sourceEx.unilateral) ? 1.0 : 0.0;
+
+              // Difficulty proximity
+              const diffSrc = Number(sourceEx.difficulty) || 2;
+              const diffCand = Number(c.difficulty) || 2;
+              const difficultyScore = Math.max(0, 1.0 - Math.abs(diffCand - diffSrc) / 3.0);
+
+              const totalScore = Number((
+                0.35 * curatedScore +
+                0.25 * primaryMuscleScore +
+                0.15 * movementPatternScore +
+                0.10 * secondaryOverlap +
+                0.05 * equipmentScore +
+                0.04 * mechanicScore +
+                0.03 * unilateralScore +
+                0.03 * difficultyScore
+              ).toFixed(4));
+
+              const hasMedia = Boolean(c.media_status && c.media_status !== 'TO_CREATE');
+
+              return {
+                ...c,
+                hasMedia,
+                scoringFactors: {
+                  curatedScore, primaryMuscleScore, movementPatternScore, secondaryOverlap,
+                  equipmentScore, mechanicScore, unilateralScore, difficultyScore, totalScore,
+                },
+              };
+            });
+
+            // Deterministic Tie-Breaking Order:
+            // 1. Curated match -> 2. Equipment score -> 3. Total score -> 4. Stable Name
+            scoredCandidates.sort((a: any, b: any) => {
+              if (b.scoringFactors.curatedScore !== a.scoringFactors.curatedScore) {
+                return b.scoringFactors.curatedScore - a.scoringFactors.curatedScore;
+              }
+              if (b.scoringFactors.equipmentScore !== a.scoringFactors.equipmentScore) {
+                return b.scoringFactors.equipmentScore - a.scoringFactors.equipmentScore;
+              }
+              if (b.scoringFactors.totalScore !== a.scoringFactors.totalScore) {
+                return b.scoringFactors.totalScore - a.scoringFactors.totalScore;
+              }
+              return a.name.localeCompare(b.name);
+            });
+
+            const topAlts = scoredCandidates.slice(0, 3);
+
+            if (topAlts.length === 0 && rawCandidates.length > 0 && dislikedExercises.length > 0) {
+              // Disliked exercises limitation fallback: explain honestly
+              substitutionLines = [
+                `SOURCE EXERCISE: ${sourceEx.name}`,
+                `NOTE: Valid alternatives exist in the catalogue, but were excluded based on your stored exercise dislikes (${dislikedExercises.join(', ')}).`,
+                `WOULD YOU LIKE TO RECONSIDER: Ask the athlete if they wish to temporarily lift a dislike preference to see options.`,
+              ];
+            } else {
+              substitutionLines = [
+                `SOURCE EXERCISE: ${sourceEx.name} (${sourceEx.primary_muscle} / ${sourceEx.movement_pattern} / ${sourceEx.equipment || 'any equipment'})`,
+                ...(userEquipmentPrefs.length > 0 ? [`USER AVAILABLE EQUIPMENT: ${userEquipmentPrefs.join(', ')}`] : []),
+                ...(userInjury ? [`ACTIVE INJURY CONSIDERATION: ${userInjury}`] : []),
+                `SUBSTITUTION OPTIONS (ranked deterministically): `,
+                ...topAlts.map((a: any, i: number) =>
+                  `  ${i + 1}. ${a.name} — ${a.primary_muscle}, ${a.movement_pattern}, ${a.equipment || 'any equipment'}${
+                    a.swap_reason ? ` (${a.swap_reason})` : ''
+                  }${!a.hasMedia ? ' [text guidance only — no video demo available]' : ''}`
+                ),
+                topAlts.length === 0 ? 'NO_VALID_ALTERNATIVES_FOUND: Inform athlete honestly and suggest general movement pattern alternatives.' : '',
+              ].filter(Boolean);
+            }
 
             engineResult = {
               type: 'exercise_substitution',
               source: sourceEx.name,
-              substitution_options: scored.map((a: any) => ({
+              substitution_options: topAlts.map((a: any) => ({
+                id: a.id,
                 name: a.name,
                 primary_muscle: a.primary_muscle,
                 movement_pattern: a.movement_pattern,
                 equipment: a.equipment,
                 difficulty: a.difficulty,
                 swap_reason: a.swap_reason,
+                has_media: a.hasMedia,
+                scoring_factors: a.scoringFactors,
               })),
               user_equipment_preferences: userEquipmentPrefs,
               user_injury: userInjury,
+              excluded_candidates_count: excludedReasons.length,
             };
           } else {
             substitutionLines = [`EXERCISE NOT IN CATALOGUE: "${targetExerciseName}" was not found in the Yeti exercise library.`, 'Use general biomechanical principles and ask the athlete for clarification.'];
@@ -1296,23 +1492,83 @@ serve(async (req) => {
         }
 
       } else if (intent === 'exercise_logging') {
-        // Exercise logging intent: provide workout context so the coach can
-        // help the athlete record or confirm their set.
+        // Exercise Logging Intent: Validate exercise, weight, reps, unit, set index
+        const logMatch = latestUserMessage.match(/\b(?:log|record|did|completed)\s+(?:(?:my|a)\s+)?([a-z0-9_\s-]+?)\s+(\d+(?:\.\d+)?)\s*(kg|lbs?)\s*(?:x|for|\*)\s*(\d+)/i)
+          || latestUserMessage.match(/(\d+(?:\.\d+)?)\s*(kg|lbs?)\s*(?:x|for|\*)\s*(\d+)\s+(?:on|for|of)?\s+([a-z0-9_\s-]+)/i);
+
+        let exerciseName = logMatch ? (logMatch[1] || logMatch[4]).trim() : resolveExerciseAlias(latestUserMessage);
+        let weightKg = logMatch ? Number(logMatch[2] || logMatch[1]) : null;
+        let unit = logMatch ? (logMatch[3] || 'kg').toLowerCase() : 'kg';
+        let reps = logMatch ? Number(logMatch[4] || logMatch[3]) : null;
+
+        if (unit.startsWith('lb') && weightKg != null) {
+          weightKg = Math.round(weightKg * 0.453592 * 10) / 10;
+        }
+
+        const { data: exRows } = await supabaseClient.from('exercises').select('id, name').ilike('name', `%${exerciseName}%`).limit(1);
+        const resolvedEx = exRows?.[0];
+
+        if (resolvedEx && weightKg != null && reps != null) {
+          // Proposal-only: no authenticated write, read-back, or idempotency
+          // flow exists yet for session sets, so this must never claim the
+          // set was actually logged. Present the parsed values and ask the
+          // athlete to confirm before any future write path persists them.
+          engineResult = {
+            type: 'exercise_logging',
+            status: 'pending_confirmation',
+            exercise_id: resolvedEx.id,
+            exercise_name: resolvedEx.name,
+            weight_kg: weightKg,
+            reps: reps,
+            unit: 'kg',
+            confirmation_required: true,
+            // Phrased as a question, not a statement — avoids any wording
+            // ("logged"/"saved"/"recorded"/"completed") that could read as a
+            // claim this has already happened.
+            proposed_action: `Confirm: ${resolvedEx.name}, ${weightKg}kg x ${reps} reps?`,
+          };
+        } else {
+          engineResult = {
+            type: 'exercise_logging',
+            status: 'missing_parameters',
+            known: { exercise_name: resolvedEx?.name || exerciseName, weight_kg: weightKg, reps },
+            missing: [!resolvedEx ? 'exercise_name' : null, weightKg == null ? 'weight' : null, reps == null ? 'reps' : null].filter(Boolean),
+          };
+        }
+
         contextBlock = await loadWorkoutContext(supabaseClient, user.id);
-        engineResult = { type: 'exercise_logging', note: 'Ask the athlete which exercise, weight, and reps to confirm before logging.' };
 
       } else if (intent === 'schedule_adjustment') {
-        // Schedule adjustment: load the current plan structure.
-        contextBlock = await loadWorkoutContext(supabaseClient, user.id);
-        engineResult = { type: 'schedule_adjustment', note: 'Review the current plan days and help the athlete adjust their schedule.' };
+        // Schedule Adjustment Intent: Parse day move, show exact proposed change, require confirmation
+        const moveMatch = latestUserMessage.match(/\bmove\s+(?:my\s+)?(day\s*\d+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|push|pull|legs)\s+to\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|day\s*\d+)/i);
 
-      } else {
-        contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
+        contextBlock = await loadWorkoutContext(supabaseClient, user.id);
+        
+        if (moveMatch) {
+          const fromDay = moveMatch[1].trim();
+          const toDay = moveMatch[2].trim();
+          engineResult = {
+            type: 'schedule_adjustment',
+            status: 'proposed_schedule_change',
+            from_day: fromDay,
+            to_day: toDay,
+            confirmation_required: true,
+            proposed_action: `Move ${fromDay} workout session to ${toDay}`,
+          };
+        } else {
+          engineResult = {
+            type: 'schedule_adjustment',
+            status: 'clarification_needed',
+            note: 'Ask athlete which specific plan day they wish to move or reschedule.',
+          };
+        }
       }
     } else if (PERSONAL_CONTEXT_INTENTS.includes(intent)) {
       // Personal coaching context: for technique, recovery, rest, general chat,
-      // goal adjustment, and app navigation — load profile + memory instead of
-      // the client-supplied context string (which could be stale or empty).
+      // and goal adjustment — load profile + memory instead of the
+      // client-supplied context string (which could be stale or empty).
+      // (app_navigation has its own dedicated, zero-private-context branch
+      // above — it is deliberately not in PERSONAL_CONTEXT_INTENTS.)
       try {
         const [{ data: prof }, recentSessionsResult] = await Promise.all([
           supabaseClient.from('profiles')
@@ -1348,8 +1604,6 @@ serve(async (req) => {
         }
         if (intent === 'goal_adjustment') {
           personalLines.push('USER WANTS TO ADJUST THEIR TRAINING GOAL. Confirm the new goal and update memory.');
-        } else if (intent === 'app_navigation') {
-          personalLines.push('USER NEEDS HELP NAVIGATING THE YETI APP. Provide brief, accurate guidance about where features are located.');
         }
         // Fall back to client-supplied context if profile is empty
         contextBlock = personalLines.length > 0
@@ -1494,7 +1748,7 @@ serve(async (req) => {
         conversation_id: conversationId || null, engine: engineNameForIntent(intent),
         fallback_triggered: false, response_type: 'error', action_types: ['retry'],
         fallback_reason: reasonSummary,
-      }).then(() => {}).catch(() => {});
+      }).then(() => {}, () => {});
       return new Response(JSON.stringify({
         reply: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
         response: 'Yeti Coach is temporarily unable to analyse this request. Please try again shortly.',
@@ -1543,7 +1797,7 @@ serve(async (req) => {
         if (u.memory_value === '') {
           // Forgetting is always allowed.
           await supabaseServiceRole.from('ai_memory').delete()
-            .eq('athlete_id', user.id).eq('memory_key', u.memory_key).then(() => {}).catch(() => {});
+            .eq('athlete_id', user.id).eq('memory_key', u.memory_key).then(() => {}, () => {});
           continue;
         }
         if (!classifyMemory(u.memory_value).shouldStore) {
@@ -1602,7 +1856,7 @@ serve(async (req) => {
       conversation_id: conversationId || null, engine: engineNameForIntent(intent),
       fallback_triggered: fallbackTriggered, response_type: responseType,
       action_types: actions.map((a) => a.type), fallback_reason: fallbackReason,
-    }).then(() => {}).catch(() => {}); // non-blocking
+    }).then(() => {}, () => {}); // non-blocking
 
     // Privacy-Safe Diagnostics Logging (NO PII, NO message content, NO meal descriptions)
     console.log('[ai-coach:diagnostics]', JSON.stringify({

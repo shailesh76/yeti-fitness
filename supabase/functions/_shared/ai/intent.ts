@@ -31,42 +31,108 @@ export type CoachIntent =
   | 'general_chat'
   | 'medical_safety';
 
-// Safety is always checked first (overrides everything).
-const MEDICAL_SAFETY_PATTERN = /\b(pain|hurts?|hurting|injur(?:e|y|ed|ies)|sprain|strain|tweak|pull(?:ed)? (a )?(muscle|something)|ache|aching|sore joint|sharp|numb|swollen|swelling)\b/;
+export type SafetyClassification =
+  | 'current_first_person_emergency'
+  | 'current_first_person_concern'
+  | 'current_third_person_emergency'
+  | 'negated_event'
+  | 'hypothetical_general'
+  | 'historical_resolved_event'
+  | 'none';
 
-// MEDICAL_SAFETY_PATTERN has no negation awareness on its own, so a natural,
-// reassuring reply ("no shoulder pain", "doesn't hurt") trips the exact same
-// keyword match as an actual complaint ("I have shoulder pain") — live-observed
-// to derail an otherwise-normal workout-plan conversation into a false
-// medical_safety classification. Curated (not a generic clause-negation
-// parser) — same false-positive-risk tradeoff as the decision-verb list in
-// coachSchema.ts: broad enough to cover the specified exact phrases and their
-// direct paraphrases, narrow enough not to swallow an unrelated affirmed
-// complaint elsewhere in the same message.
+// Acute emergency red flags that require immediate medical escalation. Distinct
+// from MEDICAL_SAFETY_PATTERN below (ordinary pain/soreness) — conflating the
+// two was a live-reproduced bug: "my shoulder hurts" and "I have severe chest
+// pain and feel faint" both routed to the exact same emergency escalation,
+// which would have blocked ordinary training conversation on any pain mention.
+const EMERGENCY_RED_FLAG_PATTERN =
+  /\b(chest pain|chest pressure|chest tightness|faint(?:ed|ing)?|pass(?:ed)? out|black(?:ed)? out|loss of consciousness|lost consciousness|losing consciousness|can'?t breathe|trouble breathing|shortness of breath|gasping|numbness|tingling|slurred speech|sudden severe headache|blurry vision|vision loss|loss of vision|stroke|one[\s-]?sided weakness|face drooping|sudden weakness|can'?t move (?:my |one )?(?:arm|leg|side)|joint pop(?:ped)?|joint dislocat(?:ed|ion)|severe (?:pain|swelling)|unbearable pain|starv(?:ing|ation)|purge|purging|vomit(?:ing)? after meals?)\b/i;
+
+// Broader medical concern pattern for general injury/pain tracking
+const MEDICAL_SAFETY_PATTERN =
+  /\b(pain|hurts?|hurting|injur(?:e|y|ed|ies)|sprain|strain|tweak|pull(?:ed)? (a )?(muscle|something)|ache|aching|sore joint|sharp|numb|swollen|swelling)\b/i;
+
+// Negation patterns: "no chest pain", "did not faint", "pain free", "not injured"
 const MEDICAL_NEGATION_STRIP_PATTERN =
-  /\bno\s+(?:\w+\s+){0,2}(?:injur(?:y|ies)|pain)\b|\bnot\s+(?:currently\s+)?injured\b|\b(?:doesn'?t|does\s+not|didn'?t|did\s+not)\s+hurt(?:s|ing)?\b|\b(?:don'?t|do\s+not|doesn'?t|does\s+not|didn'?t|did\s+not)\s+have\s+(?:any\s+)?(?:pain|injur(?:y|ies))\b|\bno\s+medical\s+(?:limitations?|issues?|concerns?|restrictions?)\b|\bnothing\s+(?:hurts?|is\s+sore)\b|\b(?:pain|injury)[\s-]free\b|\bno\s+current\s+injur(?:y|ies)\b/gi;
+  /\bno\s+(?:\w+\s+){0,2}(?:injur(?:y|ies)|pain|chest pain|fainting|shortness of breath|swelling)\b|\bnot\s+(?:currently\s+)?(?:injured|in pain|fainting)\b|\b(?:doesn'?t|does\s+not|didn'?t|did\s+not)\s+(?:hurt|faint|have pain)\b|\b(?:don'?t|do\s+not|doesn'?t|does\s+not|didn'?t|did\s+not)\s+have\s+(?:any\s+)?(?:pain|injur(?:y|ies)|chest pain)\b|\bno\s+medical\s+(?:limitations?|issues?|concerns?|restrictions?)\b|\bnothing\s+(?:hurts?|is\s+sore)\b|\b(?:pain|injury)[\s-]free\b|\bno\s+current\s+injur(?:y|ies)\b/gi;
 
-// A PAST complaint the athlete explicitly says has since resolved ("I had
-// shoulder pain last week but it's gone now", "I used to have knee pain but
-// it's fine now") is historical context, not a CURRENT acute-safety signal.
-// Bounded gaps (not unbounded ".*") so this can't reach across an unrelated
-// later clause and misfire.
+// Resolved historical patterns: "had knee pain last month but fine now"
 const MEDICAL_RESOLVED_PAST_STRIP_PATTERN =
   /\b(?:had|experienced|was\s+dealing\s+with|used\s+to\s+have)\b[^.!?;]{0,40}\b(?:pain|injur(?:y|ies)|ache|soreness|discomfort)\b[^.!?;]{0,40}\b(?:but\s+)?(?:it'?s|it\s+is|it\s+was|that'?s)?\s*(?:now\s+)?(?:gone|healed|resolved|fine|better|not\s+(?:an\s+issue|a\s+problem)|no\s+longer\s+(?:an\s+issue|a\s+problem|there|bothering\s+me))\b/gi;
 
+// Third-person emergency patterns: "my friend fainted", "someone collapsed", "my partner has chest pain"
+const THIRD_PERSON_EMERGENCY_PATTERN =
+  /\b(my (?:friend|partner|buddy|client|brother|sister|dad|mom|teammate|athlete)|someone|a guy|a girl|another person|he|she)\b[^.!?;]{0,40}\b(faint|fainted|pass(?:ed)? out|collapsed?|chest pain|can'?t breathe|shortness of breath|seizure|dislocat|injured)\b/i;
+
+// Hypothetical/Educational patterns: "what does fainting mean?", "what causes chest pain?"
+const HYPOTHETICAL_GENERAL_PATTERN =
+  /\b(what (?:does|is|causes|means?)|why (?:do|does|would)|can (?:someone|a person)|is (?:it|shortness of breath|chest pain) (?:normal|dangerous|common))\b[^.!?;]{0,40}\b(faint|fainting|chest pain|shortness of breath|injury|pain)\b/i;
+
 /**
- * True only when at least one CURRENT, un-negated pain/injury mention
- * survives stripping every explicitly-negated or explicitly-resolved-past
- * span. A mixed message ("no knee pain but sharp shoulder pain") still
- * correctly returns true, since only the negated span is consumed —
- * current acute pain always takes precedence over workout generation.
+ * Deterministically classifies a message into a SafetyClassification level.
  */
-function hasUnnegatedMedicalConcern(m: string): boolean {
-  if (!MEDICAL_SAFETY_PATTERN.test(m)) return false;
+export function classifySafetySignal(message: string): SafetyClassification {
+  const m = (message || '').trim();
+  if (!m) return 'none';
+
+  // 1. Check for explicit negations ("I do not have chest pain")
   const stripped = m
     .replace(MEDICAL_RESOLVED_PAST_STRIP_PATTERN, ' ')
     .replace(MEDICAL_NEGATION_STRIP_PATTERN, ' ');
-  return MEDICAL_SAFETY_PATTERN.test(stripped);
+
+  const hasRedFlag = EMERGENCY_RED_FLAG_PATTERN.test(m);
+  const hasStrippedRedFlag = EMERGENCY_RED_FLAG_PATTERN.test(stripped);
+  const hasMedical = MEDICAL_SAFETY_PATTERN.test(stripped);
+
+  if (hasRedFlag && !hasStrippedRedFlag) {
+    return 'negated_event';
+  }
+
+  // 2. Check for hypothetical / educational general questions ("What does fainting mean?")
+  if (HYPOTHETICAL_GENERAL_PATTERN.test(m) && !/\bi\s+(?:have|am|feel|just|felt)\b/i.test(m)) {
+    return 'hypothetical_general';
+  }
+
+  // 3. Check for resolved historical events ("I had knee pain last month, fine now")
+  if (MEDICAL_RESOLVED_PAST_STRIP_PATTERN.test(m) && !hasStrippedRedFlag) {
+    return 'historical_resolved_event';
+  }
+
+  // 4. Check for third-person emergency ("My friend fainted")
+  if (THIRD_PERSON_EMERGENCY_PATTERN.test(m) || (hasStrippedRedFlag && /\b(my friend|someone else|he|she)\b/i.test(m) && !/\bi\s+/i.test(m))) {
+    return 'current_third_person_emergency';
+  }
+
+  // 5. Current first-person acute emergency (red-flag term) vs. ordinary
+  //    pain/injury concern (MEDICAL_SAFETY_PATTERN only) — these are
+  //    deliberately DIFFERENT classifications. Both still route to the
+  //    medical_safety intent (see hasUnnegatedMedicalConcern below), but only
+  //    the emergency level may trigger the deterministic escalation
+  //    short-circuit in ai-coach/index.ts. Ordinary concern gets normal,
+  //    cautious, injury-aware coaching instead.
+  if (hasStrippedRedFlag) {
+    return 'current_first_person_emergency';
+  }
+
+  if (hasMedical) {
+    return 'current_first_person_concern';
+  }
+
+  return 'none';
+}
+
+/**
+ * True when a CURRENT, un-negated pain/injury/emergency mention survives —
+ * covers both genuine emergencies and ordinary training-related concerns, so
+ * either one still routes to the medical_safety intent (current acute
+ * pain — of any severity — always takes precedence over workout generation).
+ * Severity-based branching (emergency escalation vs. normal cautious
+ * coaching) happens downstream, keyed off classifySafetySignal's own result,
+ * not off this boolean.
+ */
+function hasUnnegatedMedicalConcern(m: string): boolean {
+  const sig = classifySafetySignal(m);
+  return sig === 'current_first_person_emergency' || sig === 'current_first_person_concern' || sig === 'current_third_person_emergency';
 }
 
 const WORKOUT_PROGRAM_GENERATE_PATTERN =
@@ -132,7 +198,10 @@ export function detectWorkoutProgramGenerate(message: string): boolean {
 /** True when the message is a high-confidence workout-plan edit command. */
 export function detectWorkoutPlanEdit(message: string): boolean {
   const m = (message || '').toLowerCase();
-  if (/\bwhat (can|should|could|would) i (replace|swap|substitut|switch)/.test(m)) {
+  if (/\bwhat (can|should|could|would)\s+(?:i\s+)?(replace|swap|substitut|switch)/i.test(m)) {
+    return false;
+  }
+  if (SCHEDULE_ADJUSTMENT_PATTERN.test(m)) {
     return false;
   }
   // If explicitly asking to generate/make/change whole plan or split, route to workout_program_generate
@@ -150,7 +219,7 @@ const EXERCISE_LOGGING_PATTERN =
 
 // Goal adjustment: "change my goal", "I want to focus on strength now", "switch to fat loss"
 const GOAL_ADJUSTMENT_PATTERN =
-  /\b(change (my )?goal|update (my )?goal|switch (my )?goal|new goal|i want to (focus on|work on|prioritise?|prioritize)|my goal (is|has changed)|i'?m (now )?focused on|shift(?:ing)? (my )?focus to|pivot (to|toward))\b/i;
+  /\b(change (my )?(\w+ )?goal|update (my )?(\w+ )?goal|switch (my )?(\w+ )?goal|new goal|i want to (focus on|work on|prioritise?|prioritize)|my goal (is|has changed)|i'?m (now )?focused on|shift(?:ing)? (my )?focus to|pivot (to|toward))\b/i;
 
 // App navigation/feature help: "where do I log food?", "how do I use the planner?"
 const APP_NAVIGATION_PATTERN =
@@ -158,7 +227,7 @@ const APP_NAVIGATION_PATTERN =
 
 // Schedule adjustment: "can I move Thursday's workout to Friday?", "skip leg day this week"
 const SCHEDULE_ADJUSTMENT_PATTERN =
-  /\b(move (my |the )?(\w+ ?'?s? )?(workout|session|training|day)|skip (the |this |my )?(\w+ ?'?s? )?(workout|session|training|day|week)|reschedule|swap (my )?(training |workout )?days?|can i train (on |a )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|i'?m (training|working out) (on|tomorrow|today)|shift (my )?(workout|session|training))\b/i;
+  /\b(move (my |the )?(\w+ ?'?s? )?(workout|session|training|day)\s+to\s+(\w+)|skip (the |this |my )?(\w+ ?'?s? )?(workout|session|training|day|week)|reschedule|swap (my )?(training |workout )?days?|can i train (on |a )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|i'?m (training|working out) (on|tomorrow|today)|shift (my )?(workout|session|training))\b/i;
 
 // Ordered soft rules — earlier wins. `exclude`, when present, skips this rule
 // (falling through to later rules / general_chat) even if a pattern matches.
