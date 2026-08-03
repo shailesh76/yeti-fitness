@@ -17,26 +17,38 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { P } from '../constants/premiumTheme';
+import { computeCalorieRingState } from './calorieRingMath';
 
 interface CalorieRingProps {
-  /** Calories remaining for the day (displayed in the centre). */
-  remaining: number;
+  /** Calories remaining for the day (displayed in the centre). Ignored when `consumed` is provided. */
+  remaining?: number;
+  /** Calories consumed so far. When provided, `remaining` is derived internally as total − consumed. */
+  consumed?: number;
   /** Daily calorie target used to compute the fill percentage. */
   total: number;
   /** Diameter of the ring in logical pixels. Defaults to 130. */
   size?: number;
   /** Stroke width of the ring in logical pixels. Defaults to 10. */
-  stroke?: number;
+  strokeWidth?: number;
+  /**
+   * Arc/label accent color. This component renders the arc with plain View
+   * borders (no SVG), which can't paint an actual two-stop gradient — the
+   * first color is used as the solid accent throughout. Defaults to the
+   * theme accent so callers that don't pass it get the original look.
+   */
+  gradientColors?: [string, string];
 }
 
 export function CalorieRing({
-  remaining,
+  remaining: remainingProp,
+  consumed: consumedProp,
   total,
   size = 130,
-  stroke = 10,
+  strokeWidth = 10,
+  gradientColors = [P.ACCENT, P.ACCENT],
 }: CalorieRingProps) {
-  const consumed = Math.max(total - remaining, 0);
-  const pct      = Math.min(consumed / Math.max(total, 1), 1);
+  const { remaining, pct } = computeCalorieRingState({ remaining: remainingProp, consumed: consumedProp, total });
+  const accentColor = gradientColors[0];
 
   const scale   = useSharedValue(0.6);
   const opacity = useSharedValue(0);
@@ -55,7 +67,7 @@ export function CalorieRing({
 
   const iosShadow = Platform.OS === 'ios'
     ? {
-        shadowColor:   P.ACCENT,
+        shadowColor:   accentColor,
         shadowOffset:  { width: 0, height: 0 },
         shadowOpacity: 0.8,
         shadowRadius:  6,
@@ -71,7 +83,7 @@ export function CalorieRing({
           width:       size,
           height:      size,
           borderRadius: size / 2,
-          borderWidth:  stroke,
+          borderWidth:  strokeWidth,
           borderColor:  P.CARD_BORDER,
         }}
       />
@@ -104,8 +116,8 @@ export function CalorieRing({
                 width:        size,
                 height:       size,
                 borderRadius: size / 2,
-                borderWidth:  stroke,
-                borderColor:  P.ACCENT,
+                borderWidth:  strokeWidth,
+                borderColor:  accentColor,
                 position:     'absolute',
                 left:         -size / 2,
                 transform:    [{ rotate: `${Math.max(0, deg - 180)}deg` }],
@@ -119,8 +131,8 @@ export function CalorieRing({
                 width:        size,
                 height:       size,
                 borderRadius: size / 2,
-                borderWidth:  stroke,
-                borderColor:  P.ACCENT,
+                borderWidth:  strokeWidth,
+                borderColor:  accentColor,
                 position:     'absolute',
                 left:         -size / 2,
                 transform:    [{ rotate: `${Math.min(deg, 180)}deg` }],
@@ -146,8 +158,8 @@ export function CalorieRing({
                   width:        size,
                   height:       size,
                   borderRadius: size / 2,
-                  borderWidth:  stroke,
-                  borderColor:  P.ACCENT,
+                  borderWidth:  strokeWidth,
+                  borderColor:  accentColor,
                   position:     'absolute',
                   left:         0,
                   ...iosShadow,
@@ -172,7 +184,7 @@ export function CalorieRing({
           style={{
             fontSize:      Math.round(size * 0.215),
             fontWeight:    '800',
-            color:         P.ACCENT,
+            color:         accentColor,
             letterSpacing: -1,
           }}
         >
