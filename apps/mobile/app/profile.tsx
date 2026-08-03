@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/useAuthStore';
+import { useUserStore } from '../store/useUserStore';
 import { supabase } from '../lib/supabase';
 import { useRepositories } from '../hooks/useRepositories';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
@@ -113,8 +114,6 @@ export default function MoreScreen() {
       checkWearables();
       fetchLogsHistory(session.user.id);
       fetchPRs(session.user.id);
-    } else {
-      setLoading(false);
     }
   }, [session]);
 
@@ -166,20 +165,36 @@ export default function MoreScreen() {
   };
 
   const fetchProfile = async () => {
+    if (!session?.user?.id) return;
     try {
       setLoading(true);
-      let localProfile = await userRepository.getProfile(session!.user!.id);
-      if (!localProfile) {
-        const { data, error } = await userRepository.fetchProfileRemote(session!.user!.id);
-        if (data) {
-          localProfile = await userRepository.updateProfile(session!.user!.id, data);
-        } else if (error) {
-          throw error;
+
+      // 1. Try local profile
+      let localProf = await userRepository.getProfile(session.user.id);
+      if (localProf) {
+        setProfile(localProf);
+      }
+
+      // 2. Fetch remote profile
+      const { data: remoteProf, error: remoteErr } = await userRepository.fetchProfileRemote(session.user.id);
+      if (remoteErr) {
+        console.error("Could not fetch remote user profile:", remoteErr);
+      } else if (remoteProf) {
+        // Remote profile immediately updates UI
+        setProfile((prev: any) => ({ ...(prev || {}), ...remoteProf }));
+
+        // Best-effort local cache write
+        try {
+          await userRepository.updateProfile(session.user.id, remoteProf);
+        } catch (localErr: any) {
+          // LOCAL_DB_UNAVAILABLE must never discard already-fetched remote data
+          if (!localErr?.message?.includes('LOCAL_DB_UNAVAILABLE')) {
+            console.warn("Best-effort local profile write failed:", localErr);
+          }
         }
       }
-      if (localProfile) setProfile(localProfile);
     } catch (e) {
-      console.warn("Could not fetch user profile:", e);
+      console.error("Could not fetch user profile:", e);
     } finally {
       setLoading(false);
     }
@@ -189,18 +204,36 @@ export default function MoreScreen() {
     if (!session?.user?.id || updating) return;
     setUpdating(true);
     try {
-      const updatedProfile = await userRepository.updateProfile(session.user.id, { goal });
-      setProfile(updatedProfile);
-      if (Platform.OS === 'web') {
-        alert('Goal Updated!\nYour nutrition targets have been adjusted.');
-      } else {
-        Alert.alert('Goal Updated', 'Your nutrition targets have been adjusted.');
+      setProfile((prev: any) => ({ ...prev, goal }));
+      const result = await userRepository.updateProfile(session.user.id, { goal });
+      if (result?.profile) {
+        setProfile((prev: any) => ({ ...prev, ...result.profile }));
       }
-    } catch (e) {
-      Alert.alert('Update Failed', 'Failed to save new goal. Please try again.');
+      if (result?.remoteSuccess === false) {
+        if (Platform.OS === 'web') {
+          alert('Goal Updated (Offline)\nChanges saved locally and will sync when online.');
+        } else {
+          Alert.alert('Goal Updated (Offline)', 'Changes saved locally and will sync when online.');
+        }
+      } else {
+        if (Platform.OS === 'web') {
+          alert('Goal Updated!\nYour nutrition targets have been adjusted.');
+        } else {
+          Alert.alert('Goal Updated', 'Your nutrition targets have been adjusted.');
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Update Failed', e?.message || 'Failed to save new goal. Please try again.');
     } finally {
       setUpdating(false);
     }
+  };
+
+  const handleEditProfile = () => {
+    if (profile && session?.user?.id) {
+      useUserStore.getState().initializeFromProfile(profile, session.user.id);
+    }
+    router.push('/onboarding/basic-info');
   };
 
   // Rows for features that don't have a screen/endpoint yet surface an honest
@@ -319,7 +352,7 @@ export default function MoreScreen() {
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Edit profile photo and details"
-              onPress={() => router.push('/onboarding/basic-info')}
+              onPress={handleEditProfile}
               style={styles.avatarWrap}
               activeOpacity={0.85}
             >
@@ -402,7 +435,7 @@ export default function MoreScreen() {
               icon="person"
               title="Edit Profile"
               subtitle="Update your personal information"
-              onPress={() => router.push('/onboarding/basic-info')}
+              onPress={handleEditProfile}
             />
             <SettingsRow
               icon="body"

@@ -10,6 +10,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { EVENTS } from '../constants/analyticsEvents';
+import { decidePostLoginRoute } from '@yeti/database';
 
 // Required so openAuthSessionAsync's underlying browser session correctly
 // dismisses and returns control to the app once Google redirects back.
@@ -32,6 +33,8 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
+  const [profileCheckUserId, setProfileCheckUserId] = useState<string | null>(null);
+  const [profileCheckRetrying, setProfileCheckRetrying] = useState(false);
   const router = useRouter();
   const { userRepository, eventRepository } = useRepositories();
 
@@ -72,6 +75,48 @@ export default function AuthScreen() {
     } finally {
       setResending(false);
     }
+  }
+
+  /**
+   * Shared post-login routing decision (also used by oauth-callback.tsx via
+   * decidePostLoginRoute) so email and Google sign-in never drift: a failed
+   * profile lookup must show a retryable error, never a silent onboarding
+   * redirect for an existing user.
+   */
+  async function resolvePostLogin(userId: string) {
+    const result = await userRepository.fetchProfileRemote(userId);
+    const decision = decidePostLoginRoute(result);
+
+    if (decision.outcome === 'home') {
+      setProfileCheckUserId(null);
+      router.replace('/home');
+    } else if (decision.outcome === 'onboarding') {
+      setProfileCheckUserId(null);
+      router.replace('/onboarding/BetaAgreementScreen');
+    } else {
+      eventRepository.logError(userId, 'PostLoginProfileCheck', decision.code).catch(() => {});
+      setProfileCheckUserId(userId);
+      setError('We couldn’t verify your profile. Please try again.');
+    }
+  }
+
+  async function handleRetryProfileCheck() {
+    if (!profileCheckUserId || profileCheckRetrying) return;
+    setProfileCheckRetrying(true);
+    setError(null);
+    try {
+      await resolvePostLogin(profileCheckUserId);
+    } catch (e: any) {
+      setError(describeAuthError(e));
+    } finally {
+      setProfileCheckRetrying(false);
+    }
+  }
+
+  async function handleSignOutFromProfileCheck() {
+    setProfileCheckUserId(null);
+    setError(null);
+    await supabase.auth.signOut();
   }
 
   async function signInWithEmail() {
@@ -117,14 +162,9 @@ export default function AuthScreen() {
         // Log login completed event
         await eventRepository.logActivity(data.user.id, EVENTS.LOGIN_COMPLETED);
 
-        // Check if user has completed onboarding profile using UserRepository
-        const { data: profile } = await userRepository.fetchProfileRemote(data.user.id);
-
-        if (profile) {
-          router.replace('/home');
-        } else {
-          router.replace('/onboarding/BetaAgreementScreen');
-        }
+        // Check if user has completed onboarding profile, and route accordingly
+        // (a failed lookup shows a retryable error, not a false onboarding redirect).
+        await resolvePostLogin(data.user.id);
       }
     } catch (e: any) {
       setError(describeAuthError(e));
@@ -310,6 +350,35 @@ export default function AuthScreen() {
         {loading ? (
           <View style={styles.loaderContainer}>
             <ActivityIndicator size="large" color={P.ACCENT} />
+          </View>
+        ) : profileCheckUserId ? (
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
+              onPress={handleRetryProfileCheck}
+              disabled={profileCheckRetrying}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+              accessibilityState={{ disabled: profileCheckRetrying, busy: profileCheckRetrying }}
+            >
+              {profileCheckRetrying ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <Text style={styles.loginBtnText}>Retry</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.signUpBtn}
+              onPress={handleSignOutFromProfileCheck}
+              disabled={profileCheckRetrying}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
+            >
+              <Text style={styles.signUpBtnText}>Sign Out</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.actionContainer}>

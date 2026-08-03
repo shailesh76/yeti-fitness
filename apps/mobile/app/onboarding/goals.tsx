@@ -7,6 +7,7 @@ import Animated, { SlideInRight } from 'react-native-reanimated';
 import { useUserStore } from '../../store/useUserStore';
 import { useAuthStore } from '../../store/useAuthStore';
 /* removed supabase */
+import { decideProfileSaveOutcome } from '@yeti/database';
 import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
 
 const GOALS_DATA = [
@@ -61,6 +62,12 @@ export default function GoalsScreen() {
   const session = useAuthStore((state) => state.session);
   const { userRepository } = useRepositories();
   const [loading, setLoading] = useState(false);
+  // Set only when a save attempt didn't cleanly succeed. Navigation past
+  // this screen must never happen except via the success path or the
+  // user's own explicit "Continue Later" choice in the offline-queued case.
+  const [saveOutcome, setSaveOutcome] = useState<
+    null | { kind: 'offline-queued'; message: string } | { kind: 'blocked'; message: string }
+  >(null);
 
   const handleComplete = async () => {
     if (!userStore.activity_level || !userStore.goal) return;
@@ -70,8 +77,9 @@ export default function GoalsScreen() {
     }
 
     setLoading(true);
+    setSaveOutcome(null);
     try {
-      await userRepository.updateProfile(session.user.id, {
+      const result = await userRepository.updateProfile(session.user.id, {
         full_name: userStore.full_name,
         age: parseInt(userStore.age),
         gender: userStore.gender,
@@ -81,27 +89,48 @@ export default function GoalsScreen() {
         activity_level: userStore.activity_level,
         goal: userStore.goal,
       });
-      router.replace('/onboarding/notifications');
-    } catch (e: any) {
-      // Local WatermelonDB is unavailable on web — there is nothing more this
-      // screen can do locally, so proceed rather than stranding web users at
-      // onboarding. Any other unexpected failure is surfaced to the user.
-      if (typeof e?.message === 'string' && e.message.startsWith('LOCAL_DB_UNAVAILABLE')) {
+
+      // Never treat a returned result as automatic success — decide from
+      // the actual flags, the same way auth.tsx/oauth-callback.tsx decide
+      // post-login routing from decidePostLoginRoute instead of assuming
+      // success.
+      const outcome = decideProfileSaveOutcome(result);
+      if (outcome.kind === 'success') {
         router.replace('/onboarding/notifications');
+      } else if (outcome.kind === 'offline-queued') {
+        setSaveOutcome({
+          kind: 'offline-queued',
+          message: "You're offline. Your info is saved on this device and will sync automatically once you're back online.",
+        });
       } else {
-        Alert.alert('Error saving profile', e?.message ?? 'Please try again.');
+        setSaveOutcome({
+          kind: 'blocked',
+          message: 'Could not save your profile. Please try again.',
+        });
       }
+    } catch (e: any) {
+      // Only reachable when no Supabase client is configured at all and the
+      // local write also failed — not the normal offline case, which now
+      // returns a result instead of throwing. Treat as blocked either way.
+      setSaveOutcome({
+        kind: 'blocked',
+        message: e?.message ?? 'Please try again.',
+      });
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleContinueLater = () => {
+    router.replace('/onboarding/notifications');
   };
 
   const isFormValid = userStore.activity_level && userStore.goal;
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Animated.View 
-        entering={SlideInRight.duration(500)} 
+      <Animated.View
+        entering={SlideInRight.duration(500)}
         style={styles.container}
       >
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
@@ -187,6 +216,17 @@ export default function GoalsScreen() {
           </View>
         </ScrollView>
 
+        {saveOutcome && (
+          <View
+            style={[
+              styles.outcomeBanner,
+              saveOutcome.kind === 'blocked' ? styles.outcomeBannerError : styles.outcomeBannerOffline,
+            ]}
+          >
+            <Text style={styles.outcomeBannerText}>{saveOutcome.message}</Text>
+          </View>
+        )}
+
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={styles.backBtn}
@@ -207,7 +247,7 @@ export default function GoalsScreen() {
             disabled={!isFormValid || loading}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel="Finish profile"
+            accessibilityLabel={saveOutcome ? 'Retry' : 'Finish profile'}
             accessibilityState={{ disabled: !isFormValid || loading, busy: loading }}
           >
             {loading ? (
@@ -217,11 +257,23 @@ export default function GoalsScreen() {
                 styles.nextBtnText,
                 isFormValid ? styles.nextBtnTextActive : null
               ]}>
-                Finish Profile
+                {saveOutcome ? 'Retry' : 'Finish Profile'}
               </Text>
             )}
           </TouchableOpacity>
         </View>
+
+        {saveOutcome?.kind === 'offline-queued' && !loading && (
+          <TouchableOpacity
+            style={styles.continueLaterBtn}
+            onPress={handleContinueLater}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Continue later"
+          >
+            <Text style={styles.continueLaterBtnText}>Continue Later</Text>
+          </TouchableOpacity>
+        )}
       </Animated.View>
     </SafeAreaView>
   );
@@ -358,5 +410,37 @@ const styles = StyleSheet.create({
   nextBtnTextActive: {
     color: '#000000',
     fontWeight: '900',
+  },
+  outcomeBanner: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  outcomeBannerOffline: {
+    backgroundColor: (P.WARNING || P.ACCENT) + '14',
+    borderColor: (P.WARNING || P.ACCENT) + '55',
+  },
+  outcomeBannerError: {
+    backgroundColor: P.RED + '14',
+    borderColor: P.RED + '55',
+  },
+  outcomeBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: P.TEXT_PRI,
+    lineHeight: 17,
+  },
+  continueLaterBtn: {
+    alignItems: 'center',
+    paddingTop: 14,
+  },
+  continueLaterBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: P.TEXT_SEC,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });

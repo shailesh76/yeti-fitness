@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { SyncManager } from '@yeti/sync';
+import { UserRepository } from '@yeti/database';
 
 export function useSyncManager() {
   const [syncing, setSyncing] = useState(false);
@@ -41,6 +42,24 @@ export function useSyncManager() {
       });
     } finally {
       setSyncing(false);
+    }
+
+    // Flush any profile edits queued while offline/local-DB-unavailable.
+    // Independent of the WatermelonDB sync above (profiles isn't part of
+    // that changeset — see sync-push/sync-pull), so it runs regardless of
+    // that sync's outcome. This is the existing sync lifecycle's entry
+    // point rather than a second, separate mechanism: same trigger (an
+    // authenticated session initializing/re-checking), same caller.
+    if (userId) {
+      try {
+        const userRepository = new UserRepository(database, supabase);
+        const result = await userRepository.syncPendingProfileUpdates(userId);
+        if (!result.synced) {
+          console.warn('[SyncManager] Pending profile update flush did not complete:', result.error);
+        }
+      } catch (e: any) {
+        console.warn('[SyncManager] Pending profile update flush threw:', e);
+      }
     }
   }, []);
 
