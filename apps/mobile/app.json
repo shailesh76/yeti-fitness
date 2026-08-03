@@ -34,16 +34,15 @@
       ]
     },
     "web": {
+      "bundler": "metro",
+      "output": "static",
       "favicon": "./assets/favicon.png",
       "name": "Yeti",
       "shortName": "Yeti",
       "description": "Your personal fitness & nutrition coach",
-      "lang": "en",
-      "scope": "/",
-      "themeColor": "#39FF6A",
+      "themeColor": "#0a0a0a",
       "backgroundColor": "#0a0a0a",
-      "display": "standalone",
-      "orientation": "portrait"
+      "display": "standalone"
     },
     "plugins": [
       "expo-router",
