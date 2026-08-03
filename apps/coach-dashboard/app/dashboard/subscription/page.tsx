@@ -1,12 +1,7 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ShieldAlert, Users, Plus, Star, Loader2, CheckCircle, XCircle, Globe } from 'lucide-react';
-import { createBrowserClient } from '@supabase/ssr';
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import { supabase } from '@/lib/supabase';
 
 interface BetaUser {
   user_id: string;
@@ -28,17 +23,13 @@ export default function SubscriptionAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
   const showMessage = (msg: string, isError = false) => {
     if (isError) setError(msg);
     else setSuccess(msg);
     setTimeout(() => { setError(null); setSuccess(null); }, 4000);
   };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       // Fetch global beta flag
@@ -76,7 +67,11 @@ export default function SubscriptionAdmin() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const toggleGlobalBeta = async () => {
     setToggling(true);

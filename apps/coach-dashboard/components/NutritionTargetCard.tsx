@@ -5,12 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Target, Lock } from "lucide-react";
 import { useCoachStore } from "@/store/useCoachStore";
-import { createBrowserClient } from "@supabase/ssr";
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import { supabase } from "@/lib/supabase";
 
 /**
  * Coach-facing card to assign an athlete's calorie + macro targets as one object.
