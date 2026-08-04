@@ -26,6 +26,7 @@ import {
   Image,
   Modal,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
@@ -614,7 +615,11 @@ const s = StyleSheet.create({
   responsiveWrapper: { flex: 1, width: '100%', alignSelf: 'center' },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
+  // SafeAreaView's top inset is (correctly) 0 in a browser — there's no notch
+  // to clear — so the native paddingTop of 12 alone leaves the header flush
+  // against the viewport edge on web. Add extra breathing room there only;
+  // native keeps its original spacing unchanged.
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 24 : 12, paddingBottom: 8 },
   pageTitle: { fontSize: 30, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
   pageSubtitle: { fontSize: 13, color: '#64748B', marginTop: 2 },
   filterBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
