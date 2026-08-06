@@ -47,7 +47,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { analyzeFoodPhoto, lookupBarcodeProduct, analyzeFoodDescription, FoodPhotoAnalysis, BarcodeProductInfo } from '../services/nutritionApi';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 
@@ -304,13 +303,44 @@ export default function FoodSearchScreen() {
     }
   };
 
-  const handlePickWebImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8 });
-      if (!result.canceled && result.assets[0]?.uri) await processPhotoAnalysis(result.assets[0].uri);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to pick image.');
-    }
+  const handlePickWebImage = () => {
+    // Hand-rolled instead of ImagePicker.launchImageLibraryAsync(): that web
+    // shim registers both 'change' and 'cancel' listeners on the same
+    // <input>, and 'cancel' re-dispatches a synthetic 'change' — if the
+    // browser also fires a real 'change', the shared handler's
+    // document.body.removeChild(input) runs twice and throws "Failed to
+    // execute 'removeChild': the node to be removed is not a child of this
+    // node", which crashes the screen while it's mid-analysis and leaves the
+    // loading spinner stuck forever. { once: true } plus a parentNode guard
+    // here make removal safe no matter how many times 'change' fires.
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+
+    const cleanup = () => {
+      if (input.parentNode) input.parentNode.removeChild(input);
+    };
+
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      cleanup();
+      if (!file) return;
+      try {
+        const dataUri = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        await processPhotoAnalysis(dataUri);
+      } catch (e) {
+        Alert.alert('Error', 'Failed to pick image.');
+      }
+    }, { once: true });
+
+    input.click();
   };
 
   const handleBarcodeScanned = async ({ data }: { data: string }) => {
