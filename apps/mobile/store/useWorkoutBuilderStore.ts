@@ -69,6 +69,15 @@ interface WorkoutBuilderState {
   setPendingPick: (pick: PendingPick) => void;
   consumePendingPick: () => void;
   beginReplace: (tempId: string) => void;
+  /** Clears a stale replace target before starting a genuine "+ Add Exercise"
+   * picker trip. Needed because beginReplace(tempId) and a plain add both
+   * navigate through the same picker route, distinguished only by whether
+   * replacingTempId is set — if the athlete opens the picker to replace one
+   * exercise, cancels out without picking (navigates back), then taps "+ Add
+   * Exercise" to add a different one, replacingTempId would otherwise still
+   * be armed from the abandoned replace attempt and silently turn that
+   * unrelated add into a replace of the original row. */
+  clearReplaceTarget: () => void;
   addExercise: (exerciseId: string, exerciseName: string, muscleGroup?: string) => void;
   removeExercise: (tempId: string) => void;
   replaceExercise: (tempId: string, newExerciseId: string, newExerciseName: string, newMuscleGroup?: string) => void;
@@ -141,6 +150,7 @@ export const useWorkoutBuilderStore = create<WorkoutBuilderState>((set, get) => 
   setPendingPick: (pick) => set({ pendingPick: pick }),
   consumePendingPick: () => set({ pendingPick: null }),
   beginReplace: (tempId) => set({ replacingTempId: tempId }),
+  clearReplaceTarget: () => set({ replacingTempId: null }),
 
   resolvePendingPick: () => {
     const { pendingPick, replacingTempId } = get();

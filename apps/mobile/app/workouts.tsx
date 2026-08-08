@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useWorkoutStore } from '../store/useWorkoutStore';
+import { useWorkoutBuilderStore } from '../store/useWorkoutBuilderStore';
 import { useLogStore } from '../store/useLogStore';
 import { useSessionStore } from '../store/useSessionStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -610,7 +611,16 @@ export default function WorkoutScreen() {
                   accessible={true}
                   accessibilityRole="button"
                   accessibilityLabel="Create a new workout template"
-                  onPress={() => router.push('/workouts/create')}
+                  onPress={() => {
+                    // Explicit reset at the true "start fresh" gesture, not
+                    // inferred from create.tsx's mount timing — see
+                    // useWorkoutBuilderStore.ts's reset() usage there for why:
+                    // this guarantees a clean draft regardless of whatever
+                    // was left in the store (an abandoned prior draft, or a
+                    // just-saved template's data lingering after router.back()).
+                    useWorkoutBuilderStore.getState().reset();
+                    router.push('/workouts/create');
+                  }}
                   activeOpacity={0.8}
                 >
                   <Text style={styles.newTemplateText}>+ New</Text>
@@ -624,7 +634,10 @@ export default function WorkoutScreen() {
                   accessible={true}
                   accessibilityRole="button"
                   accessibilityLabel="Build your own workout template"
-                  onPress={() => router.push('/workouts/create')}
+                  onPress={() => {
+                    useWorkoutBuilderStore.getState().reset();
+                    router.push('/workouts/create');
+                  }}
                   style={styles.emptyTemplateCard}
                   activeOpacity={0.8}
                 >

@@ -153,14 +153,32 @@ export default function CreateWorkoutScreen() {
   const session = useAuthStore((state) => state.session);
   const {
     name, notes, exercises, loading, saving, pendingPick,
-    reset, loadExisting, setName, setNotes, resolvePendingPick, save,
+    loadExisting, setName, setNotes, resolvePendingPick, save, clearReplaceTarget,
   } = useWorkoutBuilderStore();
 
+  // Loads an existing template when editing. Deliberately does NOT reset()
+  // for the "new template" case anymore — see workouts.tsx's "+ New" / "Build
+  // your own workout template" handlers, which call reset() explicitly at the
+  // one real "start fresh" user gesture instead.
+  //
+  // Root cause this replaces: on Expo Router web, navigating from here to the
+  // exercise picker (/exercises?builderPick=1) and back REMOUNTS this screen
+  // rather than merely refocusing it (confirmed via performance.getEntriesByType
+  // ('navigation') and the fact that `name` itself was reverting to '' on
+  // return — only reset() does that). That remount reran this exact effect
+  // with the same params (no planId), which called reset() — wiping
+  // pendingPick — a render before the useFocusEffect below could resolve it.
+  // Effects fire in declaration order within a commit, so reset() always won
+  // the race: every picked exercise was silently discarded, and since
+  // handleSave() refuses to save with zero exercises, no template could ever
+  // be created through this screen on web. Native doesn't remount on this
+  // navigation (screens stay mounted in the stack), which is exactly why
+  // this was invisible there — but removing the mount-inferred reset()
+  // doesn't change native behavior: it never depended on this effect
+  // re-running to do anything useful.
   useEffect(() => {
     if (params.planId) {
       loadExisting(params.planId);
-    } else {
-      reset();
     }
   }, [params.planId]);
 
@@ -249,7 +267,15 @@ export default function CreateWorkoutScreen() {
                 accessible={true}
                 accessibilityRole="button"
                 accessibilityLabel="Add exercise from library"
-                onPress={() => router.push('/exercises?builderPick=1')}
+                onPress={() => {
+                  // Ensure this pick resolves as an ADD, not a replace: if the
+                  // athlete previously tapped "Replace" on some row, cancelled
+                  // out of the picker without choosing anything, and is now
+                  // starting an unrelated add, replacingTempId would otherwise
+                  // still be armed from that abandoned attempt.
+                  clearReplaceTarget();
+                  router.push('/exercises?builderPick=1');
+                }}
                 style={styles.addBtn}
                 activeOpacity={0.8}
               >
