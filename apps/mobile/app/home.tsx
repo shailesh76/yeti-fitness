@@ -23,13 +23,19 @@ import { EVENTS } from '../constants/analyticsEvents';
 import { useAuthStore } from '../store/useAuthStore';
 import { HealthScoreEngine } from '@yeti/training-engine';
 import { useSyncManager } from '../hooks/useSyncManager';
-import { Workout, WorkoutSession } from '@yeti/database';
+import { WorkoutSession } from '@yeti/database';
 import AppShell from '../components/AppShell';
 import { database, isNativeDbAvailable } from '../database';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { fetchDailyTelemetry } from '../services/wearableService';
 import { fetchNutritionTargets } from '../services/nutritionTargets';
+import { useFoodStore } from '../store/useFoodStore';
+import {
+  Macros, ZERO_MACROS, TodaysPlanSummary, ReadinessState,
+  resolveConsumedMacros, sumMealLogsForDay, pickRicherMacros,
+  buildTodaysPlan, describeReadiness,
+} from '../services/homeSummary';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 
 const { width } = Dimensions.get('window');
@@ -185,15 +191,13 @@ MotivationalBanner.displayName = 'MotivationalBanner';
 
 // ─── 3. Today's Plan Card (Master Reference) ──────────────────────────────────
 const TodaysPlanCard = memo(({
-  todayWorkout,
-  activeSessionId,
+  plan,
   onPressWorkout,
 }: {
-  todayWorkout: string;
-  activeSessionId: string | null;
+  plan: TodaysPlanSummary;
   onPressWorkout: () => void;
 }) => {
-  const isResume = !!activeSessionId;
+  const isResume = plan.kind === 'session';
 
   return (
     <View style={[sharedStyles.card, styles.planCard]}>
@@ -204,19 +208,29 @@ const TodaysPlanCard = memo(({
 
       <View style={sharedStyles.rowBetween}>
         <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={styles.planTitle}>{todayWorkout}</Text>
-          <Text style={styles.planSubtitle}>Chest, Shoulders, Triceps</Text>
-          
-          <View style={styles.planMetaRow}>
-            <View style={sharedStyles.row}>
-              <Ionicons name="barbell-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
-              <Text style={styles.planMetaText}>6 Exercises</Text>
+          <Text style={styles.planTitle}>{plan.name}</Text>
+          {/* Real muscle groups from this plan's own exercises; omitted
+              entirely when the rows carry no muscle data. */}
+          {!!plan.muscleSummary && <Text style={styles.planSubtitle}>{plan.muscleSummary}</Text>}
+
+          {plan.exerciseCount > 0 && (
+            <View style={styles.planMetaRow}>
+              <View style={sharedStyles.row}>
+                <Ionicons name="barbell-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
+                <Text style={styles.planMetaText}>
+                  {plan.exerciseCount} {plan.exerciseCount === 1 ? 'Exercise' : 'Exercises'}
+                </Text>
+              </View>
+              {plan.setCount > 0 && (
+                <View style={[sharedStyles.row, { marginLeft: 14 }]}>
+                  <Ionicons name="repeat-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
+                  <Text style={styles.planMetaText}>
+                    {plan.setCount} {plan.setCount === 1 ? 'Set' : 'Sets'}
+                  </Text>
+                </View>
+              )}
             </View>
-            <View style={[sharedStyles.row, { marginLeft: 14 }]}>
-              <Ionicons name="time-outline" size={13} color={P.TEXT_MUT} style={{ marginRight: 4 }} />
-              <Text style={styles.planMetaText}>75 min</Text>
-            </View>
-          </View>
+          )}
         </View>
 
         <View style={styles.planMascotContainer}>
@@ -232,7 +246,7 @@ const TodaysPlanCard = memo(({
       <TouchableOpacity
         accessible={true}
         accessibilityRole="button"
-        accessibilityLabel={isResume ? `Resume Workout Session: ${todayWorkout}` : `Start Workout: ${todayWorkout}`}
+        accessibilityLabel={isResume ? `Resume Workout Session: ${plan.name}` : `Start Workout: ${plan.name}`}
         activeOpacity={0.85}
         onPress={() => {
           if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -248,6 +262,48 @@ const TodaysPlanCard = memo(({
   );
 });
 TodaysPlanCard.displayName = 'TodaysPlanCard';
+
+// Shown when the athlete genuinely has no active session and no saved plan.
+// Replaces the previous behaviour of falling back to a hardcoded "Push Day",
+// which presented a workout the athlete had never created as though it were
+// theirs. Keeps the same card shape/CTA slot so the layout doesn't shift.
+const TodaysPlanEmptyCard = memo(({ onPressBrowse }: { onPressBrowse: () => void }) => (
+  <View style={[sharedStyles.card, styles.planCard]}>
+    <View style={sharedStyles.rowBetween}>
+      <Text style={sharedStyles.labelCaps}>TODAY&apos;S PLAN</Text>
+    </View>
+
+    <View style={sharedStyles.rowBetween}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <Text style={styles.planTitle}>No plan yet</Text>
+        <Text style={styles.planSubtitle}>Create a workout template to see it here.</Text>
+      </View>
+
+      <View style={styles.planMascotContainer}>
+        <Image
+          source={require('../assets/yeti_mascot_avatar.png')}
+          style={styles.planMascotImg}
+          resizeMode="cover"
+        />
+      </View>
+    </View>
+
+    <TouchableOpacity
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel="Browse workouts to create a plan"
+      activeOpacity={0.85}
+      onPress={() => {
+        if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        onPressBrowse();
+      }}
+      style={[styles.primaryRoyalBtn, glowStyle(P.ACCENT, 16, 0.35)]}
+    >
+      <Text style={styles.primaryRoyalBtnText}>BROWSE WORKOUTS</Text>
+    </TouchableOpacity>
+  </View>
+));
+TodaysPlanEmptyCard.displayName = 'TodaysPlanEmptyCard';
 
 // ─── 4. Daily Progress 4-Ring Widget ──────────────────────────────────────────
 const DailyProgressWidget = memo(({
@@ -335,24 +391,28 @@ const DailyProgressWidget = memo(({
 DailyProgressWidget.displayName = 'DailyProgressWidget';
 
 // ─── 5. Nutrition Summary Bar Card (Reference UI Screen 1) ──────────────────
+// Every value is required and comes from real state. These props previously
+// had demo defaults (1980 / 152 / 205 / 62) AND the call site passed only
+// calories + targetCalories — so all three macro bars rendered those defaults
+// unconditionally, for every athlete, no matter what was logged.
 const NutritionSummaryCard = memo(({
-  calories = 1980,
-  targetCalories = 2600,
-  protein = 152,
-  targetProtein = 170,
-  carbs = 205,
-  targetCarbs = 280,
-  fat = 62,
-  targetFat = 80,
+  calories,
+  targetCalories,
+  protein,
+  targetProtein,
+  carbs,
+  targetCarbs,
+  fat,
+  targetFat,
 }: {
-  calories?: number;
-  targetCalories?: number;
-  protein?: number;
-  targetProtein?: number;
-  carbs?: number;
-  targetCarbs?: number;
-  fat?: number;
-  targetFat?: number;
+  calories: number;
+  targetCalories: number;
+  protein: number;
+  targetProtein: number;
+  carbs: number;
+  targetCarbs: number;
+  fat: number;
+  targetFat: number;
 }) => {
   const router = useRouter();
   const remaining = Math.max(0, targetCalories - calories);
@@ -360,8 +420,10 @@ const NutritionSummaryCard = memo(({
   const strokeWidth = 6;
   const radius = (ringSize - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const clampedProgress = Math.min(Math.max(calories / (targetCalories || 2600), 0), 1);
+  const clampedProgress = targetCalories > 0 ? Math.min(Math.max(calories / targetCalories, 0), 1) : 0;
   const strokeDashoffset = circumference * (1 - clampedProgress);
+  // Targets can legitimately be 0/unset — never divide by them.
+  const barPct = (value: number, target: number) => (target > 0 ? Math.min((value / target) * 100, 100) : 0);
 
   return (
     <View style={sharedStyles.card}>
@@ -429,7 +491,7 @@ const NutritionSummaryCard = memo(({
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{protein} / {targetProtein}g</Text>
           </View>
           <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
-            <View style={[styles.nutriBarFill, { width: `${Math.min((protein / targetProtein) * 100, 100)}%`, backgroundColor: P.PROTEIN }]} />
+            <View style={[styles.nutriBarFill, { width: `${barPct(protein, targetProtein)}%`, backgroundColor: P.PROTEIN }]} />
           </View>
         </View>
 
@@ -440,7 +502,7 @@ const NutritionSummaryCard = memo(({
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{carbs} / {targetCarbs}g</Text>
           </View>
           <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
-            <View style={[styles.nutriBarFill, { width: `${Math.min((carbs / targetCarbs) * 100, 100)}%`, backgroundColor: P.WARNING }]} />
+            <View style={[styles.nutriBarFill, { width: `${barPct(carbs, targetCarbs)}%`, backgroundColor: P.WARNING }]} />
           </View>
         </View>
 
@@ -451,7 +513,7 @@ const NutritionSummaryCard = memo(({
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_PRI }}>{fat} / {targetFat}g</Text>
           </View>
           <View style={[styles.nutriBarTrack, { marginTop: 4 }]}>
-            <View style={[styles.nutriBarFill, { width: `${Math.min((fat / targetFat) * 100, 100)}%`, backgroundColor: P.CALORIES }]} />
+            <View style={[styles.nutriBarFill, { width: `${barPct(fat, targetFat)}%`, backgroundColor: P.CALORIES }]} />
           </View>
         </View>
       </View>
@@ -461,22 +523,26 @@ const NutritionSummaryCard = memo(({
 NutritionSummaryCard.displayName = 'NutritionSummaryCard';
 
 // ─── 6. Yeti Readiness Score Hero ────────────────────────────────────────────
-const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previousScore: number }) => {
-  const diff = score - previousScore;
-  const isPositive = diff >= 0;
+// `readiness` is a discriminated state, not a bare number: no real readiness
+// metric is computed anywhere in the app yet, and the card previously rendered
+// a hardcoded 87% "Fully Ready" with a hardcoded "+7 pts this week" for every
+// athlete on every load. Until a genuine source exists it reports unavailable
+// rather than inventing a score.
+const YetiReadinessCard = memo(({ readiness }: { readiness: ReadinessState }) => {
+  const TONE_COLORS: Record<'ready' | 'moderate' | 'recover', string> = {
+    ready: P.ACCENT,
+    moderate: P.PROTEIN,
+    recover: P.CALORIES,
+  };
 
-  let readinessLabel = 'Fully Ready';
-  let readinessSub = "You're primed to perform!";
-  let readinessColor: string = P.ACCENT;
-  if (score < 60) {
-    readinessLabel = 'Recovery Needed';
-    readinessSub = 'Consider an easier session today.';
-    readinessColor = P.CALORIES;
-  } else if (score < 80) {
-    readinessLabel = 'Getting There';
-    readinessSub = 'Moderate intensity recommended.';
-    readinessColor = P.PROTEIN;
-  }
+  const score = readiness.available ? readiness.score : 0;
+  const readinessColor: string = readiness.available ? TONE_COLORS[readiness.tone] : P.TEXT_MUT;
+  const readinessLabel = readiness.available ? readiness.label : 'Not available';
+  const readinessSub = readiness.available
+    ? readiness.sub
+    : 'Log workouts and recovery data to unlock this.';
+  const diff = readiness.available ? readiness.delta : null;
+  const isPositive = (diff ?? 0) >= 0;
 
   // Small ring accent sharing the BiometricRing drawing logic at a compact size
   const ringSize = 44;
@@ -502,21 +568,25 @@ const YetiReadinessCard = memo(({ score, previousScore }: { score: number; previ
           <Ionicons name="information-circle-outline" size={13} color={P.TEXT_MUT} style={{ marginLeft: 4 }} />
         </View>
         <View style={[sharedStyles.row, { marginTop: 4 }]}>
-          <Text style={styles.readinessPercent}>{score}%</Text>
+          {readiness.available && <Text style={styles.readinessPercent}>{score}%</Text>}
           <Text style={[styles.readinessStatus, { color: readinessColor }]}>{readinessLabel}</Text>
         </View>
         <Text style={styles.readinessSub}>{readinessSub}</Text>
 
-        <View style={styles.deltaRow}>
-          <Ionicons
-            name={isPositive ? 'trending-up' : 'trending-down'}
-            size={13}
-            color={isPositive ? P.STEPS : P.CALORIES}
-          />
-          <Text style={[styles.deltaText, { color: isPositive ? P.STEPS : P.CALORIES }]}>
-            {isPositive ? '+' : ''}{diff} pts this week
-          </Text>
-        </View>
+        {/* Week-over-week delta only when there's a real previous score to
+            compare against — never a difference between two seeded numbers. */}
+        {diff !== null && (
+          <View style={styles.deltaRow}>
+            <Ionicons
+              name={isPositive ? 'trending-up' : 'trending-down'}
+              size={13}
+              color={isPositive ? P.STEPS : P.CALORIES}
+            />
+            <Text style={[styles.deltaText, { color: isPositive ? P.STEPS : P.CALORIES }]}>
+              {isPositive ? '+' : ''}{diff} pts this week
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={{ width: ringSize, height: ringSize, alignItems: 'center', justifyContent: 'center' }}>
@@ -608,7 +678,9 @@ const WeeklyProgressCard = memo(({
   workoutCount: number;
   weeklyCalories: number;
   targetWeeklyCalories: number;
-  readinessScore: number;
+  /** null when no real readiness metric exists — the tile shows '—', not a
+   * fabricated percentage. */
+  readinessScore: number | null;
   onPressViewAll: () => void;
 }) => {
   // Workouts has no real weekly target anywhere in the schema (plan_days is an
@@ -616,10 +688,10 @@ const WeeklyProgressCard = memo(({
   // shows calendar-day coverage (workouts / 7) rather than a fabricated target.
   const workoutPct = Math.min(workoutCount / 7, 1);
   const caloriePct = Math.min(weeklyCalories / (targetWeeklyCalories || 1), 1);
-  // Recovery reuses the same Yeti Readiness score shown above — there is no
-  // separate real weekly recovery metric computed anywhere yet, so this is a
-  // mirror of that (still-placeholder) number, not an independent calculation.
-  const recoveryPct = Math.min(readinessScore / 100, 1);
+  // Recovery mirrors the Yeti Readiness score above. There is still no real
+  // recovery metric computed anywhere, so when that's unavailable this shows
+  // an empty tile rather than a stand-in percentage.
+  const recoveryPct = readinessScore === null ? 0 : Math.min(readinessScore / 100, 1);
 
   return (
     <View style={{ marginBottom: 20 }}>
@@ -656,7 +728,7 @@ const WeeklyProgressCard = memo(({
 
         <View style={styles.weeklyStatTile}>
           <Text style={styles.weeklyStatLabel}>Recovery</Text>
-          <Text style={styles.weeklyStatValue}>{readinessScore}%</Text>
+          <Text style={styles.weeklyStatValue}>{readinessScore === null ? '—' : `${readinessScore}%`}</Text>
           <Text style={styles.weeklyStatSub}>This Week</Text>
           <View style={styles.weeklyStatBarTrack}>
             <View style={[styles.weeklyStatBarFill, { width: `${recoveryPct * 100}%`, backgroundColor: P.STEPS }]} />
@@ -680,12 +752,19 @@ export default function HomeScreen() {
 
   const [loading, setLoading] = useState(true);
   const [athleteName, setAthleteName] = useState('Sailesh Shrestha');
-  const [yetiScore, setYetiScore] = useState(87);
-  const [prevYetiScore, setPrevYetiScore] = useState(80);
-  const [consumedMacros, setConsumedMacros] = useState({ calories: 1980, protein: 152, carbs: 205, fat: 62 });
+  // No real readiness metric is computed anywhere in the app yet, so there is
+  // nothing to hold in state and nothing to set — these are null until a
+  // genuine source exists, and the card renders an honest "Not available"
+  // instead of the seeded 87/80 every athlete used to see as their own score.
+  // (HealthScoreEngine is deliberately NOT used here: it scores engagement /
+  // churn risk from app usage, not physiological readiness to train.)
+  const yetiScore: number | null = null;
+  const prevYetiScore: number | null = null;
+  // Seeded to zero, not to demo values: a brand-new account with nothing
+  // logged must read 0, and every field below is overwritten from real rows.
+  const [consumedMacros, setConsumedMacros] = useState<Macros>(ZERO_MACROS);
   const [targetMacros, setTargetMacros] = useState({ calories: 2500, protein: 170, carbs: 280, fat: 80 });
-  const [todayWorkout, setTodayWorkout] = useState<string | null>('Push Day');
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [todayPlan, setTodayPlan] = useState<TodaysPlanSummary | null>(null);
   const [waterMl, setWaterMl] = useState(0);
   const [steps, setSteps] = useState(0);
   const [weeklyWorkoutCount, setWeeklyWorkoutCount] = useState(0);
@@ -720,10 +799,29 @@ export default function HomeScreen() {
         fat: targets.fat ?? 80,
       });
 
-      const todayMacros = await nutritionRepository.calculateDailyNutrition(userId, Date.now());
-      if (todayMacros && todayMacros.calories > 0) {
-        setConsumedMacros(todayMacros);
-      }
+      // Set unconditionally — a real zero-calorie day must render as zero.
+      // (The previous `todayMacros.calories > 0` guard is exactly what left
+      // the seeded demo macros on screen for accounts with nothing logged.)
+      // calculateDailyNutrition reads WatermelonDB, which doesn't exist on
+      // web and returns zero there, so the AsyncStorage-backed food store is
+      // summed as well and whichever source actually has logs wins.
+      const now = Date.now();
+      const todayMacros = await nutritionRepository.calculateDailyNutrition(userId, now);
+      // useFoodStore.mealLogs is only ever hydrated from AsyncStorage by
+      // food-diary's initSync() — nothing loads it on app boot. Landing on
+      // Home without having visited Food Diary first in this session (a
+      // fresh load, or simply never opening the diary) leaves it as [],
+      // which would silently under-report a real logged day as zero, the
+      // same class of bug as the mock-data seed this replaced. Hydrating
+      // here (idempotent — it's a plain AsyncStorage read + set, safe to
+      // call every time regardless of whether it's already loaded) removes
+      // that dependency on navigation order.
+      await useFoodStore.getState().loadLocalCache();
+      // Scoped to this userId: the food store is not user-partitioned and is
+      // not cleared on sign-out, so an unfiltered sum would surface the
+      // previous account's meals here.
+      const storeMacros = sumMealLogsForDay(useFoodStore.getState().mealLogs, now, userId);
+      setConsumedMacros(pickRicherMacros(resolveConsumedMacros(todayMacros), storeMacros));
 
       const loggedWater = await getWaterForDate(new Date().toDateString());
       setWaterMl(loggedWater);
@@ -750,26 +848,32 @@ export default function HomeScreen() {
       );
       setWeeklyCalories(dailyTotals.reduce((sum, d) => sum + d.calories, 0));
 
+      // Today's Plan: a real in-progress session if there is one, otherwise the
+      // athlete's most recent saved plan, otherwise nothing (honest empty
+      // state). fetchOwnWorkoutPlans works on web too — the old local-DB-only
+      // branch meant web never loaded a plan at all and simply kept showing
+      // the seeded "Push Day".
+      let activeSession: { id: string; name?: string | null } | null = null;
       if (isNativeDbAvailable && database) {
         const activeSessions = (await database
           .get('workout_sessions')
           .query(Q.where('status', 'active'))
           .fetch()) as WorkoutSession[];
-
         if (activeSessions.length > 0) {
-          setTodayWorkout(activeSessions[0].name || 'Push Day');
-          setActiveSessionId(activeSessions[0].id);
-        } else {
-          const templates = (await workoutRepository.getWorkouts()) as Workout[];
-          if (templates.length > 0) {
-            setTodayWorkout(templates[0].name || 'Push Day');
-            setActiveSessionId(null);
-          } else {
-            setTodayWorkout('Push Day');
-            setActiveSessionId(null);
-          }
+          activeSession = { id: activeSessions[0].id, name: activeSessions[0].name };
         }
       }
+
+      let ownPlans: any[] = [];
+      try {
+        ownPlans = await workoutRepository.fetchOwnWorkoutPlans(userId);
+      } catch (planErr) {
+        // Plans unreachable (offline/unconfigured) — fall through with none,
+        // which renders the empty state rather than a stale placeholder.
+        console.warn('Failed to load workout plans for Today’s Plan:', planErr);
+      }
+
+      setTodayPlan(buildTodaysPlan({ activeSession, plans: ownPlans }));
     } catch (e) {
       console.warn('Failed to load local analytics:', e);
     } finally {
@@ -814,27 +918,36 @@ export default function HomeScreen() {
           {/* 2. Yeti Readiness Score Hero — matches reference order (second, right
               after the header, before Today's Workout) */}
           <Animated.View entering={FadeInDown.duration(400).delay(80)}>
-            <YetiReadinessCard score={yetiScore} previousScore={prevYetiScore} />
+            <YetiReadinessCard readiness={describeReadiness(yetiScore, prevYetiScore)} />
           </Animated.View>
 
-          {/* 3. Today's Plan Card */}
-          {todayWorkout && (
-            <Animated.View entering={FadeInDown.duration(400).delay(120)}>
+          {/* 3. Today's Plan Card — real plan, or an honest empty state */}
+          <Animated.View entering={FadeInDown.duration(400).delay(120)}>
+            {todayPlan ? (
               <TodaysPlanCard
-                todayWorkout={todayWorkout}
-                activeSessionId={activeSessionId}
+                plan={todayPlan}
                 onPressWorkout={() =>
-                  router.push(activeSessionId ? '/workouts/session' : '/workouts')
+                  router.push(todayPlan.kind === 'session' ? '/workouts/session' : '/workouts')
                 }
               />
-            </Animated.View>
-          )}
+            ) : (
+              <TodaysPlanEmptyCard onPressBrowse={() => router.push('/workouts')} />
+            )}
+          </Animated.View>
 
-          {/* 4. Nutrition Summary Bar */}
+          {/* 4. Nutrition Summary Bar — all four macros wired to real state;
+              passing only calories used to leave the other three bars showing
+              the component's demo default props. */}
           <Animated.View entering={FadeInDown.duration(400).delay(160)}>
             <NutritionSummaryCard
               calories={consumedMacros.calories}
               targetCalories={targetMacros.calories}
+              protein={consumedMacros.protein}
+              targetProtein={targetMacros.protein}
+              carbs={consumedMacros.carbs}
+              targetCarbs={targetMacros.carbs}
+              fat={consumedMacros.fat}
+              targetFat={targetMacros.fat}
             />
           </Animated.View>
 
