@@ -217,12 +217,20 @@ export function Sidebar() {
         <div className={cn("mt-auto px-2 border-t border-white/5 pt-6 transition-all duration-300", isCollapsed ? "mx-auto px-0" : "")}>
           <div className={cn("flex items-center", isCollapsed ? "flex-col gap-3" : "gap-3")}>
             <div className="h-10 w-10 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center shrink-0">
-              <span className="font-bold text-xs text-blue-400">{initials || "CA"}</span>
+              {coachName === "..." ? (
+                <span className="h-4 w-4 rounded-full bg-blue-400/30 animate-pulse" />
+              ) : (
+                <span className="font-bold text-xs text-blue-400">{initials}</span>
+              )}
             </div>
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-bold text-white truncate">{coachName === "..." ? "Coach Alex" : coachName}</span>
-                <span className="text-xs text-blue-400 font-semibold">Premium Coach</span>
+                {coachName === "..." ? (
+                  <span className="h-4 w-24 rounded bg-white/10 animate-pulse block mb-0.5" />
+                ) : (
+                  <span className="text-sm font-bold text-white truncate">{coachName}</span>
+                )}
+                {userRole && <span className="text-xs text-blue-400 font-semibold capitalize">{userRole}</span>}
               </div>
             )}
           </div>

@@ -1,19 +1,20 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { countSessionsToday } from '@/lib/dashboardMetrics';
 
 export interface Client {
   id: string;
   name: string;
   initials: string;
   avatarColor: string;
-  lastWorkout: number; // timestamp
-  adherenceScore: number; // 0-100
-  caloriesLogged: number;
+  lastWorkout: number | null; // timestamp; null when workout data is unavailable
+  adherenceScore: number | null; // 0-100; null when calculate_adherence failed
+  caloriesLogged: number | null;
   calorieTarget: number;
   weight: number;
   avgHeartRate: number;
   wearableConnected: boolean;
-  planName: string;
+  planName: string | null;
   weekProgress: string; 
 }
 
@@ -61,16 +62,41 @@ export interface DraftPlan {
   days: PlanDay[];
 }
 
+/** Summary row for the Programs list (/dashboard/templates) — one of this
+ * coach's own workout_plans, not an athlete-authored or assigned one. */
+export interface WorkoutTemplateSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  dayCount: number;
+}
+
 interface CoachState {
   clients: Client[];
   loading: boolean;
+  /** Authentication or roster-load failure; distinct from a legitimate zero-client coach, which has no error. */
+  clientsError: string | null;
+  /** Total successful workout_sessions completed today; null means the workout query was unavailable, while 0 is a successful empty result. */
+  workoutsToday: number | null;
+  dashboardErrors: {
+    workouts: string | null;
+    plans: string | null;
+    meals: string | null;
+    adherence: string | null;
+  };
   exercises: Exercise[];
   invites: any[];
+  /** Set when the client_invites fetch itself failed, so an unavailable invite count is never rendered as a real zero. */
+  invitesError: string | null;
   notes: Record<string, any[]>;
   bundles: any[];
-  
+  templates: WorkoutTemplateSummary[];
+  templatesLoading: boolean;
+  templatesError: string | null;
+
   // Actions
   getClients: () => Promise<void>;
+  getTemplates: () => Promise<void>;
   getClientDetail: (id: string) => Promise<{ 
     client: Client | null; 
     logs: WorkoutLog[]; 
@@ -103,30 +129,52 @@ interface CoachState {
 
 export const useCoachStore = create<CoachState>((set, get) => ({
   clients: [],
+  clientsError: null,
+  workoutsToday: null,
+  dashboardErrors: { workouts: null, plans: null, meals: null, adherence: null },
   exercises: [],
   previousWeights: {},
   invites: [],
+  invitesError: null,
   notes: {},
   bundles: [],
+  templates: [],
+  templatesLoading: false,
+  templatesError: null,
   loading: false,
 
   getClients: async () => {
-    set({ loading: true });
-    const { data: sessionData } = await supabase.auth.getSession();
+    try {
+    set({
+      loading: true,
+      clientsError: null,
+      dashboardErrors: { workouts: null, plans: null, meals: null, adherence: null },
+    });
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     const coachId = sessionData.session?.user?.id;
-    if (!coachId) {
-      set({ loading: false, clients: [] });
+    if (sessionError || !coachId) {
+      set({
+        loading: false,
+        clients: [],
+        workoutsToday: null,
+        clientsError: sessionError?.message || 'Not signed in',
+      });
       return;
     }
-    
+
     // 1. Get clients from coach_clients
     const { data: clientsData, error } = await supabase
       .from('coach_clients')
       .select('athlete:profiles!coach_clients_athlete_id_fkey(*)')
       .eq('coach_id', coachId);
-      
-    if (error || !clientsData || clientsData.length === 0) {
-      set({ clients: [], loading: false });
+
+    if (error) {
+      // Genuine fetch failure — distinct from a coach who simply has no athletes yet.
+      set({ clients: [], loading: false, workoutsToday: null, clientsError: error.message });
+      return;
+    }
+    if (!clientsData || clientsData.length === 0) {
+      set({ clients: [], loading: false, workoutsToday: 0, clientsError: null });
       return;
     }
 
@@ -160,17 +208,27 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       Promise.all(athleteIds.map((id: string) => supabase.rpc('calculate_adherence', { athlete_id_param: id }))),
     ]);
 
+    const failedAdherence = adherenceResults.filter((result: any) => result.error).length;
+    const dashboardErrors = {
+      workouts: workoutRes.error?.message || null,
+      plans: plansRes.error?.message || null,
+      meals: mealLogsRes.error?.message || null,
+      adherence: failedAdherence > 0
+        ? `Adherence unavailable for ${failedAdherence} ${failedAdherence === 1 ? 'athlete' : 'athletes'}`
+        : null,
+    };
+
     // First occurrence per athlete_id after a DESC-sorted fetch == latest row,
     // matching each original per-client `.order(...).limit(1)` query.
     const lastWorkoutMap = new Map<string, number>();
-    (workoutRes.data || []).forEach((row: any) => {
+    (!workoutRes.error ? workoutRes.data || [] : []).forEach((row: any) => {
       if (!lastWorkoutMap.has(row.athlete_id) && row.completed_at) {
         lastWorkoutMap.set(row.athlete_id, new Date(row.completed_at).getTime());
       }
     });
 
     const planMap = new Map<string, string>();
-    (plansRes.data || []).forEach((row: any) => {
+    (!plansRes.error ? plansRes.data || [] : []).forEach((row: any) => {
       if (planMap.has(row.athlete_id)) return;
       const wp = row.workout_plans as any;
       const name = Array.isArray(wp) ? wp[0]?.name : wp?.name;
@@ -180,16 +238,17 @@ export const useCoachStore = create<CoachState>((set, get) => ({
     // Sum today's calories per athlete (same aggregation as the original,
     // just grouped across all athletes' logs instead of one athlete's).
     const caloriesMap = new Map<string, number>();
-    (mealLogsRes.data || []).forEach((log: any) => {
+    (!mealLogsRes.error ? mealLogsRes.data || [] : []).forEach((log: any) => {
       const calories = log.food?.calories || 0;
       const servings = Number(log.servings) || 0;
       caloriesMap.set(log.user_id, (caloriesMap.get(log.user_id) || 0) + Math.round(calories * servings));
     });
 
     // Adherence RPC results are positionally aligned with athleteIds.
-    const adherenceMap = new Map<string, number>();
+    const adherenceMap = new Map<string, number | null>();
     athleteIds.forEach((id: string, idx: number) => {
-      adherenceMap.set(id, adherenceResults[idx]?.data || 0);
+      const result = adherenceResults[idx];
+      adherenceMap.set(id, result?.error ? null : (result?.data ?? null));
     });
 
     const mappedClients: Client[] = clientsData.map((row: any) => {
@@ -201,19 +260,68 @@ export const useCoachStore = create<CoachState>((set, get) => ({
         name: p.full_name || 'Unknown',
         initials,
         avatarColor: 'bg-primary text-black',
-        lastWorkout: lastWorkoutMap.get(p.id) || 0,
-        adherenceScore: adherenceMap.get(p.id) || 0,
-        caloriesLogged: caloriesMap.get(p.id) || 0,
+        lastWorkout: workoutRes.error ? null : (lastWorkoutMap.get(p.id) || 0),
+        adherenceScore: adherenceMap.get(p.id) ?? null,
+        caloriesLogged: mealLogsRes.error ? null : (caloriesMap.get(p.id) || 0),
         calorieTarget: p.daily_calorie_target || 2500,
         weight: p.weight_kg || 170,
         avgHeartRate: 70,
         wearableConnected: p.wearable_connected || false,
-        planName: planMap.get(p.id) || 'No Plan',
+        planName: plansRes.error ? null : (planMap.get(p.id) || 'No Plan'),
         weekProgress: 'Active',
       };
     });
 
-    set({ clients: mappedClients, loading: false });
+    set({
+      clients: mappedClients,
+      loading: false,
+      workoutsToday: workoutRes.error ? null : countSessionsToday(workoutRes.data || []),
+      clientsError: null,
+      dashboardErrors,
+    });
+    } catch (e: any) {
+      set({ clients: [], loading: false, workoutsToday: null, clientsError: e?.message || 'Failed to load athletes' });
+    }
+  },
+
+  getTemplates: async () => {
+    set({ templatesLoading: true, templatesError: null });
+    try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const coachId = sessionData.session?.user?.id;
+    if (sessionError || !coachId) {
+      set({ templates: [], templatesLoading: false, templatesError: sessionError?.message || 'Not signed in' });
+      return;
+    }
+
+    // Coach-authored templates only (workout_plans.coach_id) — RLS additionally
+    // enforces this server-side, this filter is belt-and-suspenders, not the
+    // only line of defense. Deliberately excludes athlete-authored plans
+    // (workout_plans.user_id), which are a different ownership axis in this
+    // schema (see docs/database-schema.md's "Workout planning" section) and
+    // don't belong on the coach's own Programs list.
+    const { data, error } = await supabase
+      .from('workout_plans')
+      .select('id, name, created_at, plan_days(count)')
+      .eq('coach_id', coachId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      set({ templates: [], templatesLoading: false, templatesError: error.message });
+      return;
+    }
+
+    const templates: WorkoutTemplateSummary[] = (data || []).map((row: any) => ({
+      id: row.id,
+      name: row.name || 'Untitled Program',
+      createdAt: row.created_at,
+      dayCount: row.plan_days?.[0]?.count ?? 0,
+    }));
+
+    set({ templates, templatesLoading: false, templatesError: null });
+    } catch (e: any) {
+      set({ templates: [], templatesLoading: false, templatesError: e?.message || 'Failed to load programs' });
+    }
   },
 
   getClientDetail: async (id: string) => {
@@ -521,7 +629,10 @@ export const useCoachStore = create<CoachState>((set, get) => ({
   getInvites: async () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const coachId = sessionData.session?.user?.id;
-    if (!coachId) return;
+    if (!coachId) {
+      set({ invites: [], invitesError: 'Not signed in' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('client_invites')
@@ -529,9 +640,14 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       .eq('coach_id', coachId)
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      set({ invites: data });
+    if (error) {
+      // Keep a failed fetch distinguishable from a genuine zero-invite result,
+      // so the dashboard can say "unavailable" instead of showing a real "0".
+      set({ invites: [], invitesError: error.message });
+      return;
     }
+
+    set({ invites: data || [], invitesError: null });
   },
 
   inviteClient: async (email: string) => {
