@@ -55,9 +55,13 @@ export function NutritionTargetCard({ athleteId, athleteName }: { athleteId: str
     setSaving(true);
     setStatus(null);
     try {
-      await assignNutritionTargets(athleteId, t);
+      const outcome = await assignNutritionTargets(athleteId, t);
       setLocked(true);
-      setStatus({ ok: true, msg: "Targets assigned and locked — the athlete has been notified." });
+      setStatus(
+        outcome.notified
+          ? { ok: true, msg: "Targets assigned and locked — the athlete has been notified." }
+          : { ok: false, msg: "Targets assigned and locked, but we couldn't notify the athlete. Let them know directly." },
+      );
     } catch (e: any) {
       setStatus({ ok: false, msg: e?.message || "Failed to assign targets." });
     } finally {

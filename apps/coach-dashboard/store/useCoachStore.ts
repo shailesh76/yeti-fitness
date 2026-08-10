@@ -2,6 +2,18 @@ import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
 import { countSessionsToday } from '@/lib/dashboardMetrics';
 
+/** athleteId:planId pairs with an assignment request currently in flight. */
+const assignmentsInFlight = new Set<string>();
+
+/** Result of a write whose follow-up athlete notification may fail independently. */
+export interface WriteOutcome {
+  /** False when the primary write succeeded but the notification insert did not. */
+  notified: boolean;
+  notificationError: string | null;
+  /** True when an identical request was already in flight and this call was a no-op. */
+  duplicateSuppressed?: boolean;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -10,12 +22,22 @@ export interface Client {
   lastWorkout: number | null; // timestamp; null when workout data is unavailable
   adherenceScore: number | null; // 0-100; null when calculate_adherence failed
   caloriesLogged: number | null;
-  calorieTarget: number;
-  weight: number;
-  avgHeartRate: number;
+  /** profiles.daily_calorie_target; null when the athlete/coach hasn't set one. */
+  calorieTarget: number | null;
+  /** profiles.weight_kg; null when never recorded (previously defaulted to a fabricated 170). */
+  weight: number | null;
+  /** No wearable/HR source exists in the schema yet — always null rather than a made-up resting rate. */
+  avgHeartRate: number | null;
   wearableConnected: boolean;
   planName: string | null;
-  weekProgress: string; 
+  weekProgress: string;
+  /** Real profile columns, null when the athlete hasn't filled them in.
+   * Additive for the Phase 2 roster/detail views — nothing in Phase 1 reads them. */
+  age: number | null;
+  gender: string | null;
+  goal: string | null;
+  heightCm: number | null;
+  bodyFatPercent: number | null;
 }
 
 export interface WorkoutLog {
@@ -97,17 +119,24 @@ interface CoachState {
   // Actions
   getClients: () => Promise<void>;
   getTemplates: () => Promise<void>;
-  getClientDetail: (id: string) => Promise<{ 
-    client: Client | null; 
-    logs: WorkoutLog[]; 
-    weightHistory: { date: string; weight: number }[] 
+  getClientDetail: (id: string) => Promise<{
+    client: Client | null;
+    logs: WorkoutLog[];
+    weightHistory: { date: string; weight: number }[];
+    /** Lets the detail page tell "not your athlete" apart from "no such athlete"
+     * instead of rendering one generic blank state for every failure. */
+    status: 'ok' | 'unauthenticated' | 'unauthorized' | 'not_found';
   }>;
   getExercises: () => Promise<void>;
   assignPlan: (plan: DraftPlan, clientIds: string[]) => Promise<void>;
+  /** Assigns an EXISTING coach template to one athlete, writing the same
+   * canonical assigned_plans + notifications rows assignPlan uses. Resolves with
+   * the notification outcome so the UI can report a partial success. */
+  assignExistingPlan: (planId: string, athleteId: string, startDate?: string) => Promise<WriteOutcome>;
   assignNutritionTargets: (
     athleteId: string,
     targets: { calories: number; protein: number; carbs: number; fat: number },
-  ) => Promise<void>;
+  ) => Promise<WriteOutcome>;
 
   previousWeights: Record<string, number>;
   fetchPreviousWeights: (athleteId: string) => Promise<void>;
@@ -263,12 +292,17 @@ export const useCoachStore = create<CoachState>((set, get) => ({
         lastWorkout: workoutRes.error ? null : (lastWorkoutMap.get(p.id) || 0),
         adherenceScore: adherenceMap.get(p.id) ?? null,
         caloriesLogged: mealLogsRes.error ? null : (caloriesMap.get(p.id) || 0),
-        calorieTarget: p.daily_calorie_target || 2500,
-        weight: p.weight_kg || 170,
-        avgHeartRate: 70,
+        calorieTarget: p.daily_calorie_target ?? null,
+        weight: p.weight_kg ?? null,
+        avgHeartRate: null,
         wearableConnected: p.wearable_connected || false,
         planName: plansRes.error ? null : (planMap.get(p.id) || 'No Plan'),
         weekProgress: 'Active',
+        age: p.age ?? null,
+        gender: p.gender ?? null,
+        goal: p.goal ?? null,
+        heightCm: p.height_cm ?? null,
+        bodyFatPercent: p.body_fat_percent ?? null,
       };
     });
 
@@ -328,7 +362,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
     // 0. Verify the requesting coach actually owns this athlete
     const { data: sessionData } = await supabase.auth.getSession();
     const coachId = sessionData.session?.user?.id;
-    if (!coachId) return { client: null, logs: [], weightHistory: [] };
+    if (!coachId) return { client: null, logs: [], weightHistory: [], status: 'unauthenticated' as const };
 
     const { data: ownership } = await supabase
       .from('coach_clients')
@@ -338,7 +372,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       .single();
 
     // Refuse to return data if this athlete doesn't belong to the requesting coach
-    if (!ownership) return { client: null, logs: [], weightHistory: [] };
+    if (!ownership) return { client: null, logs: [], weightHistory: [], status: 'unauthorized' as const };
 
     // 1. Get profile (safe — ownership confirmed above)
     const { data: profile } = await supabase
@@ -347,7 +381,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       .eq('id', id)
       .single();
 
-    if (!profile) return { client: null, logs: [], weightHistory: [] };
+    if (!profile) return { client: null, logs: [], weightHistory: [], status: 'not_found' as const };
 
     // 2. Get recent logs (joining session_sets and exercises to display set details)
     const { data: logsData } = await supabase
@@ -422,24 +456,47 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       return acc + Math.round(calories * servings);
     }, 0);
 
-    // Use existing client from store to grab pre-calculated fields if available
+    // Use existing client from store to grab pre-calculated fields if available.
+    // On a direct page load the roster hasn't been fetched, so this builds the
+    // client from the profile row alone — every field that isn't actually on
+    // that row stays null rather than being invented (this branch previously
+    // fabricated adherenceScore: 80, planName: 'Current Plan' and weight: 170).
     let client = get().clients.find(c => c.id === id);
     if (!client) {
       const initials = profile.full_name ? profile.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : '??';
+      const latestSession = (logsData || []).find((l: any) => l.completed_at);
+
+      const { data: assignedRow } = await supabase
+        .from('assigned_plans')
+        .select('workout_plans(name)')
+        .eq('athlete_id', id)
+        .order('assigned_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const assignedPlan = assignedRow?.workout_plans as any;
+      const assignedPlanName = Array.isArray(assignedPlan) ? assignedPlan[0]?.name : assignedPlan?.name;
+
+      const { data: adherenceData } = await supabase.rpc('calculate_adherence', { athlete_id_param: id });
+
       client = {
          id: profile.id,
          name: profile.full_name || 'Unknown',
          initials,
          avatarColor: 'bg-primary text-black',
-         lastWorkout: 0,
-         adherenceScore: 80,
+         lastWorkout: latestSession ? new Date(latestSession.completed_at).getTime() : 0,
+         adherenceScore: adherenceData ?? null,
          caloriesLogged,
-         calorieTarget: profile.daily_calorie_target || 2000,
-         weight: profile.weight_kg || 170,
-         avgHeartRate: 0,
+         calorieTarget: profile.daily_calorie_target ?? null,
+         weight: profile.weight_kg ?? null,
+         avgHeartRate: null,
          wearableConnected: profile.wearable_connected || false,
-         planName: 'Current Plan',
-         weekProgress: 'Active'
+         planName: assignedPlanName ?? null,
+         weekProgress: 'Active',
+         age: profile.age ?? null,
+         gender: profile.gender ?? null,
+         goal: profile.goal ?? null,
+         heightCm: profile.height_cm ?? null,
+         bodyFatPercent: profile.body_fat_percent ?? null,
       };
     } else {
       client = {
@@ -448,7 +505,7 @@ export const useCoachStore = create<CoachState>((set, get) => ({
       };
     }
 
-    return { client, logs, weightHistory };
+    return { client, logs, weightHistory, status: 'ok' as const };
   },
 
   fetchPreviousWeights: async (athleteId: string) => {
@@ -580,6 +637,80 @@ export const useCoachStore = create<CoachState>((set, get) => ({
     }
   },
 
+  assignExistingPlan: async (planId, athleteId, startDate) => {
+    // Idempotency guard for rapid repeat submissions (double-click, retried tap).
+    // Keyed by athlete+plan so two different assignments can still run
+    // concurrently, and held in module scope rather than store state so it is
+    // checked synchronously before any await — a React `disabled` prop alone
+    // can't prevent a second call that starts in the same tick.
+    const inFlightKey = `${athleteId}:${planId}`;
+    if (assignmentsInFlight.has(inFlightKey)) {
+      return { notified: false, notificationError: null, duplicateSuppressed: true };
+    }
+    assignmentsInFlight.add(inFlightKey);
+    try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const coachId = sessionData.session?.user?.id;
+    if (!coachId) throw new Error('Not authenticated');
+
+    // Verify the coach owns this athlete before writing. RLS on assigned_plans
+    // enforces the same rule server-side; this is the belt-and-suspenders check
+    // that also lets us return a clear message instead of a raw policy error.
+    const { data: ownership } = await supabase
+      .from('coach_clients')
+      .select('athlete_id')
+      .eq('coach_id', coachId)
+      .eq('athlete_id', athleteId)
+      .maybeSingle();
+    if (!ownership) throw new Error('This athlete is not on your roster.');
+
+    // The plan must be one of this coach's own templates.
+    const { data: plan } = await supabase
+      .from('workout_plans')
+      .select('id, name')
+      .eq('id', planId)
+      .eq('coach_id', coachId)
+      .maybeSingle();
+    if (!plan) throw new Error('That program was not found on your account.');
+
+    // assigned_plans has no status/active column: the app treats the most recent
+    // assigned_at as the athlete's current plan (see getClients' plan lookup), so
+    // assigning simply supersedes and the older rows remain as history. The UI
+    // shows the current plan and asks for confirmation first — nothing here
+    // silently deactivates or deletes a previous assignment.
+    const { error: assignError } = await supabase.from('assigned_plans').insert({
+      plan_id: plan.id,
+      athlete_id: athleteId,
+      start_date: startDate || new Date().toISOString().split('T')[0],
+    });
+    if (assignError) throw assignError;
+
+    // Same notification shape assignPlan already uses — not a second system.
+    // supabase-js resolves with { data, error } instead of throwing, so the
+    // error has to be inspected: a try/catch alone silently swallowed failures
+    // and let the UI claim the athlete had been notified when they hadn't.
+    const { error: notifError } = await supabase.from('notifications').insert({
+      user_id: athleteId,
+      type: 'coach',
+      title: 'New Workout Plan!',
+      body: `Your coach assigned a new plan: ${plan.name}. Let's get to work!`,
+      deep_link: '/workouts',
+    });
+    if (notifError) {
+      console.warn('Plan assignment notification failed (assignment itself succeeded):', notifError);
+    }
+
+    await get().getClients();
+
+    // The assignment row is the primary write and is already committed; a failed
+    // notification is reported, not rolled back (assigned_plans and notifications
+    // have never been written atomically here).
+    return { notified: !notifError, notificationError: notifError?.message ?? null, duplicateSuppressed: false };
+    } finally {
+      assignmentsInFlight.delete(inFlightKey);
+    }
+  },
+
   assignNutritionTargets: async (athleteId, targets) => {
     const { data: sessionData } = await supabase.auth.getSession();
     const coachId = sessionData.session?.user?.id;
@@ -587,37 +718,42 @@ export const useCoachStore = create<CoachState>((set, get) => ({
 
     set({ loading: true });
     try {
-      // Writes the CANONICAL profiles.daily_*_target columns and locks them. RLS
-      // ("Coaches update client nutrition targets") restricts this to the coach's
-      // own assigned athletes, so a coach cannot touch anyone else's targets.
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          daily_calorie_target: targets.calories,
-          daily_protein_target: targets.protein,
-          daily_carb_target: targets.carbs,
-          daily_fat_target: targets.fat,
-          nutrition_targets_locked: true,
-          nutrition_targets_updated_by: coachId,
-          nutrition_targets_updated_at: new Date().toISOString(),
-        })
-        .eq('id', athleteId);
+      // Goes through the narrowly scoped RPC rather than a direct profiles
+      // UPDATE. There is deliberately NO coach UPDATE policy on public.profiles
+      // (RLS is row-level, so one would expose every column of the athlete's
+      // row); assign_client_nutrition_targets touches only the target + lock
+      // columns, re-derives the coach from auth.uid() server-side, and rejects
+      // an athlete who is not on the caller's roster.
+      const { error } = await supabase.rpc('assign_client_nutrition_targets', {
+        p_athlete_id: athleteId,
+        p_calorie_target: targets.calories,
+        p_protein_target: targets.protein,
+        p_carb_target: targets.carbs,
+        p_fat_target: targets.fat,
+        p_locked: true,
+      });
       if (error) throw error;
 
-      // Best-effort notification so the athlete knows their targets changed.
-      try {
-        await supabase.from('notifications').insert({
-          user_id: athleteId,
-          type: 'coach',
-          title: 'Nutrition targets updated',
-          body: `Your coach set new daily targets: ${targets.calories} kcal · ${targets.protein}P / ${targets.carbs}C / ${targets.fat}F.`,
-          deep_link: '/food-diary',
-        });
-      } catch (notifErr) {
-        console.warn('Nutrition target notification failed (non-fatal):', notifErr);
+      // Notification is secondary to the target write. supabase-js resolves with
+      // { data, error } rather than throwing, so inspect error explicitly —
+      // otherwise a rejected insert was reported to the coach as "the athlete
+      // has been notified".
+      const { error: notifError } = await supabase.from('notifications').insert({
+        user_id: athleteId,
+        type: 'coach',
+        title: 'Nutrition targets updated',
+        body: `Your coach set new daily targets: ${targets.calories} kcal · ${targets.protein}P / ${targets.carbs}C / ${targets.fat}F.`,
+        deep_link: '/food-diary',
+      });
+      if (notifError) {
+        console.warn('Nutrition target notification failed (targets themselves saved):', notifError);
       }
 
       await get().getClients();
+
+      // Targets are committed; report the notification outcome instead of
+      // rolling back a successful primary write.
+      return { notified: !notifError, notificationError: notifError?.message ?? null };
     } catch (e) {
       console.error('Failed to assign nutrition targets:', e);
       throw e;

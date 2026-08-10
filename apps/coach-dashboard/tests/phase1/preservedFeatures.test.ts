@@ -20,6 +20,11 @@ const client = (overrides: Partial<Client> = {}): Client => ({
   wearableConnected: false,
   planName: 'Plan',
   weekProgress: 'Active',
+  age: null,
+  gender: null,
+  goal: null,
+  heightCm: null,
+  bodyFatPercent: null,
   ...overrides,
 });
 

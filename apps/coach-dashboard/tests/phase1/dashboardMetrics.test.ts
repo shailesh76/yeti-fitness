@@ -21,6 +21,11 @@ const client = (id: string, adherenceScore: number | null): Client => ({
   wearableConnected: false,
   planName: 'Plan',
   weekProgress: 'Active',
+  age: null,
+  gender: null,
+  goal: null,
+  heightCm: null,
+  bodyFatPercent: null,
 });
 
 describe('dashboard metrics', () => {

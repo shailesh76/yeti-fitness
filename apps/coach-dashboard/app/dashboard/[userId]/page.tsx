@@ -403,6 +403,16 @@ type TabKey = "overview" | "training" | "intelligence" | "notes";
 export default function ClientDetailPage({ params }: { params: { userId: string } }) {
   const router = useRouter();
   const { getClientDetail, notes, getTrainerNotes, addTrainerNote, deleteTrainerNote } = useCoachStore();
+  const getTemplates = useCoachStore((s) => s.getTemplates);
+  const templates = useCoachStore((s) => s.templates);
+  const templatesLoading = useCoachStore((s) => s.templatesLoading);
+  const templatesError = useCoachStore((s) => s.templatesError);
+  const assignExistingPlan = useCoachStore((s) => s.assignExistingPlan);
+  const [detailStatus, setDetailStatus] = useState<'ok' | 'unauthenticated' | 'unauthorized' | 'not_found'>('ok');
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [assignMessage, setAssignMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<{ client: Client | null; logs: WorkoutLog[]; weightHistory: { date: string; weight: number }[] } | null>(null);
@@ -549,13 +559,44 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
     }
   };
 
-  useEffect(() => {
-    getClientDetail(params.userId).then((res) => {
+  const loadDetail = useCallback(() => {
+    return getClientDetail(params.userId).then((res) => {
       setData(res);
+      setDetailStatus(res.status);
       setLoading(false);
     });
+  }, [params.userId, getClientDetail]);
+
+  useEffect(() => {
+    loadDetail();
     getTrainerNotes(params.userId);
+    getTemplates();
   }, [params.userId]);
+
+  const handleAssignPlan = async () => {
+    if (!selectedPlanId) return;
+    setAssigning(true);
+    setAssignMessage(null);
+    try {
+      const outcome = await assignExistingPlan(selectedPlanId, params.userId, startDate || undefined);
+      if (outcome.duplicateSuppressed) {
+        // An identical assignment was already in flight; don't claim a second one.
+        return;
+      }
+      setAssignMessage(
+        outcome.notified
+          ? { text: "Program assigned. The athlete has been notified.", isError: false }
+          : { text: "Program assigned, but we couldn't notify the athlete. Let them know directly.", isError: true },
+      );
+      setSelectedPlanId("");
+      setStartDate("");
+      await loadDetail();
+    } catch (e: any) {
+      setAssignMessage({ text: e?.message || "Failed to assign program.", isError: true });
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const athleteNotes = notes[params.userId] || [];
 
@@ -599,10 +640,20 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
   }
 
   if (!data?.client) {
+    // getClientDetail distinguishes these; showing one generic "not found" for an
+    // athlete who simply belongs to another coach was misleading.
+    const copy = {
+      unauthorized: { title: "This athlete is not on your roster", body: "You can only view athletes linked to your coaching account." },
+      not_found: { title: "Athlete not found", body: "This profile no longer exists." },
+      unauthenticated: { title: "Your session has expired", body: "Sign in again to view this athlete." },
+      ok: { title: "Athlete unavailable", body: "No profile data was returned." },
+    }[detailStatus];
+
     return (
       <div className="p-8 text-center">
-        <h2 className="text-xl text-white">Client not found</h2>
-        <Button onClick={() => router.push("/dashboard")} className="mt-4">Go Back</Button>
+        <h2 className="text-xl text-white">{copy.title}</h2>
+        <p className="text-sm text-gray-400 mt-2">{copy.body}</p>
+        <Button onClick={() => router.push("/dashboard/athletes")} className="mt-4">Back to athletes</Button>
       </div>
     );
   }
@@ -672,29 +723,41 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
 
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {/* Every value here is nullable — null means "not recorded" or "query
+            unavailable", so render an em dash rather than "null" / "null%". */}
         <Card className="relative overflow-hidden">
           <Activity className="absolute top-4 right-4 h-5 w-5 text-gray-500 opacity-50" />
-          <div className="text-4xl font-black text-white mb-1">{client.weight}</div>
+          <div className="text-4xl font-black text-white mb-1">
+            {client.weight ?? <span className="text-gray-600">—</span>}
+          </div>
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Weight (kg)</div>
         </Card>
         <Card className="relative overflow-hidden">
           <Heart className="absolute top-4 right-4 h-5 w-5 text-gray-500 opacity-50" />
           <div className="text-4xl font-black text-white mb-1">
-            {client.wearableConnected ? client.avgHeartRate : "--"}
+            {client.wearableConnected && client.avgHeartRate !== null
+              ? client.avgHeartRate
+              : <span className="text-gray-600">—</span>}
           </div>
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Avg HR</div>
         </Card>
         <Card className="relative overflow-hidden">
           <Flame className="absolute top-4 right-4 h-5 w-5 text-gray-500 opacity-50" />
           <div className="text-4xl font-black text-white mb-1">
-            {client.caloriesLogged}
-            <span className="text-lg text-gray-600 font-bold ml-1">/ {client.calorieTarget}</span>
+            {client.caloriesLogged ?? <span className="text-gray-600">—</span>}
+            <span className="text-lg text-gray-600 font-bold ml-1">
+              / {client.calorieTarget ?? "—"}
+            </span>
           </div>
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Calories</div>
         </Card>
         <Card className="relative overflow-hidden">
           <Target className="absolute top-4 right-4 h-5 w-5 text-gray-500 opacity-50" />
-          <div className="text-4xl font-black text-primary mb-1">{client.adherenceScore}%</div>
+          <div className="text-4xl font-black text-primary mb-1">
+            {client.adherenceScore !== null
+              ? `${client.adherenceScore}%`
+              : <span className="text-gray-600">—</span>}
+          </div>
           <div className="text-xs font-bold uppercase tracking-wider text-primary/70">Adherence</div>
         </Card>
       </div>
@@ -763,6 +826,61 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
             </Card>
           </div>
         </div>
+      )}
+
+      {activeTab === "training" && (
+        <Card className="mb-6">
+          <h2 className="text-xl font-bold text-white mb-1">Assign a program</h2>
+          <p className="text-sm text-gray-400 mb-4">
+            {client.planName
+              ? <>Currently on <span className="text-white font-semibold">{client.planName}</span>. Assigning a new program makes it their current plan; the previous assignment stays in their history.</>
+              : "This athlete has no assigned program yet."}
+          </p>
+
+          {templatesLoading ? (
+            <div className="text-sm text-gray-500">Loading your programs…</div>
+          ) : templatesError ? (
+            <p className="text-sm text-red-400">Couldn&apos;t load your programs: {templatesError}</p>
+          ) : templates.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              You haven&apos;t built any programs yet.{" "}
+              <button onClick={() => router.push("/plans/builder")} className="text-primary font-bold hover:underline">
+                Build one
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <select
+                  value={selectedPlanId}
+                  onChange={(e) => setSelectedPlanId(e.target.value)}
+                  className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary"
+                >
+                  <option value="">Select a program…</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.dayCount} {t.dayCount === 1 ? "day" : "days"})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary"
+                />
+                <Button onClick={handleAssignPlan} disabled={!selectedPlanId || assigning}>
+                  {assigning ? "Assigning…" : "Assign"}
+                </Button>
+              </div>
+              {assignMessage && (
+                <p className={`mt-3 text-xs font-bold ${assignMessage.isError ? "text-red-400" : "text-primary"}`}>
+                  {assignMessage.text}
+                </p>
+              )}
+            </>
+          )}
+        </Card>
       )}
 
       {activeTab === "training" && (

@@ -59,7 +59,19 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   `workout_plans` have indexed `updated_at` timestamps maintained by triggers for incremental sync.
 - **`assigned_plans`** — decouples athlete assignment from `workout_plans.user_id`, so a plan can be
   assigned to an athlete without being "owned" by them. It is pull-only for athlete clients and has
-  `updated_at` tracking for incremental sync.
+  `updated_at` tracking for incremental sync. There is deliberately **no** status/active column: the
+  most recent `assigned_at` is the athlete's current plan and earlier rows are retained as history,
+  so nothing enforces uniqueness on `(athlete_id, plan_id)` and re-assignment stays possible.
+  RLS (see [20260810230000_assigned_plans_plan_ownership_rls.sql](../supabase/migrations/20260810230000_assigned_plans_plan_ownership_rls.sql)):
+  - **INSERT / UPDATE (coach)** require *both* that the athlete is linked to `auth.uid()` through
+    `coach_clients` *and* that `workout_plans.coach_id = auth.uid()`. The original 20260702 policy
+    was `FOR ALL` and only checked the athlete, which let a coach assign another coach's plan to
+    their own athlete — exposing that coach's `plan_days`/`plan_exercises` through the athlete app.
+    Because policies for the same command are OR-ed, the permissive policy had to be **dropped**,
+    not merely supplemented.
+  - **SELECT / DELETE (coach)** check athlete linkage only, so historical rows stay readable and
+    removable even if the referenced plan later changes hands.
+  - **SELECT (athlete)** is unchanged: `auth.uid() = athlete_id`.
 - The mobile WatermelonDB schema mirrors `workout_plans`, `plan_days`, `plan_exercises`,
   `assigned_plans`, and `exercises` (pull-only catalog). Athlete-authored templates are local-first;
   coach assignments are read-only locally.
@@ -100,9 +112,26 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   `daily_protein_target`, `daily_carb_target`, `daily_fat_target` (INT, added 2024). The mobile app
   reads/writes these directly via `services/nutritionTargets.ts` (offline-cached). ⚠️ The mobile
   WatermelonDB `target_*` columns are a legacy phantom — never present server-side and not synced;
-  do not use them. Coach assignment + a `nutrition_targets_locked` flag come from
-  [20260728_coach_nutrition_targets.sql](../supabase/migrations/20260728_coach_nutrition_targets.sql)
-  (coach UPDATE gated by `coach_clients`). **NOTE: not yet applied to the live DB.**
+  do not use them. Production also carries the coach lock/audit columns
+  `nutrition_targets_locked`, `nutrition_targets_updated_by`, `nutrition_targets_updated_at`, added by
+  [20260810230100_coach_nutrition_targets_reconcile.sql](../supabase/migrations/20260810230100_coach_nutrition_targets_reconcile.sql)
+  — **applied live and recorded in migration history**. (Its predecessor `20260728` appears in the
+  ledger but none of its objects ever existed in production; the reconcile migration supersedes it.)
+
+  Coaches do **not** get a general UPDATE policy on `profiles`. RLS is row-level, not column-level, so
+  such a policy would let a coach rewrite every column of a linked athlete's row — `full_name`, `role`,
+  `weight_kg`, `goal`. Instead coaches write targets through
+  `public.assign_client_nutrition_targets(p_athlete_id, p_calorie_target, p_protein_target, p_carb_target, p_fat_target, p_locked)`:
+  - `SECURITY DEFINER` with `SET search_path = ''`, required because no coach UPDATE policy exists on
+    `profiles`, so a coach's own privileges cannot perform the write.
+  - Coach identity is derived solely from `auth.uid()` — there is no coach-id parameter to spoof, and
+    `nutrition_targets_updated_by` is always set server-side from it.
+  - Ownership is verified against `coach_clients` before any write; an unlinked athlete is rejected.
+  - Only the seven nutrition/audit columns can change: the four `daily_*_target` values plus
+    `nutrition_targets_locked` / `_updated_by` / `_updated_at`. Targets are range-validated.
+  - `EXECUTE` is granted to `authenticated` only; `PUBLIC`, `anon` and `service_role` are revoked.
+  - The athlete's own `Users update own profile` policy is unchanged, so athletes keep editing their
+    own row (the lock flag is what makes coach-set targets read-only in the athlete app).
 
 ### Progress tracking
 - **`measurements`** — generic typed measurement log (`type` + `value` — weight, body fat %, circumference,
