@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCoachStore, Exercise, PlanDay, AssignedExercise } from "@/store/useCoachStore";
+import { createSaveGuard, createPlanLoadTracker, canPersistPlan, persistBlockedReason, didRouteChange } from "@/lib/planBuilderGuards";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
@@ -166,20 +167,24 @@ function SortableExerciseItem({
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 font-bold uppercase">Sets</span>
+            {/* A persisted NULL renders as an empty field with a placeholder,
+                never as an invented "3" that a later save would write back. */}
             <input
               type="text"
-              value={item.sets}
+              value={item.sets ?? ""}
+              placeholder="—"
               onChange={(e) => onUpdate(item.id, "sets", e.target.value)}
-              className="w-12 h-7 bg-white/5 border border-white/10 rounded px-2 text-sm text-white text-center focus:outline-none focus:border-primary"
+              className="w-12 h-7 bg-white/5 border border-white/10 rounded px-2 text-sm text-white text-center focus:outline-none focus:border-primary placeholder:text-gray-600"
             />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 font-bold uppercase">Reps</span>
             <input
               type="text"
-              value={item.reps}
+              value={item.reps ?? ""}
+              placeholder="—"
               onChange={(e) => onUpdate(item.id, "reps", e.target.value)}
-              className="w-16 h-7 bg-white/5 border border-white/10 rounded px-2 text-sm text-white text-center focus:outline-none focus:border-primary"
+              className="w-16 h-7 bg-white/5 border border-white/10 rounded px-2 text-sm text-white text-center focus:outline-none focus:border-primary placeholder:text-gray-600"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -253,7 +258,9 @@ function PlanBuilderInner() {
     getExercises, 
     clients, 
     getClients, 
-    assignPlan,
+    savePlan,
+    getPlanForEdit,
+    assignExistingPlan,
     bundles,
     getBundles,
     createBundle,
@@ -320,13 +327,160 @@ function PlanBuilderInner() {
 
   const searchParams = useSearchParams();
   const queryClientId = searchParams?.get("clientId");
+  const queryPlanId = searchParams?.get("planId");
   const firstClientId = Array.from(selectedClients)[0];
+
+  // ── Phase 3: real persistence state ──────────────────────────────────────
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planLoadError, setPlanLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Synchronous single-flight guard. React state is batched, so `saving` cannot
+  // stop two clicks in the same tick — without this, two concurrent handlers
+  // could both reach savePlan() and create two distinct plans before Phase 2's
+  // assignExistingPlan guard (which is keyed by plan id) could ever apply.
+  const saveGuardRef = useRef(createSaveGuard());
+
+  // Previous value of the route's ?planId=. `undefined` means "not evaluated
+  // yet" (first mount), which is distinct from `null` ("route has no planId").
+  const prevQueryPlanIdRef = useRef<string | null | undefined>(undefined);
+
+  // Load lifecycle, tracked separately from route identity. Route identity
+  // alone cannot answer "does this route still need loading?" — under Strict
+  // Mode the same route must load twice, because the first request is killed
+  // by the cleanup between the two setups.
+  const loadTrackerRef = useRef(createPlanLoadTracker());
+
+  const editState = {
+    queryPlanId: queryPlanId ?? null,
+    loadedPlanId: planId,
+    loadFailed: planLoadError !== null,
+    loading: planLoading,
+  };
+  const persistAllowed = canPersistPlan(editState);
+  const blockedReason = persistBlockedReason(editState);
 
   useEffect(() => {
     getExercises();
     getClients();
     getBundles();
   }, []);
+
+  // Edit mode: ?planId=<uuid> loads one of THIS coach's plans. getPlanForEdit
+  // filters on coach_id, so another coach's id simply resolves to not_found and
+  // nothing is hydrated into the builder.
+  useEffect(() => {
+    const currentQueryPlanId = queryPlanId ?? null;
+    const tracker = loadTrackerRef.current;
+
+    // Compare against the PREVIOUS ROUTE, never against the loaded planId.
+    // savePlan() returns a canonical id that we store in planId; that is
+    // persistence state, not navigation, and must never be read as a route
+    // transition — doing so cleared the id right after a create and made the
+    // next Save mint a second plan.
+    const routeChanged = didRouteChange(prevQueryPlanIdRef.current, currentQueryPlanId);
+    prevQueryPlanIdRef.current = currentQueryPlanId;
+
+    if (routeChanged) {
+      // Navigating edit -> plain create keeps this component mounted, so the
+      // old canonical planId has to be dropped here; otherwise the next Save
+      // would update the previous plan instead of creating a new one.
+      setPlanId(null);
+      setPlanLoadError(null);
+      // planLoading belongs to the ROUTE, not to a request. Leaving an
+      // in-flight edit for /plans/builder cancels that request, and a
+      // cancelled request is (correctly) unable to clear anything — so
+      // without this reset the create route stayed disabled forever, waiting
+      // on a load that could never report back. Reset because the route
+      // changed, never because a stale request finished.
+      setPlanLoading(false);
+      // Whatever the previous route completed says nothing about this one.
+      tracker.forget();
+    }
+
+    if (!currentQueryPlanId) return;
+
+    // Route identity is not the load gate — the tracker is. An unchanged route
+    // still loads when the previous attempt never completed (Strict Mode's
+    // cleanup between the two setups cancels it), and a completed route never
+    // reloads on an ordinary re-render.
+    const token = tracker.claim(currentQueryPlanId);
+    if (token === null) return;
+
+    const targetPlanId = currentQueryPlanId;
+    let cancelled = false;
+    const isStale = () => cancelled || !tracker.isLive(token);
+    (async () => {
+      setPlanLoading(true);
+      try {
+        const res = await getPlanForEdit(targetPlanId);
+        if (isStale()) return;
+        if (res.status === "ok" && res.plan) {
+          setPlanId(res.plan.id);
+          setPlanName(res.plan.name);
+          if (res.plan.days.length > 0) {
+            setDays(res.plan.days);
+            setActiveDayId(res.plan.days[0].id);
+          }
+        } else {
+          setPlanLoadError(
+            res.status === "not_found"
+              ? "That plan was not found on your account."
+              : res.status === "unauthenticated"
+                ? "Your session has expired. Sign in again."
+                : res.message || "Couldn't load that plan.",
+          );
+        }
+        // Completed (hydrated or errored): this route is done, so a re-render
+        // must not refetch it — and an error must not retry forever.
+        tracker.settle(token);
+        setPlanLoading(false);
+      } catch (e: any) {
+        if (isStale()) return;
+        setPlanLoadError(e?.message || "Couldn't load that plan.");
+        tracker.settle(token);
+        setPlanLoading(false);
+      }
+    })();
+    // Releasing the claim is what makes the same route eligible again: the
+    // cancelled request can no longer hydrate or clear planLoading, so the
+    // next setup has to be able to start a fresh one.
+    return () => {
+      cancelled = true;
+      tracker.release(token);
+    };
+    // Deliberately NOT dependent on planId: this effect responds to route
+    // changes only. The tracker makes it idempotent if it ever re-runs for
+    // another reason, so an ordinary re-render never reloads or clears the draft.
+  }, [queryPlanId, getPlanForEdit]);
+
+  /** Persists the plan without assigning it. Returns the canonical plan id. */
+  const persistPlan = async (): Promise<string | null> => {
+    // A failed ?planId= load must never fall through into CREATE mode.
+    if (!persistAllowed) {
+      setSaveMessage({ text: blockedReason || "Saving is unavailable right now.", isError: true });
+      return null;
+    }
+    // Claimed synchronously, before the first await.
+    if (!saveGuardRef.current.tryAcquire()) return null;
+
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const savedId = await savePlan({ name: planName, days }, planId ?? undefined);
+      setPlanId(savedId);
+      setSaveMessage({ text: planId ? "Plan updated." : "Plan saved.", isError: false });
+      return savedId;
+    } catch (e: any) {
+      setSaveMessage({ text: e?.message || "Failed to save the plan.", isError: true });
+      return null;
+    } finally {
+      saveGuardRef.current.release();
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (queryClientId) {
@@ -495,13 +649,38 @@ function PlanBuilderInner() {
   const handleAssignSubmit = async () => {
     if (selectedClients.size === 0 || assignSubmitting) return;
     setAssignSubmitting(true);
+    setSaveMessage(null);
     try {
-      await assignPlan({ name: planName, days }, Array.from(selectedClients));
+      // Phase 3: save first to obtain the canonical plan id, then assign through
+      // the Phase 2 path. assignExistingPlan re-verifies athlete linkage AND plan
+      // ownership, is RLS-hardened, guards duplicate submissions and reports the
+      // notification outcome honestly — assignPlan (create-and-assign) does none
+      // of that and would create a fresh duplicate plan on every assignment.
+      const savedId = await persistPlan();
+      if (!savedId) return; // persistPlan already surfaced the error
+
+      const outcomes = [];
+      for (const athleteId of Array.from(selectedClients)) {
+        outcomes.push(await assignExistingPlan(savedId, athleteId));
+      }
+
+      const assigned = outcomes.filter((o) => !o.duplicateSuppressed).length;
+      const unnotified = outcomes.filter((o) => !o.duplicateSuppressed && !o.notified).length;
+      setSaveMessage(
+        unnotified > 0
+          ? {
+              text: `Plan saved and assigned to ${assigned} athlete${assigned === 1 ? "" : "s"}, but ${unnotified} could not be notified. Let them know directly.`,
+              isError: true,
+            }
+          : {
+              text: `Plan saved and assigned to ${assigned} athlete${assigned === 1 ? "" : "s"}.`,
+              isError: false,
+            },
+      );
       setShowAssignModal(false);
       setSelectedClients(new Set());
-    } catch (err) {
-      console.error(err);
-      alert("Failed to assign plan. Please try again.");
+    } catch (err: any) {
+      setSaveMessage({ text: err?.message || "Failed to assign plan. Please try again.", isError: true });
     } finally {
       setAssignSubmitting(false);
     }
@@ -622,17 +801,52 @@ function PlanBuilderInner() {
               placeholder="Plan Name"
             />
             <div className="flex items-center gap-3 w-full sm:w-auto">
-              <Button variant="secondary" className="flex-1 sm:flex-none">Save Draft</Button>
-              <Button onClick={() => setShowAssignModal(true)} className="flex-1 sm:flex-none">Assign Plan</Button>
+              <Button
+                variant="secondary"
+                onClick={persistPlan}
+                disabled={saving || planLoading || !persistAllowed}
+                className="flex-1 sm:flex-none"
+              >
+                {saving ? "Saving…" : planId ? "Save Changes" : "Save Plan"}
+              </Button>
+              <Button
+                onClick={() => setShowAssignModal(true)}
+                disabled={saving || planLoading || !persistAllowed}
+                className="flex-1 sm:flex-none"
+              >
+                Save &amp; Assign
+              </Button>
             </div>
           </div>
+
+          {/* Phase 3: honest load/save state for real persistence */}
+          {(planLoading || planLoadError || saveMessage) && (
+            <div className="px-6 pt-3 shrink-0">
+              {planLoading && (
+                <p className="text-xs font-bold text-gray-400">Loading plan…</p>
+              )}
+              {planLoadError && (
+                <p className="text-xs font-bold text-red-400">{planLoadError}</p>
+              )}
+              {/* Saving is blocked while a named plan failed to load, so the
+                  builder can never silently create a new plan instead. */}
+              {!planLoading && !persistAllowed && blockedReason && (
+                <p className="text-xs font-bold text-amber-400">{blockedReason}</p>
+              )}
+              {saveMessage && (
+                <p className={`text-xs font-bold ${saveMessage.isError ? "text-red-400" : "text-primary"}`}>
+                  {saveMessage.text}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Builder Canvas */}
           <div className="flex-1 p-4 sm:p-8 flex flex-col min-h-0">
             
             {/* Tabs */}
             <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 shrink-0">
-              {days.map((day) => (
+              {days.map((day, dayIndex) => (
                 <button
                   key={day.id}
                   onClick={() => setActiveDayId(day.id)}
@@ -642,7 +856,9 @@ function PlanBuilderInner() {
                       : "bg-surface-highlight text-gray-400 hover:text-white"
                   }`}
                 >
-                  {day.name}
+                  {/* Positional label for an unnamed day — display only, never
+                      written back as the persisted plan_days.name. */}
+                  {day.name ?? `Day ${dayIndex + 1}`}
                 </button>
               ))}
               <button

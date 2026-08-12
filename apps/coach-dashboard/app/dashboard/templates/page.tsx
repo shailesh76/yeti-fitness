@@ -75,9 +75,10 @@ export default function TemplatesPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {templates.map((t) => (
-            <div
+            <Link
               key={t.id}
-              className="bg-[#161C28] border border-white/10 rounded-2xl p-5 hover:border-blue-500/30 transition-all flex flex-col justify-between"
+              href={`/plans/builder?planId=${t.id}`}
+              className="bg-[#161C28] border border-white/10 rounded-2xl p-5 hover:border-blue-500/30 transition-all flex flex-col justify-between cursor-pointer"
             >
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -91,7 +92,7 @@ export default function TemplatesPage() {
                   {new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                 </p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

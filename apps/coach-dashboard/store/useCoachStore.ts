@@ -67,15 +67,33 @@ export interface Exercise {
 export interface AssignedExercise {
   id: string;
   exerciseId: string;
-  name: string;
-  sets: string;
-  reps: string;
-  weight?: string;
+  /** Catalog display name (exercises.name), not a plan_exercises column. Null
+   * when the catalog row could not be joined — the UI shows a placeholder. */
+  name: string | null;
+  /** plan_exercises.sets/reps/weight are nullable text. NULL means "no
+   * prescription recorded" and is NOT the same as the table defaults '3'/'10';
+   * hydration must preserve it so an unset value can never be saved back as an
+   * invented one. The builder shows a placeholder for null, never a value. */
+  sets: string | null;
+  reps: string | null;
+  weight?: string | null;
+  /** Optional prescription fields that plan_exercises genuinely supports.
+   * Additive — existing callers that omit them keep working, and anything
+   * left undefined is written as NULL rather than a fabricated default. */
+  targetRpe?: number | null;
+  restSeconds?: number | null;
+  notes?: string | null;
+  warmupSets?: number | null;
+  isDropset?: boolean | null;
+  /** plan_exercises.superset_group is a uuid column, not free text. */
+  supersetGroup?: string | null;
 }
 
 export interface PlanDay {
   id: string;
-  name: string;
+  /** plan_days.name is nullable. Null means the coach never named the day —
+   * the UI labels it by position rather than persisting a synthetic "Day N". */
+  name: string | null;
   exercises: AssignedExercise[];
 }
 
@@ -129,6 +147,16 @@ interface CoachState {
   }>;
   getExercises: () => Promise<void>;
   assignPlan: (plan: DraftPlan, clientIds: string[]) => Promise<void>;
+  /** Persists a plan WITHOUT assigning it. Creates when planId is omitted,
+   * otherwise replaces the day/exercise tree of that plan in place (keeping the
+   * plan id, so existing assigned_plans rows stay valid). Returns the plan id. */
+  savePlan: (plan: DraftPlan, planId?: string) => Promise<string>;
+  /** Loads one of this coach's own plans for editing, ordered days/exercises. */
+  getPlanForEdit: (planId: string) => Promise<{
+    plan: { id: string; name: string; days: PlanDay[] } | null;
+    status: 'ok' | 'unauthenticated' | 'not_found' | 'error';
+    message?: string;
+  }>;
   /** Assigns an EXISTING coach template to one athlete, writing the same
    * canonical assigned_plans + notifications rows assignPlan uses. Resolves with
    * the notification outcome so the UI can report a partial success. */
@@ -635,6 +663,112 @@ export const useCoachStore = create<CoachState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  savePlan: async (draft, planId) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.user?.id) throw new Error('Not authenticated');
+
+    // Client-side pre-checks so the coach gets an immediate, specific message.
+    // They are a UX convenience only — save_coach_workout_plan re-validates the
+    // whole payload server-side before it touches a row, and that is the check
+    // that actually protects the data.
+    const name = (draft.name || '').trim();
+    if (!name) throw new Error('Give the plan a name before saving.');
+    if (!draft.days || draft.days.length === 0) throw new Error('Add at least one day before saving.');
+    if (draft.days.some((d) => !d.exercises || d.exercises.length === 0)) {
+      throw new Error('Every day needs at least one exercise before saving.');
+    }
+
+    // ONE request. The RPC creates/replaces the whole plan tree inside a single
+    // Postgres transaction, so a mid-way failure rolls everything back instead
+    // of leaving an assigned plan with no days. Optional fields are sent as null
+    // when unset — never as an invented prescription.
+    const payloadDays = draft.days.map((day) => ({
+      name: day.name ?? null,
+      exercises: (day.exercises || []).map((ex) => ({
+        exercise_id: ex.exerciseId,
+        sets: ex.sets ?? null,
+        reps: ex.reps ?? null,
+        weight: ex.weight ?? null,
+        target_rpe: ex.targetRpe ?? null,
+        rest_seconds: ex.restSeconds ?? null,
+        notes: ex.notes ?? null,
+        warmup_sets: ex.warmupSets ?? null,
+        is_dropset: ex.isDropset ?? null,
+        superset_group: ex.supersetGroup ?? null,
+      })),
+    }));
+
+    const { data, error } = await supabase.rpc('save_coach_workout_plan', {
+      p_plan_id: planId ?? null,
+      p_name: name,
+      p_days: payloadDays,
+    });
+    if (error) throw error;
+    if (!data) throw new Error('Failed to save the plan.');
+
+    return data as string;
+  },
+
+  getPlanForEdit: async (planId) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const coachId = sessionData.session?.user?.id;
+    if (!coachId) return { plan: null, status: 'unauthenticated' as const };
+
+    // Ownership is part of the query, so another coach's plan simply returns no
+    // row — it is never loaded into the builder.
+    const { data: plan, error } = await supabase
+      .from('workout_plans')
+      .select('id, name')
+      .eq('id', planId)
+      .eq('coach_id', coachId)
+      .maybeSingle();
+    if (error) return { plan: null, status: 'error' as const, message: error.message };
+    if (!plan) return { plan: null, status: 'not_found' as const };
+
+    const { data: dayRows, error: daysError } = await supabase
+      .from('plan_days')
+      .select('id, name, day_number, plan_exercises(id, exercise_id, sets, reps, weight, order_index, target_rpe, rest_seconds, notes, warmup_sets, is_dropset, superset_group, exercises(name))')
+      .eq('plan_id', planId)
+      .order('day_number', { ascending: true });
+    if (daysError) return { plan: null, status: 'error' as const, message: daysError.message };
+
+    // Hydration returns the PERSISTED state, never a substitute for it. A NULL
+    // sets/reps/weight means "no prescription recorded" and stays null, because
+    // this object is exactly what savePlan() writes back — coercing null to '3'
+    // or '10' here would silently persist an invented prescription on the next
+    // save. Display placeholders belong in the component, not in the data.
+    const days: PlanDay[] = (dayRows || []).map((d: any) => ({
+      id: d.id,
+      // plan_days.name is nullable; keep null and let the UI label the tab from
+      // its position instead of baking "Day N" into the saved value.
+      name: d.name ?? null,
+      exercises: [...(d.plan_exercises || [])]
+        .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        .map((ex: any) => {
+          const catalog = Array.isArray(ex.exercises) ? ex.exercises[0] : ex.exercises;
+          return {
+            id: ex.id,
+            exerciseId: ex.exercise_id,
+            // Catalog display name only — not a persisted plan_exercises column,
+            // so a missing join is shown as unknown rather than invented.
+            name: catalog?.name ?? null,
+            sets: ex.sets ?? null,
+            reps: ex.reps ?? null,
+            weight: ex.weight ?? null,
+            targetRpe: ex.target_rpe ?? null,
+            restSeconds: ex.rest_seconds ?? null,
+            notes: ex.notes ?? null,
+            warmupSets: ex.warmup_sets ?? null,
+            isDropset: ex.is_dropset ?? null,
+            supersetGroup: ex.superset_group ?? null,
+          };
+        }),
+    }));
+
+    // workout_plans.name is NOT NULL in the schema, so it is used as-is.
+    return { plan: { id: plan.id, name: plan.name, days }, status: 'ok' as const };
   },
 
   assignExistingPlan: async (planId, athleteId, startDate) => {

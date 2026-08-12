@@ -57,6 +57,33 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`plan_days`** → **`plan_exercises`** — the current hierarchy: a plan has days, each day has exercises
   (`sets`, `reps`, `weight`, prescription fields, `order_index`). These three tables and
   `workout_plans` have indexed `updated_at` timestamps maintained by triggers for incremental sync.
+  Note `plan_exercises.superset_group` is a **uuid**, not free text, and `sets`/`reps` are nullable
+  text whose column defaults (`'3'`/`'10'`) apply only when the column is omitted — a persisted NULL
+  means "no prescription recorded" and must not be hydrated into a value that could be saved back.
+- **Coach plan persistence** goes through
+  `public.save_coach_workout_plan(p_plan_id uuid, p_name text, p_days jsonb)`
+  Both migrations behind it are **applied live and recorded in migration history**:
+  `supabase/migrations/20260811000000_atomic_coach_plan_save.sql` created the function, and
+  `supabase/migrations/20260811010000_prevalidate_plan_exercise_casts.sql` is a follow-up that
+  `CREATE OR REPLACE`s the same function so `is_dropset` and `superset_group` are cast-validated
+  before the destructive edit statements rather than at insert time. (`CREATE OR REPLACE` leaves no
+  trace in migration history by itself, so `md5(prosrc)` is the reliable way to confirm which
+  definition is deployed.) The dashboard previously wrote a plan with five independent PostgREST requests
+  (verify, update, delete days, insert days, insert exercises); a failure after the delete left a
+  real — possibly already assigned — plan with no days. The RPC performs the whole create-or-replace
+  in **one call, inside one transaction**, so any failure rolls the entire operation back and no
+  partially-written plan can be observed.
+  - **Create**: validates the full payload, inserts `workout_plans`, then the day/exercise tree, and
+    returns the new id. A failed insert leaves no orphan plan row.
+  - **Edit**: locks the plan `FOR UPDATE`, verifies `coach_id = auth.uid()`, updates the name,
+    deletes the day tree (`plan_days` cascades to `plan_exercises`) and re-inserts it. The
+    `workout_plans` row is **updated in place and its id returned unchanged** — it is never deleted
+    and recreated, because `assigned_plans.plan_id` references it `ON DELETE CASCADE` and recreating
+    it would destroy every existing athlete assignment.
+  - Coach identity comes only from `auth.uid()`; there is no coach-id parameter. `SECURITY DEFINER`
+    with `SET search_path = ''`, static SQL only, and `EXECUTE` granted to `authenticated` only
+    (`PUBLIC`, `anon` and `service_role` revoked). Optional exercise fields are written as NULL when
+    unset rather than as invented prescriptions.
 - **`assigned_plans`** — decouples athlete assignment from `workout_plans.user_id`, so a plan can be
   assigned to an athlete without being "owned" by them. It is pull-only for athlete clients and has
   `updated_at` tracking for incremental sync. There is deliberately **no** status/active column: the
