@@ -70,7 +70,7 @@ export default function ExerciseLibraryPage() {
   // Primary Data State
   const [exercises, setExercises] = useState<DbExercise[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
-  const [yetiCount, setYetiCount] = useState<number>(220);
+  const [yetiCount, setYetiCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,7 +89,7 @@ export default function ExerciseLibraryPage() {
   // Filter & Search Controls
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'yeti_v2' | 'legacy_catalog' | 'custom'>('yeti_v2');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'yeti_first_party' | 'legacy_catalog' | 'custom'>('yeti_first_party');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [muscleGroupFilter, setMuscleGroupFilter] = useState('all');
   const [equipmentFilter, setEquipmentFilter] = useState('all');
@@ -117,7 +117,7 @@ export default function ExerciseLibraryPage() {
         const { count } = await supabase
           .from('exercises')
           .select('*', { count: 'exact', head: true })
-          .eq('source_type', 'yeti_v2');
+          .eq('source_type', 'yeti_first_party');
         if (count !== null) setYetiCount(count);
       } catch (err) {
         console.error('Error fetching Yeti count:', err);
@@ -153,8 +153,8 @@ export default function ExerciseLibraryPage() {
         .select('*', { count: 'exact' });
 
       // Apply Source Filter
-      if (sourceFilter === 'yeti_v2') {
-        query = query.eq('source_type', 'yeti_v2');
+      if (sourceFilter === 'yeti_first_party') {
+        query = query.eq('source_type', 'yeti_first_party');
       } else if (sourceFilter === 'legacy_catalog') {
         query = query.eq('source_type', 'legacy_catalog');
       } else if (sourceFilter === 'custom') {
@@ -378,7 +378,7 @@ export default function ExerciseLibraryPage() {
           <button 
             onClick={() => {
               setSearchQuery('');
-              setSourceFilter('yeti_v2');
+              setSourceFilter('yeti_first_party');
               setCategoryFilter('all');
               setMuscleGroupFilter('all');
               setEquipmentFilter('all');
@@ -404,7 +404,7 @@ export default function ExerciseLibraryPage() {
               className="w-full bg-[#161C28] border border-blue-500/30 text-blue-300 font-bold rounded-xl px-2.5 py-1.5 focus:outline-none"
             >
               <option value="all">All Sources</option>
-              <option value="yeti_v2">Yeti First-Party (220)</option>
+              <option value="yeti_first_party">Yeti First-Party ({yetiCount})</option>
               <option value="legacy_catalog">Existing API/Imported</option>
               <option value="custom">Coach-Created</option>
             </select>
@@ -506,9 +506,9 @@ export default function ExerciseLibraryPage() {
       {/* ── QUICK SOURCE TABS ── */}
       <div className="flex items-center gap-2 mb-6 text-xs font-bold overflow-x-auto pb-1">
         <button
-          onClick={() => { setSourceFilter('yeti_v2'); setPage(1); }}
+          onClick={() => { setSourceFilter('yeti_first_party'); setPage(1); }}
           className={`px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
-            sourceFilter === 'yeti_v2' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'bg-[#111A23] text-gray-400 hover:text-white border border-white/10'
+            sourceFilter === 'yeti_first_party' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'bg-[#111A23] text-gray-400 hover:text-white border border-white/10'
           }`}
         >
           <Sparkles className="h-3.5 w-3.5 text-blue-300" />
@@ -589,7 +589,7 @@ export default function ExerciseLibraryPage() {
               {exercises.map((ex: DbExercise) => {
                 const isSelected = selectedExercise?.id === ex.id;
                 const isFav = favorites.has(ex.id);
-                const isYeti = ex.source_type === 'yeti_v2';
+                const isYeti = ex.source_type === 'yeti_first_party';
                 const hasMedia = ex.media_status === 'READY';
 
                 return (
@@ -724,7 +724,7 @@ export default function ExerciseLibraryPage() {
                 </div>
                 
                 <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
-                  {selectedExercise.source_type === 'yeti_v2' && (
+                  {selectedExercise.source_type === 'yeti_first_party' && (
                     <span className="text-blue-400 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded-md">
                       Yeti First-Party
                     </span>

@@ -78,7 +78,7 @@ export async function searchCatalogExercise(supabase: any, rawInput: string): Pr
   const { data: exact } = await supabase
     .from('exercises')
     .select('*')
-    .eq('source_type', 'yeti_v2')
+    .eq('source_type', 'yeti_first_party')
     .or(`slug.eq.${canonical},name.ilike.${canonical}`)
     .maybeSingle();
 
@@ -89,7 +89,7 @@ export async function searchCatalogExercise(supabase: any, rawInput: string): Pr
     .from('exercises')
     .select('*')
     .ilike('name', `%${canonical}%`)
-    .eq('source_type', 'yeti_v2')
+    .eq('source_type', 'yeti_first_party')
     .limit(1);
 
   if (matches && matches.length > 0) return matches[0];
@@ -99,7 +99,7 @@ export async function searchCatalogExercise(supabase: any, rawInput: string): Pr
     .from('exercise_aliases')
     .select('exercise_id, exercises!inner(*)')
     .ilike('alias', `%${canonical}%`)
-    .eq('exercises.source_type', 'yeti_v2')
+    .eq('exercises.source_type', 'yeti_first_party')
     .limit(1);
 
   if (aliasMatch && aliasMatch.length > 0 && (aliasMatch[0] as any).exercises) {
@@ -109,7 +109,7 @@ export async function searchCatalogExercise(supabase: any, rawInput: string): Pr
   // 4. Token-based fallback across name / slug
   const tokens = canonical.split(/\s+/).filter(t => t.length > 2);
   if (tokens.length > 0) {
-    let q = supabase.from('exercises').select('*').eq('source_type', 'yeti_v2');
+    let q = supabase.from('exercises').select('*').eq('source_type', 'yeti_first_party');
     tokens.forEach(tok => {
       q = q.or(`name.ilike.%${tok}%,slug.ilike.%${tok}%`);
     });
@@ -130,7 +130,7 @@ export function buildExerciseGroundingPrompt(exercise: any): string {
   return (
     `GROUNDED DATABASE EXERCISE RECORD:\n` +
     `- ID: ${exercise.id}\n` +
-    `- Source Type: ${exercise.source_type || 'yeti_v2'}\n` +
+    `- Source Type: ${exercise.source_type || 'yeti_first_party'}\n` +
     `- Name: ${exercise.name}\n` +
     `- Slug: ${exercise.slug || 'n/a'}\n` +
     `- Primary Muscle: ${exercise.primary_muscle || exercise.target_muscle || exercise.muscle_group || 'n/a'}\n` +

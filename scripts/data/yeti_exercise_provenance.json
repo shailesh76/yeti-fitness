@@ -1,0 +1,5183 @@
+{
+  "generated_from": {
+    "v2": "packages/database/seeds/exercises/yeti_equipment_exercises_v2.json",
+    "v3": "packages/database/seeds/exercises/yeti_exercise_expansion_v3.json"
+  },
+  "input_records": 420,
+  "canonical_exercises": 396,
+  "shared_slug_merges": 24,
+  "exercises": [
+    {
+      "slug": "90-90-hip-switch",
+      "name": "90/90 Hip Switch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0209",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ab-wheel-rollout",
+      "name": "Ab Wheel Rollout",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0188",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ab-wheel-rollout-from-knees",
+      "name": "Ab Wheel Rollout from Knees",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000376",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "adductor-rock-back",
+      "name": "Adductor Rock-Back",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0213",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "air-bike-sprint",
+      "name": "Air Bike Sprint",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0202",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000412",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "air-bike-tempo-ride",
+      "name": "Air Bike Tempo Ride",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000413",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "alternating-dumbbell-bench-press",
+      "name": "Alternating Dumbbell Bench Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000234",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "alternating-dumbbell-curl",
+      "name": "Alternating Dumbbell Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0156",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ankle-dorsiflexion-mobilization",
+      "name": "Ankle Dorsiflexion Mobilization",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0215",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "arnold-press",
+      "name": "Arnold Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0068",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "assault-runner-tempo-run",
+      "name": "Assault Runner Tempo Run",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000420",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "assisted-pull-up",
+      "name": "Assisted Pull-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0061",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "assisted-sissy-squat",
+      "name": "Assisted Sissy Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000292",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "b-stance-hip-thrust",
+      "name": "B-Stance Hip Thrust",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000325",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "back-squat",
+      "name": "Back Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0093",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "backward-sled-drag",
+      "name": "Backward Sled Drag",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000403",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "band-shoulder-dislocate",
+      "name": "Band Shoulder Dislocate",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0220",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-bench-press",
+      "name": "Barbell Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0001",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-bent-over-row",
+      "name": "Barbell Bent-Over Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0029",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-curl",
+      "name": "Barbell Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0153",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-glute-bridge",
+      "name": "Barbell Glute Bridge",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000323",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "barbell-overhead-press",
+      "name": "Barbell Overhead Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0065",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-romanian-deadlift-from-blocks",
+      "name": "Barbell Romanian Deadlift from Blocks",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000311",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "barbell-seal-row",
+      "name": "Barbell Seal Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000258",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "barbell-upright-row",
+      "name": "Barbell Upright Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0092",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "barbell-z-press",
+      "name": "Barbell Z Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000277",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "battle-rope-alternating-waves",
+      "name": "Battle Rope Alternating Waves",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000406",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "battle-rope-slams",
+      "name": "Battle Rope Slams",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000407",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "bayesian-cable-curl",
+      "name": "Bayesian Cable Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0166",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "behind-the-body-cable-lateral-raise",
+      "name": "Behind-the-Body Cable Lateral Raise",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0079",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000265",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "belt-squat",
+      "name": "Belt Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0103",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "belt-squat-calf-raise",
+      "name": "Belt Squat Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000394",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "belt-squat-machine",
+      "name": "Belt Squat Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000285",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "bent-knee-calf-raise",
+      "name": "Bent-Knee Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000392",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "bent-over-dumbbell-reverse-fly",
+      "name": "Bent-Over Dumbbell Reverse Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0086",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "bird-dog",
+      "name": "Bird Dog",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0192",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "bodyweight-tibialis-raise",
+      "name": "Bodyweight Tibialis Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0152",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "box-squat",
+      "name": "Box Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0096",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "bulgarian-split-squat",
+      "name": "Bulgarian Split Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0116",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-anti-extension-walkout",
+      "name": "Cable Anti-Extension Walkout",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000370",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-bayesian-hammer-curl",
+      "name": "Cable Bayesian Hammer Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000343",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-belt-squat",
+      "name": "Cable Belt Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000286",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-chest-press",
+      "name": "Cable Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0019",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-crossover-hold",
+      "name": "Cable Crossover Hold",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000230",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-crunch",
+      "name": "Cable Crunch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0181",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-curl",
+      "name": "Cable Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0164",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-dead-bug",
+      "name": "Cable Dead Bug",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000371",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-front-raise",
+      "name": "Cable Front Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0083",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-front-raise-with-rope",
+      "name": "Cable Front Raise with Rope",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000268",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-glute-kickback",
+      "name": "Cable Glute Kickback",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0135",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000326",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-high-to-low-fly",
+      "name": "Cable High-to-Low Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0024",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-hip-abduction",
+      "name": "Cable Hip Abduction",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000330",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-kickback",
+      "name": "Cable Kickback",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0180",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-kneeling-crunch",
+      "name": "Cable Kneeling Crunch",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000362",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-lat-prayer",
+      "name": "Cable Lat Prayer",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000254",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-lateral-raise",
+      "name": "Cable Lateral Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0078",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-lift",
+      "name": "Cable Lift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0198",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-lift-low-to-high",
+      "name": "Cable Lift Low to High",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000369",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-low-to-high-fly",
+      "name": "Cable Low-to-High Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0023",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-lying-leg-curl",
+      "name": "Cable Lying Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000307",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-mid-fly",
+      "name": "Cable Mid Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0022",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-press-around",
+      "name": "Cable Press-Around",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000227",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-pull-through",
+      "name": "Cable Pull-Through",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0134",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000318",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-pushdown",
+      "name": "Cable Pushdown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0173",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-rear-delt-fly",
+      "name": "Cable Rear-Delt Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0087",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-rear-delt-sweep",
+      "name": "Cable Rear-Delt Sweep",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000269",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-reverse-lunge",
+      "name": "Cable Reverse Lunge",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000335",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-seated-row",
+      "name": "Cable Seated Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0046",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-shoulder-press",
+      "name": "Cable Shoulder Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0074",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-skull-crusher",
+      "name": "Cable Skull Crusher",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000357",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-spider-curl",
+      "name": "Cable Spider Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000344",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-standing-calf-raise",
+      "name": "Cable Standing Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000393",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-standing-crunch",
+      "name": "Cable Standing Crunch",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000363",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-standing-leg-curl",
+      "name": "Cable Standing Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000306",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-svend-press",
+      "name": "Cable Svend Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000229",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-upright-row",
+      "name": "Cable Upright Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0091",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-wood-chop",
+      "name": "Cable Wood Chop",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0197",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cable-wood-chop-high-to-low",
+      "name": "Cable Wood Chop High to Low",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000368",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cable-y-raise",
+      "name": "Cable Y Raise",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0089",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000264",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "captain-chair-knee-raise",
+      "name": "Captain Chair Knee Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0186",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "captain-chair-leg-raise",
+      "name": "Captain Chair Leg Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000374",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cat-cow",
+      "name": "Cat-Cow",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0217",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "chest-supported-dumbbell-rear-delt-raise",
+      "name": "Chest-Supported Dumbbell Rear-Delt Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000272",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "chest-supported-dumbbell-row",
+      "name": "Chest-Supported Dumbbell Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0035",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "chest-supported-t-bar-row",
+      "name": "Chest-Supported T-Bar Row",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0033",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000243",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "childs-pose-lat-stretch",
+      "name": "Child’s Pose Lat Stretch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0218",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "chin-up",
+      "name": "Chin-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0063",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "close-grip-bench-press",
+      "name": "Close-Grip Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0167",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "close-grip-incline-barbell-press",
+      "name": "Close-Grip Incline Barbell Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000238",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "close-grip-smith-machine-press",
+      "name": "Close-Grip Smith Machine Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000360",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "concentration-curl",
+      "name": "Concentration Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0163",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "conventional-deadlift",
+      "name": "Conventional Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0027",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "converging-incline-chest-press",
+      "name": "Converging Incline Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000222",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "couch-stretch",
+      "name": "Couch Stretch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0211",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cross-body-cable-extension",
+      "name": "Cross-Body Cable Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0179",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cross-body-cable-lat-pulldown",
+      "name": "Cross-Body Cable Lat Pulldown",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000252",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cross-body-cable-triceps-extension",
+      "name": "Cross-Body Cable Triceps Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000353",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cross-body-dumbbell-hammer-curl",
+      "name": "Cross-Body Dumbbell Hammer Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000348",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cross-body-hammer-curl",
+      "name": "Cross-Body Hammer Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0158",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cross-body-lat-pulldown",
+      "name": "Cross-Body Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0060",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "cross-body-rear-delt-cable-fly",
+      "name": "Cross-Body Rear-Delt Cable Fly",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000270",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cuffed-cable-glute-kickback",
+      "name": "Cuffed Cable Glute Kickback",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000327",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cuffed-cable-lateral-raise",
+      "name": "Cuffed Cable Lateral Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000267",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "curtsy-cable-lunge",
+      "name": "Curtsy Cable Lunge",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000334",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "curved-treadmill-sprint",
+      "name": "Curved Treadmill Sprint",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000414",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "cyclist-back-squat",
+      "name": "Cyclist Back Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000293",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dead-bug",
+      "name": "Dead Bug",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0191",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "decline-barbell-bench-press",
+      "name": "Decline Barbell Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0003",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "decline-cable-crunch",
+      "name": "Decline Cable Crunch",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000364",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "decline-dumbbell-press",
+      "name": "Decline Dumbbell Press",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0006",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000233",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "decline-machine-chest-press",
+      "name": "Decline Machine Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0011",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "decline-sit-up",
+      "name": "Decline Sit-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0187",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "deep-squat-hold",
+      "name": "Deep Squat Hold",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0214",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "deficit-calf-raise",
+      "name": "Deficit Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000396",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "diverging-chest-press",
+      "name": "Diverging Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0012",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "donkey-calf-raise",
+      "name": "Donkey Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0148",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "donkey-calf-raise-machine",
+      "name": "Donkey Calf Raise Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000383",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-bench-press",
+      "name": "Dumbbell Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0004",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-curl",
+      "name": "Dumbbell Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0155",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-front-raise",
+      "name": "Dumbbell Front Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0082",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-hex-press",
+      "name": "Dumbbell Hex Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000231",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-lateral-raise",
+      "name": "Dumbbell Lateral Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0075",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-lying-leg-curl",
+      "name": "Dumbbell Lying Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000310",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-pullover",
+      "name": "Dumbbell Pullover",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0008",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-pullover-press",
+      "name": "Dumbbell Pullover Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000235",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-romanian-deadlift",
+      "name": "Dumbbell Romanian Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0121",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-row",
+      "name": "Dumbbell Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0034",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-scaption-raise",
+      "name": "Dumbbell Scaption Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000273",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-seal-row",
+      "name": "Dumbbell Seal Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000256",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-shoulder-press",
+      "name": "Dumbbell Shoulder Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0067",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-skull-crusher",
+      "name": "Dumbbell Skull Crusher",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0170",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-squeeze-press",
+      "name": "Dumbbell Squeeze Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0007",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "dumbbell-staggered-stance-romanian-deadlift",
+      "name": "Dumbbell Staggered-Stance Romanian Deadlift",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000312",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-step-down",
+      "name": "Dumbbell Step-Down",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000298",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "dumbbell-y-raise",
+      "name": "Dumbbell Y Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0090",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "elliptical-trainer",
+      "name": "Elliptical Trainer",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0206",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ez-bar-curl",
+      "name": "EZ-Bar Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0154",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ez-bar-drag-curl",
+      "name": "EZ-Bar Drag Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000350",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "ez-bar-floor-skull-crusher",
+      "name": "EZ-Bar Floor Skull Crusher",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000359",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "ez-bar-skull-crusher",
+      "name": "EZ-Bar Skull Crusher",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0169",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "face-pull",
+      "name": "Face Pull",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0051",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "farmer-walk-on-toes",
+      "name": "Farmer Walk on Toes",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000399",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "farmers-carry",
+      "name": "Farmers Carry",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000417",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "forty-five-degree-hip-extension-glute-bias",
+      "name": "Forty-Five-Degree Hip Extension Glute Bias",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000339",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "forty-five-degree-hip-extension-hamstring-bias",
+      "name": "Forty-Five-Degree Hip Extension Hamstring Bias",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000319",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "forward-lunge",
+      "name": "Forward Lunge",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0115",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "forward-sled-drag",
+      "name": "Forward Sled Drag",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000404",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "frog-pump",
+      "name": "Frog Pump",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000340",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "front-foot-elevated-split-squat",
+      "name": "Front-Foot-Elevated Split Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000295",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "front-plank",
+      "name": "Front Plank",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0193",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "front-rack-kettlebell-carry",
+      "name": "Front-Rack Kettlebell Carry",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000418",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "front-squat",
+      "name": "Front Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0094",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "glute-ham-developer-curl",
+      "name": "Glute-Ham Developer Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000305",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "glute-ham-raise",
+      "name": "Glute-Ham Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0130",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "glute-kickback-machine",
+      "name": "Glute Kickback Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0136",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "goblet-squat",
+      "name": "Goblet Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0098",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "good-morning",
+      "name": "Good Morning",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0124",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "good-morning-to-pins",
+      "name": "Good Morning to Pins",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000316",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "guillotine-press",
+      "name": "Guillotine Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000236",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "hack-squat",
+      "name": "Hack Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0099",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hack-squat-calf-raise",
+      "name": "Hack Squat Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000385",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "half-kneeling-hip-flexor-stretch",
+      "name": "Half-Kneeling Hip Flexor Stretch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0212",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "half-kneeling-landmine-press",
+      "name": "Half-Kneeling Landmine Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000275",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "half-kneeling-pallof-press",
+      "name": "Half-Kneeling Pallof Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000366",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "half-kneeling-single-arm-lat-pulldown",
+      "name": "Half-Kneeling Single-Arm Lat Pulldown",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000251",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "half-kneeling-single-arm-pulldown",
+      "name": "Half-Kneeling Single-Arm Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0059",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hammer-curl",
+      "name": "Hammer Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0157",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hammer-grip-chest-press",
+      "name": "Hammer-Grip Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0015",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hammer-strength-row",
+      "name": "Hammer Strength Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0043",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hanging-knee-raise",
+      "name": "Hanging Knee Raise",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0184",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000373",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "hanging-leg-raise",
+      "name": "Hanging Leg Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0185",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "heavy-sled-push",
+      "name": "Heavy Sled Push",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000402",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "heels-elevated-goblet-squat",
+      "name": "Heels-Elevated Goblet Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000294",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "high-cable-biceps-curl",
+      "name": "High Cable Biceps Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000345",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "high-cable-row",
+      "name": "High Cable Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0049",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "high-foot-leg-press",
+      "name": "High-Foot Leg Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000289",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "high-row-machine",
+      "name": "High Row Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0041",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "high-step-up-glute-bias",
+      "name": "High Step-Up Glute Bias",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000337",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "hip-abduction-machine",
+      "name": "Hip Abduction Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0137",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hip-adduction-machine",
+      "name": "Hip Adduction Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0138",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "hip-thrust",
+      "name": "Hip Thrust",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0131",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "horizontal-leg-press",
+      "name": "Horizontal Leg Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0107",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "incline-barbell-bench-press",
+      "name": "Incline Barbell Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0002",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "incline-bench-dumbbell-row",
+      "name": "Incline Bench Dumbbell Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000257",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "incline-dumbbell-curl",
+      "name": "Incline Dumbbell Curl",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0159",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000349",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "incline-dumbbell-lateral-raise",
+      "name": "Incline Dumbbell Lateral Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000271",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "incline-dumbbell-press",
+      "name": "Incline Dumbbell Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0005",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "incline-dumbbell-squeeze-press",
+      "name": "Incline Dumbbell Squeeze Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000232",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "incline-dumbbell-triceps-extension",
+      "name": "Incline Dumbbell Triceps Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000358",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "incline-machine-chest-press",
+      "name": "Incline Machine Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0010",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "incline-treadmill-walk",
+      "name": "Incline Treadmill Walk",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0200",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000415",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "iso-lateral-chest-press",
+      "name": "Iso-Lateral Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0013",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "iso-lateral-incline-press",
+      "name": "Iso-Lateral Incline Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0014",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "iso-lateral-low-row",
+      "name": "Iso-Lateral Low Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000247",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "iso-lateral-machine-row",
+      "name": "Iso-Lateral Machine Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0040",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "iso-lateral-shoulder-press",
+      "name": "Iso-Lateral Shoulder Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0070",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "isometric-calf-raise-hold",
+      "name": "Isometric Calf Raise Hold",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000398",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "jm-press",
+      "name": "JM Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0168",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "kettlebell-swing",
+      "name": "Kettlebell Swing",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0144",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "kneeling-cable-chest-press",
+      "name": "Kneeling Cable Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000228",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "kneeling-rope-crunch",
+      "name": "Kneeling Rope Crunch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0182",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "kneeling-rope-pullover",
+      "name": "Kneeling Rope Pullover",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000255",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "landmine-front-squat",
+      "name": "Landmine Front Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000299",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "landmine-meadows-row",
+      "name": "Landmine Meadows Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000259",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "landmine-press",
+      "name": "Landmine Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0072",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "landmine-reverse-lunge",
+      "name": "Landmine Reverse Lunge",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000338",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "landmine-rotation",
+      "name": "Landmine Rotation",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000378",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "landmine-row",
+      "name": "Landmine Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0038",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "lat-pulldown",
+      "name": "Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0054",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "lateral-lunge",
+      "name": "Lateral Lunge",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0119",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "lateral-sled-drag",
+      "name": "Lateral Sled Drag",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000405",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "leaning-cable-lateral-raise",
+      "name": "Leaning Cable Lateral Raise",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0080",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000266",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "leaning-dumbbell-lateral-raise",
+      "name": "Leaning Dumbbell Lateral Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0077",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "leg-extension",
+      "name": "Leg Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0110",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "leg-press",
+      "name": "Leg Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0106",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "leg-press-calf-press",
+      "name": "Leg Press Calf Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000384",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "leg-press-calf-raise",
+      "name": "Leg Press Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0147",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "leverage-squat",
+      "name": "Leverage Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000284",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "linear-hack-squat",
+      "name": "Linear Hack Squat",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0100",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000281",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "long-stride-bulgarian-split-squat",
+      "name": "Long-Stride Bulgarian Split Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000336",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "low-cable-row",
+      "name": "Low Cable Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0050",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "low-foot-leg-press",
+      "name": "Low-Foot Leg Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000290",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "low-row-machine",
+      "name": "Low Row Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0042",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "lying-leg-curl",
+      "name": "Lying Leg Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0126",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "lying-single-leg-curl",
+      "name": "Lying Single-Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000302",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "machine-abdominal-crunch",
+      "name": "Machine Abdominal Crunch",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0183",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000361",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "machine-chest-press",
+      "name": "Machine Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0009",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-glute-drive",
+      "name": "Machine Glute Drive",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0132",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-lateral-raise",
+      "name": "Machine Lateral Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0081",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-overhead-press-neutral-grip",
+      "name": "Machine Overhead Press Neutral Grip",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000261",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "machine-preacher-curl",
+      "name": "Machine Preacher Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0161",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-seated-row",
+      "name": "Machine Seated Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0039",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-shoulder-press",
+      "name": "Machine Shoulder Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0069",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "machine-sissy-squat",
+      "name": "Machine Sissy Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000291",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "machine-triceps-extension",
+      "name": "Machine Triceps Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000351",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "meadows-row",
+      "name": "Meadows Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0037",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "multi-hip-machine-extension",
+      "name": "Multi-Hip Machine Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000329",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "narrow-stance-leg-press",
+      "name": "Narrow-Stance Leg Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000288",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "neutral-grip-chest-supported-row",
+      "name": "Neutral-Grip Chest-Supported Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000244",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "neutral-grip-lat-pulldown",
+      "name": "Neutral-Grip Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0055",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "neutral-grip-machine-chest-press",
+      "name": "Neutral-Grip Machine Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000224",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "neutral-grip-machine-row",
+      "name": "Neutral-Grip Machine Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0045",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "neutral-grip-pull-up",
+      "name": "Neutral-Grip Pull-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0064",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "nordic-curl-machine",
+      "name": "Nordic Curl Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000304",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "nordic-hamstring-curl",
+      "name": "Nordic Hamstring Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0129",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "offset-farmer-carry",
+      "name": "Offset Farmer Carry",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000380",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "overhead-cable-rope-extension",
+      "name": "Overhead Cable Rope Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000354",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "overhead-dumbbell-extension",
+      "name": "Overhead Dumbbell Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0171",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "overhead-rope-extension",
+      "name": "Overhead Rope Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0177",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "pallof-hold",
+      "name": "Pallof Hold",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0196",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "pallof-press",
+      "name": "Pallof Press",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0195",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000365",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "pallof-press-iso-hold",
+      "name": "Pallof Press Iso Hold",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000367",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "paused-calf-raise",
+      "name": "Paused Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000395",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "pec-deck-fly",
+      "name": "Pec Deck Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0026",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "pendlay-row",
+      "name": "Pendlay Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0030",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "pendulum-squat",
+      "name": "Pendulum Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0101",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "plate-front-raise",
+      "name": "Plate Front Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0084",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "plate-loaded-decline-chest-press",
+      "name": "Plate-Loaded Decline Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000221",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "plate-loaded-high-row",
+      "name": "Plate-Loaded High Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000241",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "plate-loaded-hip-thrust",
+      "name": "Plate-Loaded Hip Thrust",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000321",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "plate-loaded-low-row",
+      "name": "Plate-Loaded Low Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000242",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "plate-loaded-shoulder-press",
+      "name": "Plate-Loaded Shoulder Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000262",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "pogo-jump",
+      "name": "Pogo Jump",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000400",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "preacher-curl",
+      "name": "Preacher Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0160",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "preacher-curl-machine",
+      "name": "Preacher Curl Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000341",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "pull-up",
+      "name": "Pull-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0062",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "rack-pull",
+      "name": "Rack Pull",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0028",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-crunch",
+      "name": "Reverse Crunch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0190",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-crunch-on-bench",
+      "name": "Reverse Crunch on Bench",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000375",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-grip-barbell-bench-press",
+      "name": "Reverse-Grip Barbell Bench Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000237",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-grip-cable-curl",
+      "name": "Reverse-Grip Cable Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000347",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-grip-cable-pushdown",
+      "name": "Reverse-Grip Cable Pushdown",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000356",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-grip-pushdown",
+      "name": "Reverse-Grip Pushdown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0175",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-grip-seated-cable-row",
+      "name": "Reverse-Grip Seated Cable Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000248",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-hack-squat",
+      "name": "Reverse Hack Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000282",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-hyperextension",
+      "name": "Reverse Hyperextension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0141",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-hyperextension-hamstring-bias",
+      "name": "Reverse Hyperextension Hamstring Bias",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000320",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "reverse-lunge",
+      "name": "Reverse Lunge",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0114",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-pec-deck",
+      "name": "Reverse Pec Deck",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0085",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "reverse-pec-deck-hold",
+      "name": "Reverse Pec Deck Hold",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000280",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "romanian-deadlift",
+      "name": "Romanian Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0120",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "rope-hammer-curl",
+      "name": "Rope Hammer Curl",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0165",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000346",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "rope-pullover",
+      "name": "Rope Pullover",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0053",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "rope-pushdown",
+      "name": "Rope Pushdown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0174",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "rope-seated-cable-row",
+      "name": "Rope Seated Cable Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000249",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "row-erg-sprint",
+      "name": "Row Erg Sprint",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000410",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "row-erg-steady-state",
+      "name": "Row Erg Steady State",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000411",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "rowing-ergometer",
+      "name": "Rowing Ergometer",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0203",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "safety-bar-box-squat",
+      "name": "Safety-Bar Box Squat",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000300",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "safety-bar-good-morning",
+      "name": "Safety-Bar Good Morning",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000317",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "safety-bar-squat",
+      "name": "Safety Bar Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0095",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "sandbag-bear-hug-carry",
+      "name": "Sandbag Bear-Hug Carry",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000419",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seal-row",
+      "name": "Seal Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0036",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "seated-arnold-press",
+      "name": "Seated Arnold Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000274",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-barbell-shoulder-press",
+      "name": "Seated Barbell Shoulder Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0066",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "seated-calf-raise",
+      "name": "Seated Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0146",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "seated-calf-raise-machine",
+      "name": "Seated Calf Raise Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000382",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-dumbbell-lateral-raise",
+      "name": "Seated Dumbbell Lateral Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0076",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "seated-hip-abduction-back-lean",
+      "name": "Seated Hip Abduction Back Lean",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000333",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-hip-abduction-forward-lean",
+      "name": "Seated Hip Abduction Forward Lean",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000332",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-leg-curl",
+      "name": "Seated Leg Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0125",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "seated-single-leg-curl",
+      "name": "Seated Single-Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000301",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-soleus-raise-with-dumbbell",
+      "name": "Seated Soleus Raise with Dumbbell",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000397",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "seated-tibialis-raise",
+      "name": "Seated Tibialis Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000390",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "side-plank",
+      "name": "Side Plank",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0194",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-cable-chest-press",
+      "name": "Single-Arm Cable Chest Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0020",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-cable-fly",
+      "name": "Single-Arm Cable Fly",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0025",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-cable-pushdown",
+      "name": "Single-Arm Cable Pushdown",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0176",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000352",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-arm-cable-row",
+      "name": "Single-Arm Cable Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0048",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-landmine-press",
+      "name": "Single-Arm Landmine Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0073",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-lat-pulldown",
+      "name": "Single-Arm Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0058",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-machine-high-row",
+      "name": "Single-Arm Machine High Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000246",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-arm-machine-shoulder-press",
+      "name": "Single-Arm Machine Shoulder Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000263",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-arm-overhead-cable-extension",
+      "name": "Single-Arm Overhead Cable Extension",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0178",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000355",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-arm-overhead-dumbbell-extension",
+      "name": "Single-Arm Overhead Dumbbell Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0172",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-preacher-curl-machine",
+      "name": "Single-Arm Preacher Curl Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000342",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-arm-rear-delt-cable-sweep",
+      "name": "Single-Arm Rear-Delt Cable Sweep",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0088",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-arm-seated-chest-press",
+      "name": "Single-Arm Seated Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000223",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-leg-calf-raise",
+      "name": "Single-Leg Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0149",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-leg-curl",
+      "name": "Single-Leg Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0128",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-leg-dumbbell-calf-raise",
+      "name": "Single-Leg Dumbbell Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000387",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-leg-extension",
+      "name": "Single-Leg Extension",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0111",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-leg-hip-thrust",
+      "name": "Single-Leg Hip Thrust",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000324",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-leg-horizontal-leg-press",
+      "name": "Single-Leg Horizontal Leg Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000287",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-leg-landmine-romanian-deadlift",
+      "name": "Single-Leg Landmine Romanian Deadlift",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000313",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "single-leg-press",
+      "name": "Single-Leg Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0109",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "single-leg-romanian-deadlift",
+      "name": "Single-Leg Romanian Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0122",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "sissy-squat-machine",
+      "name": "Sissy Squat Machine",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0112",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "ski-erg-sprint",
+      "name": "Ski Erg Sprint",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000408",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "ski-erg-steady-state",
+      "name": "Ski Erg Steady State",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000409",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "ski-ergometer",
+      "name": "Ski Ergometer",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0204",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "sled-pull",
+      "name": "Sled Pull",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0208",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "sled-push",
+      "name": "Sled Push",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0207",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000401",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "slider-leg-curl",
+      "name": "Slider Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000308",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-bench-press",
+      "name": "Smith Machine Bench Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0016",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "smith-machine-calf-raise",
+      "name": "Smith Machine Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0150",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "smith-machine-decline-press",
+      "name": "Smith Machine Decline Press",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0018",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000239",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-floor-press",
+      "name": "Smith Machine Floor Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000240",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-front-squat",
+      "name": "Smith Machine Front Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0105",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "smith-machine-hip-thrust",
+      "name": "Smith Machine Hip Thrust",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0133",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000322",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-incline-press",
+      "name": "Smith Machine Incline Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0017",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "smith-machine-reverse-lunge",
+      "name": "Smith Machine Reverse Lunge",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000297",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-romanian-deadlift",
+      "name": "Smith Machine Romanian Deadlift",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000315",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-shoulder-press",
+      "name": "Smith Machine Shoulder Press",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0071",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000278",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-split-squat",
+      "name": "Smith Machine Split Squat",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0117",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000296",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-squat",
+      "name": "Smith Machine Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0104",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "smith-machine-standing-calf-raise",
+      "name": "Smith Machine Standing Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000386",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "smith-machine-upright-row",
+      "name": "Smith Machine Upright Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000279",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "spider-curl",
+      "name": "Spider Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0162",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "split-stance-single-arm-cable-press",
+      "name": "Split-Stance Single-Arm Cable Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000226",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "stability-ball-crunch",
+      "name": "Stability Ball Crunch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0189",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "stability-ball-rollout",
+      "name": "Stability-Ball Rollout",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000377",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "stair-climber",
+      "name": "Stair Climber",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0205",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "stair-climber-step",
+      "name": "Stair Climber Step",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000416",
+      "default_reps": "30–60 sec",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-cable-chest-press",
+      "name": "Standing Cable Chest Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000225",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-cable-hip-abduction",
+      "name": "Standing Cable Hip Abduction",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0139",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "standing-cable-hip-adduction",
+      "name": "Standing Cable Hip Adduction",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0140",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "standing-cable-press-around",
+      "name": "Standing Cable Press-Around",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0021",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "standing-calf-raise",
+      "name": "Standing Calf Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0145",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "standing-calf-raise-machine",
+      "name": "Standing Calf Raise Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000381",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-hip-abduction-machine",
+      "name": "Standing Hip Abduction Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000331",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-leg-curl",
+      "name": "Standing Leg Curl",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0127",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "standing-machine-hip-extension",
+      "name": "Standing Machine Hip Extension",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000328",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-machine-leg-curl",
+      "name": "Standing Machine Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000303",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "standing-single-leg-calf-raise",
+      "name": "Standing Single-Leg Calf Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000391",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "stationary-bike",
+      "name": "Stationary Bike",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0201",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "step-up",
+      "name": "Step-Up",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0118",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "stiff-leg-deadlift",
+      "name": "Stiff-Leg Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0123",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "straight-arm-pulldown",
+      "name": "Straight-Arm Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0052",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "straight-arm-rope-pulldown",
+      "name": "Straight-Arm Rope Pulldown",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000253",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "suitcase-carry",
+      "name": "Suitcase Carry",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000379",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "sumo-deadlift",
+      "name": "Sumo Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0142",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "swiss-ball-leg-curl",
+      "name": "Swiss-Ball Leg Curl",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000309",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "t-bar-row",
+      "name": "T-Bar Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0032",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "thoracic-open-book",
+      "name": "Thoracic Open Book",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0216",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "tibialis-bar-raise",
+      "name": "Tibialis Bar Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000388",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "tibialis-raise",
+      "name": "Tibialis Raise",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0151",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "trap-bar-bent-over-row",
+      "name": "Trap-Bar Bent-Over Row",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000260",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "trap-bar-deadlift",
+      "name": "Trap Bar Deadlift",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0143",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "trap-bar-romanian-deadlift",
+      "name": "Trap-Bar Romanian Deadlift",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000314",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "treadmill-run",
+      "name": "Treadmill Run",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0199",
+      "v3_dataset_id": null,
+      "default_reps": "30–60 seconds",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "two-hand-landmine-press",
+      "name": "Two-Hand Landmine Press",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000276",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "underhand-barbell-row",
+      "name": "Underhand Barbell Row",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0031",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "underhand-lat-pulldown",
+      "name": "Underhand Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0056",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "v-squat",
+      "name": "V-Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0102",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "v-squat-machine",
+      "name": "V-Squat Machine",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000283",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "vertical-leg-press",
+      "name": "Vertical Leg Press",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0108",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "walking-lunge",
+      "name": "Walking Lunge",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0113",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "wall-slide",
+      "name": "Wall Slide",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0219",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "wall-supported-tibialis-raise",
+      "name": "Wall-Supported Tibialis Raise",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000389",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "weighted-decline-sit-up",
+      "name": "Weighted Decline Sit-Up",
+      "dataset_versions": [
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": null,
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000372",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "wide-grip-cable-row",
+      "name": "Wide-Grip Cable Row",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0047",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000250",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "wide-grip-lat-pulldown",
+      "name": "Wide-Grip Lat Pulldown",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0057",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "wide-grip-machine-row",
+      "name": "Wide-Grip Machine Row",
+      "dataset_versions": [
+        "v2",
+        "v3"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0044",
+      "v3_dataset_id": "00000000-0000-4000-a000-000000000245",
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v3"
+    },
+    {
+      "slug": "worlds-greatest-stretch",
+      "name": "World’s Greatest Stretch",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0210",
+      "v3_dataset_id": null,
+      "default_reps": "6–10 controlled reps",
+      "default_sets": 2,
+      "merge_winner": "v2"
+    },
+    {
+      "slug": "zercher-squat",
+      "name": "Zercher Squat",
+      "dataset_versions": [
+        "v2"
+      ],
+      "source_type": "yeti_first_party",
+      "v2_dataset_id": "yeti-ex-0097",
+      "v3_dataset_id": null,
+      "default_reps": "8–12",
+      "default_sets": 3,
+      "merge_winner": "v2"
+    }
+  ]
+}

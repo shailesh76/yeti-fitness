@@ -36,21 +36,19 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   email (case-insensitive) and the row becomes a `coach_clients` insert.
 
 ### Exercise catalog
-- **`exercises`** — single denormalized catalog, 2,126 rows merged from 3 free sources
-  (`omercotkd-gifs`, `free-exercise-db`, `exercisegymgifsdb`). Columns: `name`, `muscle_group`,
-  `body_part`, `target_muscle`, `secondary_muscles`, `equipment`, `category`, `difficulty`,
-  `instructions`, `gif_url`/`video_url`/`media_type`/`thumbnail_url`, `source`/`source_id`, `is_public`,
-  `created_by_coach_id` (custom coach-authored exercises), `default_rest_period_sec` (default 90),
-  `created_at`, `updated_at`. `UNIQUE(name)` (case-sensitive). RLS: any
-  authenticated user reads all; a coach can insert/update/delete only exercises where
-  `created_by_coach_id = auth.uid()`. Synced to mobile via WatermelonDB `sync-pull` (pull-only).
-- **`exercise_relations`** — self-referential `(exercise_id, related_exercise_id, relation_type)` where
-  `relation_type` is `variation` or `alternative`.
-- **`exercise_taxonomy`** — `(kind, value)` lookup powering filter dropdowns (`kind` ∈ `muscle`,
-  `equipment`, `body_part`, `category`).
-- **`workout_plan_exercises`** — the *original* (2024) join table between `workout_plans` and `exercises`.
-  Still live, RLS intact, but 0 rows and no app code references it — superseded in practice by
-  `plan_exercises` (below) and never dropped. Not touched by this audit; flagged for awareness.
+- **`exercises`** — primary exercise catalog. Columns: `id`, `slug`, `name`, `primary_muscle`, `target_muscle`, `secondary_muscles`, `equipment`, `category`, `movement_pattern`, `difficulty`, `unilateral`, `setup_instructions`, `execution_instructions`, `breathing`, `coaching_cues`, `common_mistakes`, `safety_notes`, `default_sets`, `default_reps`, `tempo`, `source_type` (`yeti_first_party`/`legacy_catalog`/`custom`), `license`, `media_status`, `media_notes`, `recommended_rest_seconds`, `hypertrophy_reps`, `strength_reps`, `endurance_reps`, `metadata`, `instructions`, `gif_url`, `video_url`, `media_type`, `thumbnail_url`, `source`, `source_id`, `is_public`, `created_by_coach_id`, `default_rest_period_sec`, `created_at`, `updated_at`. `UNIQUE(name)` and `UNIQUE(slug)`. Full-text search gin indexed on `name`. RLS: viewable by all authenticated users; coach editable for custom exercises. Synced to mobile via WatermelonDB.
+- **`exercise_media`** — Cloudflare R2 media references for exercises (`exercise_id`, `media_type` [video|gif|thumbnail|image], `file_format` [mp4|gif|webp|jpg|png], `r2_bucket`, `r2_key`, `url`, `thumbnail_url`, `is_primary`, `media_status`, `media_notes`, `created_at`, `updated_at`).
+- **`exercise_aliases`** — search alias lookup (`exercise_id`, `alias`, `created_at`). Indexed for fast full-text matching.
+- **`exercise_tags`** — categorization and AI tags (`exercise_id`, `tag`, `tag_type`, `created_at`).
+- **`exercise_muscles`** — normalized muscle involvement map (`exercise_id`, `muscle`, `role` [primary|secondary|stabilizer], `created_at`).
+- **`exercise_alternatives`** — direct exercise substitutes (`exercise_id`, `alternative_exercise_id`, `reason`, `created_at`).
+- **`exercise_progressions`** — step-up progression exercises (`exercise_id`, `progression_exercise_id`, `difficulty_delta`, `created_at`).
+- **`exercise_regressions`** — step-down regression exercises (`exercise_id`, `regression_exercise_id`, `difficulty_delta`, `created_at`).
+- **`exercise_relations`** — self-referential `(exercise_id, related_exercise_id, relation_type)` legacy lookup where `relation_type` is `variation` or `alternative`.
+- **`exercise_taxonomy`** — `(kind, value)` lookup powering filter dropdowns (`kind` ∈ `muscle`, `equipment`, `body_part`, `category`).
+- **`workout_plan_exercises`** — legacy join table between `workout_plans` and `exercises`.
+
+
 
 ### Workout planning (offline-synced plans)
 - **`workout_plans`** — top-level plan, owned by `coach_id` or authored by an athlete through `user_id`.
@@ -107,6 +105,15 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`exercise_bundles`** → **`bundle_exercises`** — reusable named groups of exercises a coach can drop
   into a plan.
 - **`coach_exercise_notes`** / **`trainer_notes`** — per-exercise and freeform per-athlete coach notes.
+
+### Exercise Library Infrastructure (Phase 1)
+- **`exercises`** — First-party single source of truth for workouts, AI coaching, exercise search, and offline synchronization. Extended in `20260802_exercise_library_phase1.sql` and `20260802_exercise_library_v2_fields.sql` with: `slug`, `primary_muscle`, `movement_pattern`, `unilateral`, `setup_instructions`, `execution_instructions`, `breathing`, `coaching_cues` (JSONB), `common_mistakes` (JSONB), `safety_notes`, `default_sets`, `default_reps`, `tempo`, `source_type` (default `'legacy_catalog'`, constrained by `exercises_source_type_check` to `'yeti_first_party'`, `'legacy_catalog'`, or `'custom'`), `license`, `recommended_rest_seconds`, `hypertrophy_reps`, `strength_reps`, `endurance_reps`, `media_status`, `media_notes`, `metadata` (JSONB). Reconciled in `20260812133000_exercise_source_taxonomy_reconciliation.sql`.
+- **`exercise_media`** — Multi-asset media library per exercise (`media_type`, `url`, `storage_key`, `is_primary`, `media_status`, `media_notes`).
+- **`exercise_aliases`** — Search alias table (`exercise_id`, `alias`) indexed for fast ILIKE search.
+- **`exercise_tags`** — Search & taxonomy tags (`exercise_id`, `tag`).
+- **`exercise_muscles`** — Granular muscle mapping (`exercise_id`, `muscle`, `role`, `is_primary`).
+- **`exercise_alternatives`** — Biomechanical alternative relationship mappings (`exercise_id`, `alternative_exercise_id`, `reason`).
+- **`exercise_progressions`** & **`exercise_regressions`** — Movement difficulty hierarchy relationships (`exercise_id`, `progression_exercise_id` / `regression_exercise_id`, `difficulty_delta`).
 
 ### Workout logging (two coexisting systems)
 - **`workout_logs`** (2024) — simple log: `started_at`/`completed_at`/`total_volume`, plus a

@@ -12,6 +12,7 @@ export default defineConfig({
       '@yeti/database': path.resolve(__dirname, './packages/database'),
       '@yeti/training-engine': path.resolve(__dirname, './packages/training-engine/src'),
       '@yeti/sync': path.resolve(__dirname, './packages/sync/src'),
+      '@yeti/types': path.resolve(__dirname, './packages/types'),
     }
   }
 });

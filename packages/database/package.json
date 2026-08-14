@@ -4,7 +4,8 @@
   "private": true,
   "main": "index.ts",
   "dependencies": {
-    "@nozbe/watermelondb": "^0.28.0"
+    "@nozbe/watermelondb": "^0.28.0",
+    "@yeti/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.4.5"
