@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 7,
+  version: 8,
   tables: [
     // Profiles (Merged properties for SSR next.js, Edge Functions and Mobile client)
     tableSchema({
@@ -38,10 +38,24 @@ export const schema = appSchema({
       name: 'exercises',
       columns: [
         { name: 'server_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'slug', type: 'string', isOptional: true, isIndexed: true },
         { name: 'name', type: 'string' },
+        { name: 'primary_muscle', type: 'string', isOptional: true, isIndexed: true },
         { name: 'muscle_group', type: 'string', isOptional: true },
         { name: 'category', type: 'string', isOptional: true },
         { name: 'equipment', type: 'string', isOptional: true },
+        { name: 'movement_pattern', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'unilateral', type: 'boolean', isOptional: true },
+        { name: 'setup_instructions', type: 'string', isOptional: true },
+        { name: 'execution_instructions', type: 'string', isOptional: true },
+        { name: 'breathing', type: 'string', isOptional: true },
+        { name: 'coaching_cues', type: 'string', isOptional: true },
+        { name: 'common_mistakes', type: 'string', isOptional: true },
+        { name: 'safety_notes', type: 'string', isOptional: true },
+        { name: 'default_sets', type: 'number', isOptional: true },
+        { name: 'default_reps', type: 'number', isOptional: true },
+        { name: 'default_reps_prescription', type: 'string', isOptional: true },
+        { name: 'tempo', type: 'string', isOptional: true },
         { name: 'instructions', type: 'string', isOptional: true },
         { name: 'gif_url', type: 'string', isOptional: true },
         { name: 'video_url', type: 'string', isOptional: true },

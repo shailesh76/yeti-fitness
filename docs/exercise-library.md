@@ -69,7 +69,8 @@ The exercise library extends `public.exercises` and includes 7 normalized sub-ta
 - **`common_mistakes`** (`TEXT[]`): Technical errors & fixes.
 - **`safety_notes`** (`TEXT`): Injury precautions.
 - **`default_sets`** (`INTEGER DEFAULT 3`): Default set count.
-- **`default_reps`** (`INTEGER DEFAULT 10`): Default rep count. *(Note: See Known Issues for string range mismatch).*
+- **`default_reps`** (`INTEGER DEFAULT 10`): Numeric compatibility/executable fallback.
+- **`default_reps_prescription`** (`TEXT NULL`): Lossless authored display prescription. Ranges and durations are not executable rep counts.
 - **`tempo`** (`TEXT DEFAULT '2-0-2-0'`): Timing pattern.
 - **`source_type`** (`TEXT`, live DEFAULT `'yeti_v2'`; becomes `'legacy_catalog'` when 20260812133000 is applied): Canonical source classification (`yeti_first_party`, `legacy_catalog`, `custom`).
 - **`license`** (`TEXT`): Ownership license terms.
@@ -119,8 +120,8 @@ SUPABASE_SERVICE_ROLE_KEY=your_key npx tsx scripts/import_exercises.ts packages/
 
 ## 4. Known Issues & Future Work
 
-- **`default_reps` is still lossy** — all 420 authored prescriptions are strings (`"8–12"`, `"30–60 sec"`, `"30–60 seconds"`, `"6–10 controlled reps"`, using an EN DASH U+2013), but `public.exercises.default_reps` is `INTEGER`. Live rows read `8`×357, `30`×27, `6`×12: Sled Push and Air Bike Sprint now prescribe *30 reps* where the author wrote a 30–60 **second** effort, so this is a change of meaning, not a rounding loss.
+- **Dual-field migration is pending deployment** — `default_reps` remains INTEGER for installed-client compatibility. `20260814120000_exercise_default_reps_prescription.sql` additively introduces lossless display text after the Watermelon v8 client ships. Duration prescriptions must never be interpreted as repetitions.
 
-  The importer no longer discards the original: `metadata.default_reps_authored` holds the exact authored text and `metadata.default_reps_lossy` flags every coerced value. **The integer column itself remains lossy until the TEXT migration lands.** `20260812140000_exercise_default_reps_lossless.sql` is written but deliberately **not applied** — `packages/database/src/schema.ts` types this field as a WatermelonDB `number`, so the server-side change must ship with the Round 2 mobile schema migration or sync decoding breaks on installed clients.
+  The importer preserves the original in `metadata.default_reps_authored`; the new column backfill prefers canonical generated data, then authored metadata, then numeric fallback. The unsafe and unapplied `20260812140000_exercise_default_reps_lossless.sql` is preserved for reference under `docs/archive/unsafe-migrations/`, outside the active Supabase migration chain.
 - **Support Table Sync**: WatermelonDB offline pull-sync currently covers `exercises` only. Pull-sync for the 7 relational sub-tables is **not implemented** and is scheduled for Round 2, together with Watermelon schema migration 9. No offline guarantee should be assumed for sub-table data today.
 - **Media management**: media manager UI and media ordering are **not implemented**; `exercise_media` rows are written by the importer only.

@@ -58,6 +58,7 @@ const OUT_SQL = path.resolve(ROOT, 'scripts/data/yeti_exercise_provenance.sql');
 const OUT_REPS_SQL = path.resolve(ROOT, 'scripts/data/yeti_exercise_prescriptions.sql');
 const OUT_MIGRATION_BLOCK = path.resolve(ROOT, 'scripts/data/yeti_exercise_manifest_block.sql');
 const MIGRATION_PATH = path.resolve(ROOT, 'supabase/migrations/20260812133000_exercise_source_taxonomy_reconciliation.sql');
+const PRESCRIPTION_MIGRATION_PATH = path.resolve(ROOT, 'supabase/migrations/20260814120000_exercise_default_reps_prescription.sql');
 
 export interface ProvenanceEntry {
   slug: string;
@@ -146,6 +147,15 @@ export function extractMigrationManifestBlock(sql: string): string | null {
   return sql.slice(start, end + 1);
 }
 
+/** Extracts the canonical prescription INSERT owned by this generator. */
+export function extractPrescriptionMigrationBlock(sql: string): string | null {
+  const start = sql.indexOf('INSERT INTO _yeti_prescriptions');
+  if (start === -1) return null;
+  const end = sql.indexOf(';', start);
+  if (end === -1) return null;
+  return sql.slice(start, end + 1);
+}
+
 /** VALUES list for the lossless default_reps backfill. */
 export function toRepsSqlValues(manifest: ProvenanceEntry[]): string {
   const esc = (s: string) => s.replace(/'/g, "''");
@@ -197,6 +207,7 @@ ${toSqlValues(manifest)}
 ${toRepsSqlValues(manifest)}
 `;
   const expectedBlock = toMigrationManifestBlock(manifest);
+  const expectedPrescriptionBlock = `INSERT INTO _yeti_prescriptions (slug, default_reps, default_sets) VALUES\n${toRepsSqlValues(manifest)};`;
 
   if (check) {
     const problems: string[] = [];
@@ -233,13 +244,34 @@ ${toRepsSqlValues(manifest)}
       }
     }
 
+    if (!fs.existsSync(PRESCRIPTION_MIGRATION_PATH)) {
+      problems.push('additive prescription migration is missing');
+    } else {
+      const actual = extractPrescriptionMigrationBlock(fs.readFileSync(PRESCRIPTION_MIGRATION_PATH, 'utf8'));
+      if (actual === null) {
+        problems.push('additive prescription migration has no _yeti_prescriptions block');
+      } else if (actual !== expectedPrescriptionBlock) {
+        const a = actual.split('\n');
+        const b = expectedPrescriptionBlock.split('\n');
+        problems.push(`additive prescription migration drifted (${a.length} lines vs ${b.length} generated)`);
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+          if (a[i] !== b[i]) {
+            problems.push(`  first prescription difference at line ${i + 1}:`);
+            problems.push(`    migration: ${a[i] ?? '<missing>'}`);
+            problems.push(`    generated: ${b[i] ?? '<missing>'}`);
+            break;
+          }
+        }
+      }
+    }
+
     if (problems.length) {
       console.error('Provenance artefacts are out of date:');
       for (const p of problems) console.error(`  - ${p}`);
       console.error('Re-run without --check to regenerate.');
       process.exit(1);
     }
-    console.log(`Manifest in sync: ${manifest.length} canonical exercises, migration block matches.`);
+    console.log(`Manifest in sync: ${manifest.length} canonical exercises, taxonomy and prescription migration blocks match.`);
     return;
   }
 
@@ -257,6 +289,15 @@ ${toRepsSqlValues(manifest)}
     if (actualBlock && actualBlock !== expectedBlock) {
       fs.writeFileSync(MIGRATION_PATH, current.replace(actualBlock, expectedBlock));
       console.log(`updated manifest block in ${path.basename(MIGRATION_PATH)}`);
+    }
+  }
+
+  if (fs.existsSync(PRESCRIPTION_MIGRATION_PATH)) {
+    const current = fs.readFileSync(PRESCRIPTION_MIGRATION_PATH, 'utf8');
+    const actual = extractPrescriptionMigrationBlock(current);
+    if (actual && actual !== expectedPrescriptionBlock) {
+      fs.writeFileSync(PRESCRIPTION_MIGRATION_PATH, current.replace(actual, expectedPrescriptionBlock));
+      console.log(`updated prescription block in ${path.basename(PRESCRIPTION_MIGRATION_PATH)}`);
     }
   }
 

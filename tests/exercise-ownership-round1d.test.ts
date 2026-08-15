@@ -207,7 +207,7 @@ describe('TESTS 13–15 — V3 field mapping', () => {
   });
 });
 
-describe('TESTS 16–17 — documented commands actually execute', () => {
+describe('TESTS 16–18 — documented commands and generator drift checks', () => {
   it('16. generator --check exits 0', () => {
     const out = execFileSync('node', ['scripts/generate_exercise_provenance.ts', '--check'], { cwd: ROOT, encoding: 'utf8' });
     expect(out).toMatch(/Manifest in sync: 396 canonical exercises/);
@@ -222,5 +222,28 @@ describe('TESTS 16–17 — documented commands actually execute', () => {
     expect(out).toMatch(/CANONICAL EXERCISE COUNT:\s+396/);
     expect(out).toMatch(/Critical Errors:\s+0/);
     expect(out).toMatch(/VALIDATION PASSED/);
+  });
+
+  it('18. generator --check rejects a changed additive prescription row and restores it byte-identically', () => {
+    const migrationPath = path.join(ROOT, 'supabase/migrations/20260814120000_exercise_default_reps_prescription.sql');
+    const original = fs.readFileSync(migrationPath);
+    const mutated = original.toString('utf8').replace(
+      "('air-bike-sprint', '30–60 sec', 3)",
+      "('air-bike-sprint', '31–60 sec', 3)",
+    );
+    expect(mutated).not.toBe(original.toString('utf8'));
+
+    try {
+      fs.writeFileSync(migrationPath, mutated, 'utf8');
+      expect(() => execFileSync('node', ['scripts/generate_exercise_provenance.ts', '--check'], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      })).toThrow();
+    } finally {
+      fs.writeFileSync(migrationPath, original);
+    }
+
+    expect(fs.readFileSync(migrationPath).equals(original)).toBe(true);
   });
 });

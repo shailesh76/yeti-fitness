@@ -113,7 +113,9 @@ export interface Exercise {
   common_mistakes?: string[] | null;
   safety_notes?: string | null;
   default_sets?: number;
-  default_reps?: number;
+  default_reps?: number | null;
+  /** Lossless display prescription; never an executable repetition count. */
+  default_reps_prescription?: string | null;
   tempo?: string | null;
   instructions?: string | null;
   gif_url?: string | null;
@@ -187,7 +189,8 @@ export interface ExerciseImportItem {
   common_mistakes?: string[];
   safety_notes?: string;
   default_sets?: number;
-  default_reps?: number;
+  default_reps?: number | null;
+  default_reps_prescription?: string | null;
   tempo?: string;
   source_type?: string;
   license?: string;

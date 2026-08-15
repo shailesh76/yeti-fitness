@@ -56,6 +56,7 @@ export function mapExerciseRowToDTO(row: any): ExerciseDTO {
     safety_notes: row.safety_notes ?? null,
     default_sets: row.default_sets ?? undefined,
     default_reps: row.default_reps ?? undefined,
+    default_reps_prescription: row.default_reps_prescription ?? null,
     tempo: row.tempo ?? null,
     instructions: row.instructions ?? null,
     gif_url: row.gif_url ?? null,
@@ -248,6 +249,7 @@ export class ExerciseRepository {
                   r.safety_notes = ex.safety_notes;
                   r.default_sets = ex.default_sets;
                   r.default_reps = ex.default_reps;
+                  r.default_reps_prescription = ex.default_reps_prescription;
                   r.tempo = ex.tempo;
                   r.instructions = ex.instructions;
                   r.gif_url = ex.gif_url;

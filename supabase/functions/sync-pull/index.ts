@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { mapExerciseForPull } from './exerciseMapping.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,11 +40,12 @@ serve(async (req) => {
     const { data: { user } } = await supabaseClient.auth.getUser()
     if (!user) throw new Error("Unauthorized")
 
-    const { lastPulledAt } = await req.json()
+    const { lastPulledAt, schemaVersion } = await req.json()
     const pullDate = lastPulledAt ? new Date(lastPulledAt).toISOString() : new Date(0).toISOString()
     const nowMs = Date.now()
 
     const changes = {
+      exercises: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       workout_plans: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       plan_days: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       plan_exercises: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
@@ -255,6 +257,48 @@ serve(async (req) => {
       assigned_at: new Date(row.assigned_at).getTime(), start_date: row.start_date,
       updated_at: new Date(row.updated_at).getTime(),
     }), 'assigned_at')
+
+    // Exercise catalog (pull-only, read-only global catalog — no RLS user filter)
+    const BATCH_SIZE = 1000
+    let exercisesData: any[] = []
+    let exerciseFrom = 0
+    const seenExerciseIds = new Set<string>()
+
+    while (true) {
+      const { data: pageChunk, error: exercisesErr } = await supabaseClient
+        .from('exercises')
+        .select('*')
+        .gte('updated_at', pullDate)
+        .order('updated_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(exerciseFrom, exerciseFrom + BATCH_SIZE - 1)
+
+      if (exercisesErr) throw exercisesErr
+      if (!pageChunk || pageChunk.length === 0) break
+
+      for (const row of pageChunk) {
+        if (!seenExerciseIds.has(row.id)) {
+          seenExerciseIds.add(row.id)
+          exercisesData.push(row)
+        }
+      }
+
+      if (pageChunk.length < BATCH_SIZE) break
+      exerciseFrom += BATCH_SIZE
+    }
+
+    if (exercisesData.length > 0) {
+      for (const row of exercisesData) {
+        const mapped = mapExerciseForPull(row, nowMs, schemaVersion)
+
+        const isNew = lastPulledAt === 0 || new Date(row.created_at || row.updated_at).getTime() > lastPulledAt
+        if (isNew) {
+          changes.exercises.created.push(mapped)
+        } else {
+          changes.exercises.updated.push(mapped)
+        }
+      }
+    }
 
     const { data: tombstones, error: tombstoneError } = await supabaseClient
       .from('workout_plan_sync_deletions').select('table_name, record_id').gt('deleted_at', pullDate)

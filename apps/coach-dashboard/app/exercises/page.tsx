@@ -8,6 +8,7 @@ import {
   Info, Check, Layers, User, Bookmark, Sparkles, Filter, RefreshCw, AlertCircle, Database
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 
 interface DbExercise {
   id: string;
@@ -29,6 +30,7 @@ interface DbExercise {
   safety_notes?: string;
   default_sets?: number;
   default_reps?: number;
+  default_reps_prescription?: string | null;
   tempo?: string;
   source_type: string;
   source_id?: string;
@@ -809,7 +811,9 @@ export default function ExerciseLibraryPage() {
 
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Default Sets / Reps</span>
-                      <span className="font-bold text-white">{selectedExercise.default_sets || 3} sets × {selectedExercise.default_reps || 10} reps</span>
+                      <span className="font-bold text-white">
+                        {selectedExercise.default_sets || 3} sets × {getExercisePrescriptionDisplay(selectedExercise) || 'Not specified'}
+                      </span>
                     </div>
 
                     {selectedExercise.recommended_rest_seconds && (
