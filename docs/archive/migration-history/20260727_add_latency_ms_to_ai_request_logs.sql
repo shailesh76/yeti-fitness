@@ -1,0 +1,2 @@
+-- Migration placeholder: latency_ms is kept in-memory in TaskExecutionResult
+-- to prevent schema drift on public.ai_request_logs.
