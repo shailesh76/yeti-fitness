@@ -8,6 +8,8 @@ import {
   Info, Check, Layers, User, Bookmark, Sparkles, Filter, RefreshCw, AlertCircle, Database
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
+import { matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
 import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 
 interface DbExercise {
@@ -56,16 +58,6 @@ interface ExerciseMuscle {
   role: string;
 }
 
-interface ExerciseMedia {
-  id: string;
-  media_type: string;
-  file_format: string;
-  url?: string;
-  r2_key?: string;
-  thumbnail_url?: string;
-  media_status?: string;
-}
-
 export default function ExerciseLibraryPage() {
   const router = useRouter();
 
@@ -84,8 +76,9 @@ export default function ExerciseLibraryPage() {
   const [selectedExercise, setSelectedExercise] = useState<DbExercise | null>(null);
   const [selectedAliases, setSelectedAliases] = useState<ExerciseAlias[]>([]);
   const [selectedMuscles, setSelectedMuscles] = useState<ExerciseMuscle[]>([]);
-  const [selectedMedia, setSelectedMedia] = useState<ExerciseMedia[]>([]);
+  const [selectedMedia, setSelectedMedia] = useState<ExerciseMediaRecord[]>([]);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+  const [canManageMedia, setCanManageMedia] = useState(false);
   const [detailTab, setDetailTab] = useState<'overview' | 'instructions' | 'muscles' | 'variations'>('overview');
 
   // Filter & Search Controls
@@ -126,6 +119,18 @@ export default function ExerciseLibraryPage() {
       }
     }
     fetchCounts();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMediaPermission() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      if (!cancelled) setCanManageMedia(data?.role === 'coach' || data?.role === 'admin');
+    }
+    loadMediaPermission();
+    return () => { cancelled = true; };
   }, []);
 
   // Main Exercises Query Function
@@ -178,11 +183,6 @@ export default function ExerciseLibraryPage() {
         query = query.ilike('difficulty', `%${difficultyFilter}%`);
       }
 
-      // Apply Media Status Filter
-      if (mediaStatusFilter !== 'all') {
-        query = query.eq('media_status', mediaStatusFilter);
-      }
-
       // Apply Search Query (Combines Name, Slug, Equipment, Primary Muscle, Target Muscle, and Alias IDs)
       if (debouncedSearch.trim()) {
         const s = debouncedSearch.trim();
@@ -212,10 +212,11 @@ export default function ExerciseLibraryPage() {
         query = query.order('created_at', { ascending: false });
       }
 
-      // Apply Pagination
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-      query = query.range(from, to);
+      // Completeness filtering must happen across the full matching result set before pagination.
+      if (mediaStatusFilter === 'all') {
+        const from = (page - 1) * pageSize;
+        query = query.range(from, from + pageSize - 1);
+      }
 
       const { data, count, error: fetchErr } = await query;
 
@@ -223,9 +224,35 @@ export default function ExerciseLibraryPage() {
         throw fetchErr;
       }
 
-      const nextExercises = data || [];
+      let nextExercises = data || [];
+      let nextTotalCount = count || 0;
+      if (mediaStatusFilter !== 'all') {
+        if (nextExercises.length < nextTotalCount) {
+          throw new Error('The complete matching exercise set could not be loaded for media filtering.');
+        }
+        const exerciseIds = nextExercises.map((exercise) => exercise.id);
+        const mediaByExercise = new Map<string, ExerciseMediaRecord[]>();
+        if (exerciseIds.length > 0) {
+          const { data: mediaRows, error: mediaError } = await supabase
+            .from('exercise_media')
+            .select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at')
+            .in('exercise_id', exerciseIds);
+          if (mediaError) throw mediaError;
+          for (const row of (mediaRows || []) as ExerciseMediaRecord[]) {
+            const rows = mediaByExercise.get(row.exercise_id) ?? [];
+            rows.push(row);
+            mediaByExercise.set(row.exercise_id, rows);
+          }
+        }
+        const filtered = nextExercises.filter((exercise) =>
+          matchesExerciseMediaFilter(mediaByExercise.get(exercise.id) ?? [], mediaStatusFilter as ExerciseMediaCompletenessFilter),
+        );
+        nextTotalCount = filtered.length;
+        const from = (page - 1) * pageSize;
+        nextExercises = filtered.slice(from, from + pageSize);
+      }
       setExercises(nextExercises);
-      setTotalCount(count || 0);
+      setTotalCount(nextTotalCount);
 
       // Functional state avoids closing over a selection from an earlier fetch.
       setSelectedExercise((current) =>
@@ -248,36 +275,39 @@ export default function ExerciseLibraryPage() {
     fetchExercises();
   }, [fetchExercises]);
 
-  // Load Sub-details for selected exercise (aliases, muscles, media)
-  useEffect(() => {
-    if (!selectedExercise) {
+  const loadExerciseSubDetails = useCallback(async () => {
+    const exerciseId = selectedExercise?.id;
+    if (!exerciseId) {
       setSelectedAliases([]);
       setSelectedMuscles([]);
       setSelectedMedia([]);
       return;
     }
 
-    async function loadExerciseSubDetails() {
-      setLoadingDetails(true);
-      try {
-        const [aliasesRes, musclesRes, mediaRes] = await Promise.all([
-          supabase.from('exercise_aliases').select('id, alias').eq('exercise_id', selectedExercise!.id),
-          supabase.from('exercise_muscles').select('id, muscle, role').eq('exercise_id', selectedExercise!.id),
-          supabase.from('exercise_media').select('id, media_type, file_format, url, r2_key, thumbnail_url, media_status').eq('exercise_id', selectedExercise!.id),
-        ]);
-
-        setSelectedAliases(aliasesRes.data || []);
-        setSelectedMuscles(musclesRes.data || []);
-        setSelectedMedia(mediaRes.data || []);
-      } catch (err) {
-        console.error('Error fetching sub-details:', err);
-      } finally {
-        setLoadingDetails(false);
-      }
+    setLoadingDetails(true);
+    try {
+      const [aliasesRes, musclesRes, mediaRes] = await Promise.all([
+        supabase.from('exercise_aliases').select('id, alias').eq('exercise_id', exerciseId),
+        supabase.from('exercise_muscles').select('id, muscle, role').eq('exercise_id', exerciseId),
+        supabase.from('exercise_media').select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at').eq('exercise_id', exerciseId),
+      ]);
+      if (aliasesRes.error) throw aliasesRes.error;
+      if (musclesRes.error) throw musclesRes.error;
+      if (mediaRes.error) throw mediaRes.error;
+      setSelectedAliases(aliasesRes.data || []);
+      setSelectedMuscles(musclesRes.data || []);
+      setSelectedMedia((mediaRes.data || []) as ExerciseMediaRecord[]);
+    } catch (err) {
+      console.error('Error fetching sub-details:', err);
+      setSelectedMedia([]);
+    } finally {
+      setLoadingDetails(false);
     }
+  }, [selectedExercise?.id]);
 
+  useEffect(() => {
     loadExerciseSubDetails();
-  }, [selectedExercise]);
+  }, [loadExerciseSubDetails]);
 
   const toggleFavorite = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -395,7 +425,7 @@ export default function ExerciseLibraryPage() {
         </div>
 
         {/* Dropdown Selectors Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 text-xs">
           {/* Source Filter */}
           <div>
             <label className="block text-[10px] font-bold text-blue-400 uppercase mb-1">Source</label>
@@ -485,6 +515,21 @@ export default function ExerciseLibraryPage() {
               <option value="beginner">Beginner</option>
               <option value="intermediate">Intermediate</option>
               <option value="advanced">Advanced</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Media</label>
+            <select
+              value={mediaStatusFilter}
+              onChange={(e) => { setMediaStatusFilter(e.target.value); setPage(1); }}
+              className="w-full bg-[#161C28] border border-white/10 rounded-xl px-2.5 py-1.5 text-white focus:outline-none"
+            >
+              <option value="all">All</option>
+              <option value="complete">Complete</option>
+              <option value="missing_gif">Missing GIF</option>
+              <option value="missing_video">Missing Video</option>
+              <option value="missing_thumbnail">Missing Thumbnail</option>
             </select>
           </div>
 
@@ -695,28 +740,14 @@ export default function ExerciseLibraryPage() {
           {selectedExercise ? (
             <div className="bg-[#111A23] border border-white/10 rounded-2xl p-5 space-y-5">
               
-              {/* Media Preview Box with Safe Fallback */}
-              <div className="relative w-full h-48 rounded-xl bg-gradient-to-br from-blue-950 via-slate-900 to-black border border-white/10 overflow-hidden flex flex-col items-center justify-center p-4 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center text-2xl font-bold mb-2">
-                  🏋️
-                </div>
-
-                <div className="space-y-1">
-                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold">
-                    {selectedExercise.media_status === 'READY' ? 'Video Ready' : 'Media Coming Soon'}
-                  </span>
-                  <p className="text-[11px] text-gray-400">
-                    {selectedExercise.media_status === 'READY' ? 'Official demonstration video available' : 'Placeholder state — full guidance text provided below'}
-                  </p>
-                </div>
-
-                <button 
-                  onClick={(e) => toggleFavorite(selectedExercise.id, e)}
-                  className="absolute top-3 right-3 p-2 rounded-full bg-black/50 text-rose-500"
-                >
-                  <Heart className={`h-4 w-4 ${favorites.has(selectedExercise.id) ? 'fill-rose-500' : ''}`} />
-                </button>
-              </div>
+              <ExerciseMediaManager
+                exerciseId={selectedExercise.id}
+                exerciseName={selectedExercise.name}
+                media={selectedMedia}
+                loading={loadingDetails}
+                canManage={canManageMedia}
+                onChanged={loadExerciseSubDetails}
+              />
 
               {/* Exercise Title & Source Badge */}
               <div>
