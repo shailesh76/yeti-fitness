@@ -223,17 +223,16 @@ export default function ExerciseLibraryPage() {
         throw fetchErr;
       }
 
-      setExercises(data || []);
+      const nextExercises = data || [];
+      setExercises(nextExercises);
       setTotalCount(count || 0);
 
-      // Auto-select first exercise if current selected exercise is not in list
-      if (data && data.length > 0) {
-        if (!selectedExercise || !data.some(e => e.id === selectedExercise.id)) {
-          setSelectedExercise(data[0]);
-        }
-      } else {
-        setSelectedExercise(null);
-      }
+      // Functional state avoids closing over a selection from an earlier fetch.
+      setSelectedExercise((current) =>
+        nextExercises.length > 0 && current && nextExercises.some((exercise) => exercise.id === current.id)
+          ? current
+          : nextExercises[0] ?? null,
+      );
     } catch (err: any) {
       console.error('Failed to fetch exercises:', err);
       setError(err.message || 'Failed to load exercise library.');

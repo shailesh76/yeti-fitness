@@ -1,5 +1,34 @@
 import { supabase } from './supabase';
 
+export interface ProgressPhotoView {
+  id: string;
+  photoKey: string;
+  notes: string | null;
+  createdAt: string;
+  url: string | null;
+  error: string | null;
+}
+
+export function orderProgressPhotos(photos: ProgressPhotoView[]) {
+  return [...photos].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function getCoachProgressPhotos(userId: string): Promise<ProgressPhotoView[]> {
+  const { data, error } = await supabase.functions.invoke('get-r2-signed-url', {
+    body: { action: 'list-progress-photos', userId },
+  });
+  if (error) throw error;
+  if (!data?.success || !Array.isArray(data.photos)) throw new Error(data?.error || 'Could not load progress photos');
+  return orderProgressPhotos(data.photos.map((photo: any) => ({
+    id: String(photo.id),
+    photoKey: String(photo.photoKey),
+    notes: photo.notes ?? null,
+    createdAt: String(photo.createdAt),
+    url: typeof photo.url === 'string' ? photo.url : null,
+    error: typeof photo.error === 'string' ? photo.error : null,
+  })));
+}
+
 /**
  * Converts a browser File object to a base64 string.
  */

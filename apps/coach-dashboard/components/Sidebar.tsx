@@ -21,7 +21,6 @@ const NAV_ITEMS = [
   { name: "Assessments", href: "/dashboard/assessments", icon: Activity },
   { name: "Calendar", href: "/dashboard/calendar", icon: Calendar },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { name: "Health Audit", href: "/admin/health", icon: ShieldAlert },
   { name: "Library", href: "/exercises", icon: BookOpen, badge: "396 Yeti" },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
@@ -157,20 +156,36 @@ export function Sidebar() {
         <nav className="flex flex-1 flex-col gap-2">
           {/* Admin-only link */}
           {userRole === "admin" && (
-            <Link
-              href="/admin"
-              title={isCollapsed ? "Admin Panel" : undefined}
-              className={cn(
-                "flex items-center rounded-xl py-3 text-sm font-semibold transition-all duration-300",
-                isCollapsed ? "justify-center px-0 h-11 w-11 mx-auto" : "gap-3 px-3",
-                pathname.startsWith("/admin")
-                  ? "bg-purple-500/10 text-purple-400"
-                  : "text-gray-400 hover:bg-white/5 hover:text-white"
-              )}
-            >
-              <ShieldAlert className="h-5 w-5 shrink-0" />
-              {!isCollapsed && <span>Admin Panel</span>}
-            </Link>
+            <>
+              <Link
+                href="/admin"
+                title={isCollapsed ? "Admin Panel" : undefined}
+                className={cn(
+                  "flex items-center rounded-xl py-3 text-sm font-semibold transition-all duration-300",
+                  isCollapsed ? "justify-center px-0 h-11 w-11 mx-auto" : "gap-3 px-3",
+                  pathname === "/admin"
+                    ? "bg-purple-500/10 text-purple-400"
+                    : "text-gray-400 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <ShieldAlert className="h-5 w-5 shrink-0" />
+                {!isCollapsed && <span>Admin Panel</span>}
+              </Link>
+              <Link
+                href="/admin/health"
+                title={isCollapsed ? "Health Audit" : undefined}
+                className={cn(
+                  "flex items-center rounded-xl py-3 text-sm font-semibold transition-all duration-300",
+                  isCollapsed ? "justify-center px-0 h-11 w-11 mx-auto" : "gap-3 px-3",
+                  pathname.startsWith("/admin/health")
+                    ? "bg-purple-500/10 text-purple-400"
+                    : "text-gray-400 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Activity className="h-5 w-5 shrink-0" />
+                {!isCollapsed && <span>Health Audit</span>}
+              </Link>
+            </>
           )}
 
           {/* Standard nav — hide Dashboard link for admins (they go to /admin) */}

@@ -9,10 +9,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { NutritionTargetCard } from "@/components/NutritionTargetCard";
+import { getCoachProgressPhotos, type ProgressPhotoView } from "@/lib/r2";
 import {
   ArrowLeft, MessageSquare, Activity, Heart, Flame, Target,
   CheckCircle2, XCircle, Trash2, Brain, TrendingUp, AlertTriangle,
-  CheckCircle, Clock, Zap, BarChart2
+  CheckCircle, Clock, Zap, BarChart2, Image as ImageIcon, ExternalLink
 } from "lucide-react";
 import { Line } from "react-chartjs-2";
 import {
@@ -398,7 +399,34 @@ function IntelligencePanel({ athleteId, client }: { athleteId: string; client: C
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type TabKey = "overview" | "training" | "intelligence" | "notes";
+function ProgressPhotosPanel({ athleteId }: { athleteId: string }) {
+  const [photos, setPhotos] = useState<ProgressPhotoView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const loadPhotos = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try { setPhotos(await getCoachProgressPhotos(athleteId)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load progress photos."); }
+    finally { setLoading(false); }
+  }, [athleteId]);
+
+  useEffect(() => { void loadPhotos(); }, [loadPhotos]);
+  if (loading) return <Card><div className="py-12 text-center text-sm text-gray-500">Loading progress photos...</div></Card>;
+  if (error) return <Card><div className="border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">Progress photos unavailable: {error}</div></Card>;
+  if (photos.length === 0) return <Card><div className="py-12 text-center"><ImageIcon className="mx-auto mb-3 h-8 w-8 text-gray-600" /><h2 className="font-bold text-white">No progress photos</h2><p className="mt-1 text-sm text-gray-500">Photos uploaded by this athlete will appear here.</p></div></Card>;
+  return <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{photos.map((photo) => <Card key={photo.id} className="overflow-hidden p-0">
+    {photo.url ? <a href={photo.url} target="_blank" rel="noreferrer" className="block">
+      {/* Signed R2 URLs are short-lived and do not have a stable Next image host. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={photo.url} alt={photo.notes || `Progress photo from ${new Date(photo.createdAt).toLocaleDateString()}`} className="aspect-[4/5] w-full bg-black/30 object-cover" onError={() => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, url: null, error: "Media could not be displayed" } : item))} />
+      <span className="sr-only">Open full photo</span>
+    </a> : <div className="flex aspect-[4/5] items-center justify-center bg-black/30 px-5 text-center text-sm text-gray-500"><div><ImageIcon className="mx-auto mb-2 h-7 w-7" />{photo.error || "Media unavailable"}</div></div>}
+    <div className="p-4"><div className="flex items-center justify-between gap-3"><time className="text-xs font-bold text-gray-400">{new Date(photo.createdAt).toLocaleString()}</time>{photo.url && <ExternalLink className="h-4 w-4 text-gray-600" />}</div>{photo.notes && <p className="mt-2 text-sm text-gray-300">{photo.notes}</p>}</div>
+  </Card>)}</div>;
+}
+
+type TabKey = "overview" | "training" | "photos" | "intelligence" | "notes";
 
 export default function ClientDetailPage({ params }: { params: { userId: string } }) {
   const router = useRouter();
@@ -571,7 +599,7 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
     loadDetail();
     getTrainerNotes(params.userId);
     getTemplates();
-  }, [params.userId]);
+  }, [params.userId, getTemplates, getTrainerNotes, loadDetail]);
 
   const handleAssignPlan = async () => {
     if (!selectedPlanId) return;
@@ -689,6 +717,7 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
   const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
     { key: "overview", label: "Overview", icon: Activity },
     { key: "training", label: "Training", icon: BarChart2 },
+    { key: "photos", label: "Photos", icon: ImageIcon },
     { key: "intelligence", label: "Intelligence", icon: Brain },
     { key: "notes", label: "Notes", icon: MessageSquare },
   ];
@@ -929,6 +958,8 @@ export default function ClientDetailPage({ params }: { params: { userId: string 
           )}
         </Card>
       )}
+
+      {activeTab === "photos" && <ProgressPhotosPanel athleteId={params.userId} />}
 
       {activeTab === "intelligence" && (
         <div className="space-y-6">

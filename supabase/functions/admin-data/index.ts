@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { authorizeAdminDataAction, dispatchAuthorizedAdminAction } from './authorization.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,7 +16,7 @@ async function verifyAdmin(authHeader: string) {
     { global: { headers: { Authorization: authHeader } } }
   )
   const { data: { user }, error } = await anonClient.auth.getUser()
-  if (error || !user) return { user: null, error: 'Unauthenticated' }
+  if (error || !user) return { user: null, role: null, error: 'Unauthenticated' }
 
   const { data: profile } = await anonClient
     .from('profiles')
@@ -23,8 +24,8 @@ async function verifyAdmin(authHeader: string) {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') return { user: null, error: 'Forbidden: admin only' }
-  return { user, error: null }
+  if (profile?.role !== 'admin') return { user: null, role: profile?.role ?? null, error: 'Forbidden: admin only' }
+  return { user, role: profile.role, error: null }
 }
 
 function serviceClient() {
@@ -58,7 +59,7 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) return err('Missing authorization header', 401)
 
-    const { user, error: authError } = await verifyAdmin(authHeader)
+    const { user, role, error: authError } = await verifyAdmin(authHeader)
     if (!user) return err(authError ?? 'Unauthorized', authError === 'Unauthenticated' ? 401 : 403)
 
     const url = new URL(req.url)
@@ -69,6 +70,8 @@ serve(async (req) => {
     const action = url.searchParams.get('action') ?? body.action
     const startDate = url.searchParams.get('start_date') ?? body.start_date
     const endDate = url.searchParams.get('end_date') ?? body.end_date
+    const actionAccess = authorizeAdminDataAction(role, action ?? null)
+    if (!actionAccess.allowed) return err(actionAccess.error ?? 'Forbidden', actionAccess.status)
     const db = serviceClient()
 
     // ── dashboard_metrics ────────────────────────────────────────────────────
@@ -260,16 +263,27 @@ serve(async (req) => {
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(50)
+      let countQ = db
+        .from('system_errors')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', since)
 
       if (endDate) {
         q = q.lte('created_at', endDate)
+        countQ = countQ.lte('created_at', endDate)
       }
-      if (errorType) q = q.eq('error_type', errorType)
-      if (platform)  q = q.eq('platform', platform)
+      if (errorType) { q = q.eq('error_type', errorType); countQ = countQ.eq('error_type', errorType) }
+      if (platform)  { q = q.eq('platform', platform); countQ = countQ.eq('platform', platform) }
 
-      const { data, error } = await q
-      if (error) throw error
-      return ok({ errors: data })
+      const result = await dispatchAuthorizedAdminAction(role, action, async () => {
+        const [rowsResult, countResult] = await Promise.all([q, countQ])
+        if (rowsResult.error) throw rowsResult.error
+        if (countResult.error) throw countResult.error
+        if (!Number.isInteger(countResult.count) || (countResult.count ?? -1) < 0) throw new Error('Invalid system error count')
+        return { errors: rowsResult.data ?? [], error_count: countResult.count }
+      })
+      if (!result.allowed) return err(result.error ?? 'Forbidden', result.status)
+      return ok(result.value)
     }
 
     // ── ai_logs ──────────────────────────────────────────────────────────────
@@ -286,10 +300,13 @@ serve(async (req) => {
         q = q.lte('requested_at', endDate)
       }
 
-      const { data, error } = await q
-      if (error) throw error
-
-      const logs = data ?? []
+      const result = await dispatchAuthorizedAdminAction(role, action, async () => {
+        const { data, error } = await q
+        if (error) throw error
+        return data ?? []
+      })
+      if (!result.allowed) return err(result.error ?? 'Forbidden', result.status)
+      const logs = result.value ?? []
       const byType: Record<string, { total: number; success: number; failed: number }> = {}
       logs.forEach(l => {
         const t = l.coach_type ?? 'unknown'
