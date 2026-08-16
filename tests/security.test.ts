@@ -1,4 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+
+const aiCoachSource = readFileSync('supabase/functions/ai-coach/index.ts', 'utf8');
+const exerciseGuidanceSource = readFileSync('supabase/functions/exercise-guidance/index.ts', 'utf8');
+
+function incrementRpcCalls(source: string): number {
+  return source.match(/\.rpc\s*\(\s*['"]increment_ai_usage['"]/g)?.length ?? 0;
+}
 
 /**
  * Phase 3.2 Security & Integration Tests
@@ -16,10 +24,10 @@ import { describe, it, expect, vi } from 'vitest';
 // ─── Helpers mirroring Edge Function logic ───────────────────────────────────
 
 function evaluatePremiumAccess(
-  currentRequests: number,
+  incrementedRequests: number,
   isPremium: boolean
 ): { allowed: boolean; error?: string } {
-  if (!isPremium && currentRequests >= 5) {
+  if (!isPremium && incrementedRequests > 5) {
     return {
       allowed: false,
       error: 'AI Coach daily limit reached for free tier.',
@@ -62,28 +70,27 @@ function isImageTooLarge(base64: string): boolean {
 // ─── 1. AI Entitlement Enforcement ───────────────────────────────────────────
 
 describe('AI Entitlement Enforcement', () => {
-  it('blocks free user at exactly 5 requests', () => {
-    expect(evaluatePremiumAccess(5, false).allowed).toBe(false);
+  it('allows the fifth free request', () => {
+    expect(evaluatePremiumAccess(5, false).allowed).toBe(true);
   });
 
-  it('allows free user at 4 requests', () => {
-    expect(evaluatePremiumAccess(4, false).allowed).toBe(true);
+  it('blocks the sixth free request', () => {
+    expect(evaluatePremiumAccess(6, false).allowed).toBe(false);
   });
 
   it('always allows PRO user regardless of count', () => {
     expect(evaluatePremiumAccess(100, true).allowed).toBe(true);
   });
 
-  it('failed requests do NOT increment daily count (enforcement happens before increment)', () => {
-    // Simulate the EF flow: check limit → if blocked, return early without writing to ai_usage
-    const mockUsageUpdate = vi.fn();
-    const result = evaluatePremiumAccess(5, false);
-    if (!result.allowed) {
-      // Early return — usage update is never called
-    } else {
-      mockUsageUpdate();
+  it('accounts exactly once in each endpoint with no direct ai_usage mutation', () => {
+    for (const source of [aiCoachSource, exerciseGuidanceSource]) {
+      expect(incrementRpcCalls(source)).toBe(1);
+      expect(source).not.toMatch(/\.from\(['"]ai_usage['"]\)/);
     }
-    expect(mockUsageUpdate).not.toHaveBeenCalled();
+    expect(aiCoachSource.indexOf(".rpc('increment_ai_usage'")).toBeLessThan(aiCoachSource.indexOf('const intent ='));
+    expect(exerciseGuidanceSource.indexOf("'increment_ai_usage'")).toBeLessThan(exerciseGuidanceSource.indexOf('const result = await generateChat'));
+    expect(aiCoachSource).toMatch(/newRequestCount\s*>\s*5/);
+    expect(exerciseGuidanceSource).toMatch(/newRequestCount\s*>\s*5/);
   });
 
   it('resolves COACHING tier when user has COACHING entitlement', () => {
@@ -448,5 +455,3 @@ describe('Admin Data Access Security (Phase 1)', () => {
     expect(visible).toHaveLength(2);
   });
 });
-
-

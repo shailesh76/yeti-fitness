@@ -101,15 +101,20 @@ serve(async (req) => {
     const isPremium = isPremiumPlan || (betaConfig?.is_global_beta_active ?? false);
 
     const today = new Date().toISOString().split('T')[0];
-    const { data: usageData } = await supabaseClient
-      .from('ai_usage')
-      .select('requests_count')
-      .eq('athlete_id', user.id)
-      .eq('date', today)
-      .maybeSingle();
-    const currentRequests = usageData?.requests_count || 0;
+    const subscriptionTier = isPremium ? (isPremiumPlan ? 'PRO' : 'FREE') : 'FREE';
+    let newRequestCount = 0;
+    try {
+      const { data: incremented, error: incrementError } = await supabaseServiceRole.rpc(
+        'increment_ai_usage',
+        { p_athlete_id: user.id, p_date: today, p_tier: subscriptionTier },
+      );
+      if (incrementError) throw incrementError;
+      newRequestCount = Number(incremented) || 0;
+    } catch (_error) {
+      newRequestCount = 0; // Match ai-coach: a metering failure must not block guidance.
+    }
 
-    if (!isPremium && currentRequests >= 5) {
+    if (!isPremium && newRequestCount > 5) {
       await supabaseServiceRole.from('ai_request_logs').insert({
         athlete_id: user.id,
         subscription_tier: 'FREE',
@@ -136,15 +141,6 @@ serve(async (req) => {
       });
 
       await Promise.all([
-        supabaseServiceRole
-          .from('ai_usage')
-          .upsert({
-            athlete_id: user.id,
-            date: today,
-            requests_count: currentRequests + 1,
-            subscription_tier: isPremium ? (isPremiumPlan ? 'PRO' : 'FREE') : 'FREE',
-            last_request_at: new Date().toISOString(),
-          }, { onConflict: 'athlete_id,date' }),
         supabaseServiceRole.from('ai_request_logs').insert({
           athlete_id: user.id,
           subscription_tier: isPremium ? 'PRO' : 'FREE',
