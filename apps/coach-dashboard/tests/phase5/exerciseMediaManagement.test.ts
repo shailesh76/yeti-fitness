@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   classifyExerciseMedia,
+  fetchAllExerciseMediaRows,
   formatForMediaUrl,
   hasDuplicateExerciseMediaUrl,
   isExternalMedia,
@@ -22,6 +23,17 @@ function media(overrides: Partial<ExerciseMediaRecord>): ExerciseMediaRecord {
     is_primary: false, media_status: 'READY', media_notes: null, created_at: null,
     ...overrides,
   };
+}
+
+function completeCatalog(exerciseCount: number): ExerciseMediaRecord[] {
+  return Array.from({ length: exerciseCount }, (_, exerciseIndex) => {
+    const exerciseId = `exercise-${exerciseIndex}`;
+    return [
+      media({ id: `${exerciseId}-gif`, exercise_id: exerciseId, media_type: 'gif', file_format: 'gif', url: `https://cdn.example.com/${exerciseId}.gif` }),
+      media({ id: `${exerciseId}-video`, exercise_id: exerciseId, media_type: 'video', file_format: 'mp4', url: `https://cdn.example.com/${exerciseId}.mp4` }),
+      media({ id: `${exerciseId}-thumbnail`, exercise_id: exerciseId, media_type: 'thumbnail', file_format: 'webp', url: `https://cdn.example.com/${exerciseId}.webp` }),
+    ];
+  }).flat();
 }
 
 describe('exercise media URL management', () => {
@@ -90,6 +102,65 @@ describe('exercise media URL management', () => {
     expect(classifyExerciseMedia([gif, media({ ...gif, id: 'gif-2' }), video, thumbnail]).complete).toBe(true);
   });
 
+  it('loads all 1,188 media rows across the 1,000-row backend boundary before classifying', async () => {
+    const rows = completeCatalog(396);
+    const calls: Array<[number, number]> = [];
+    const loaded = await fetchAllExerciseMediaRows(
+      rows.map((row) => row.exercise_id),
+      async (_ids, from, to) => {
+        calls.push([from, to]);
+        return { data: rows.slice(from, to + 1), error: null };
+      },
+      { pageSize: 1000, idChunkSize: 500 },
+    );
+    expect(calls).toEqual([[0, 999], [1000, 1999]]);
+    expect(loaded).toHaveLength(1188);
+    const grouped = new Map<string, ExerciseMediaRecord[]>();
+    for (const row of loaded) grouped.set(row.exercise_id, [...(grouped.get(row.exercise_id) ?? []), row]);
+    expect(grouped).toHaveLength(396);
+    expect(Array.from(grouped.values()).every((exerciseRows) => classifyExerciseMedia(exerciseRows).complete)).toBe(true);
+  });
+
+  it('requests an empty sentinel page when exactly 1,000 rows are returned', async () => {
+    const rows = completeCatalog(334).slice(0, 1000);
+    const calls: number[] = [];
+    const loaded = await fetchAllExerciseMediaRows(['exercise'], async (_ids, from, to) => {
+      calls.push(from);
+      return { data: rows.slice(from, to + 1), error: null };
+    });
+    expect(calls).toEqual([0, 1000]);
+    expect(loaded).toHaveLength(1000);
+  });
+
+  it('loads the second page when 1,001 rows exist', async () => {
+    const rows = completeCatalog(334).slice(0, 1001);
+    const calls: number[] = [];
+    const loaded = await fetchAllExerciseMediaRows(['exercise'], async (_ids, from, to) => {
+      calls.push(from);
+      return { data: rows.slice(from, to + 1), error: null };
+    });
+    expect(calls).toEqual([0, 1000]);
+    expect(loaded).toHaveLength(1001);
+  });
+
+  it('fails honestly when a later media page fails', async () => {
+    const rows = completeCatalog(334).slice(0, 1000);
+    await expect(fetchAllExerciseMediaRows(['exercise'], async (_ids, from, to) => {
+      if (from === 1000) return { data: null, error: { message: 'page denied' } };
+      return { data: rows.slice(from, to + 1), error: null };
+    })).rejects.toThrow('Could not load complete exercise media: page denied');
+  });
+
+  it('deduplicates media IDs across overlapping backend pages', async () => {
+    const first = media({ id: 'one' });
+    const second = media({ id: 'two' });
+    const loaded = await fetchAllExerciseMediaRows(['exercise'], async (_ids, from) => ({
+      data: from === 0 ? [first, second] : [second],
+      error: null,
+    }), { pageSize: 2 });
+    expect(loaded.map((row) => row.id)).toEqual(['one', 'two']);
+  });
+
   it('uses locator-aware preview error keys so an edited row can recover', () => {
     const broken = media({ id: 'same-row', url: 'https://cdn.example.com/broken.webp' });
     const corrected = media({ id: 'same-row', url: 'https://cdn.example.com/valid.webp' });
@@ -126,7 +197,8 @@ describe('exercise media URL management', () => {
 
   it('loads complete media metadata and applies global completeness filtering before pagination', () => {
     expect(pageSource).toContain('is_primary, media_status, media_notes, created_at');
-    expect(pageSource).toContain(".in('exercise_id', exerciseIds)");
+    expect(pageSource).toContain(".in('exercise_id', idChunk)");
+    expect(pageSource).toContain('.range(from, to)');
     expect(pageSource).toContain('matchesExerciseMediaFilter');
     expect(pageSource).toContain('nextTotalCount = filtered.length');
     expect(pageSource).toContain('nextExercises = filtered.slice(from, from + pageSize)');

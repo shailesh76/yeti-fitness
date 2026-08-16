@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
-import { matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
+import { fetchAllExerciseMediaRows, matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
 import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 
 interface DbExercise {
@@ -233,12 +233,16 @@ export default function ExerciseLibraryPage() {
         const exerciseIds = nextExercises.map((exercise) => exercise.id);
         const mediaByExercise = new Map<string, ExerciseMediaRecord[]>();
         if (exerciseIds.length > 0) {
-          const { data: mediaRows, error: mediaError } = await supabase
-            .from('exercise_media')
-            .select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at')
-            .in('exercise_id', exerciseIds);
-          if (mediaError) throw mediaError;
-          for (const row of (mediaRows || []) as ExerciseMediaRecord[]) {
+          const mediaRows = await fetchAllExerciseMediaRows(exerciseIds, async (idChunk, from, to) => {
+            const { data, error } = await supabase
+              .from('exercise_media')
+              .select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at')
+              .in('exercise_id', idChunk)
+              .order('id', { ascending: true })
+              .range(from, to);
+            return { data: (data || []) as ExerciseMediaRecord[], error };
+          });
+          for (const row of mediaRows) {
             const rows = mediaByExercise.get(row.exercise_id) ?? [];
             rows.push(row);
             mediaByExercise.set(row.exercise_id, rows);

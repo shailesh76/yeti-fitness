@@ -24,6 +24,17 @@ export interface ExerciseMediaCompleteness {
   missingThumbnail: boolean;
 }
 
+export interface ExerciseMediaPageResult {
+  data: ExerciseMediaRecord[] | null;
+  error: { message: string } | null;
+}
+
+export type ExerciseMediaPageLoader = (
+  exerciseIds: string[],
+  from: number,
+  to: number,
+) => Promise<ExerciseMediaPageResult>;
+
 const TYPE_ORDER: Record<ExerciseMediaType, number> = {
   gif: 0,
   video: 1,
@@ -114,4 +125,29 @@ export function matchesExerciseMediaFilter(rows: ExerciseMediaRecord[], filter: 
 
 export function previewErrorKey(row: Pick<ExerciseMediaRecord, 'id' | 'r2_key' | 'url'>, resolvedUrl?: string | null): string {
   return `${row.id}:${row.r2_key ?? ''}:${row.url ?? ''}:${resolvedUrl ?? ''}`;
+}
+
+export async function fetchAllExerciseMediaRows(
+  exerciseIds: string[],
+  loadPage: ExerciseMediaPageLoader,
+  options: { pageSize?: number; idChunkSize?: number } = {},
+): Promise<ExerciseMediaRecord[]> {
+  const pageSize = options.pageSize ?? 1000;
+  const idChunkSize = options.idChunkSize ?? 200;
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) throw new Error('Invalid exercise media page size.');
+  if (!Number.isInteger(idChunkSize) || idChunkSize < 1) throw new Error('Invalid exercise ID chunk size.');
+
+  const uniqueExerciseIds = Array.from(new Set(exerciseIds));
+  const rowsById = new Map<string, ExerciseMediaRecord>();
+  for (let chunkStart = 0; chunkStart < uniqueExerciseIds.length; chunkStart += idChunkSize) {
+    const idChunk = uniqueExerciseIds.slice(chunkStart, chunkStart + idChunkSize);
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await loadPage(idChunk, offset, offset + pageSize - 1);
+      if (error) throw new Error(`Could not load complete exercise media: ${error.message}`);
+      const page = data ?? [];
+      for (const row of page) if (!rowsById.has(row.id)) rowsById.set(row.id, row);
+      if (page.length < pageSize) break;
+    }
+  }
+  return Array.from(rowsById.values());
 }
