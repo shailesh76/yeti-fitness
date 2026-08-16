@@ -36,6 +36,13 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
   email (case-insensitive) and the row becomes a `coach_clients` insert.
 
 ### Exercise catalog
+
+> **Pending exercise-media contract:** `20260816120000_exercise_media_external_urls.sql` is authored but
+> not applied. After application, `exercise_media.r2_key` is nullable for external media and
+> `exercise_media.url` stores reviewed HTTPS media. Every row must have at least one locator: an R2 key,
+> or an HTTPS URL. R2 media remains unique by `exercise_id + r2_key`; external media is unique by
+> `exercise_id + url`. Authenticated coaches and admins may insert, update, and delete media through RLS;
+> athletes remain read-only and receive no mutation policy.
 - **`exercises`** — primary exercise catalog. Columns: `id`, `slug`, `name`, `primary_muscle`, `target_muscle`, `secondary_muscles`, `equipment`, `category`, `movement_pattern`, `difficulty`, `unilateral`, `setup_instructions`, `execution_instructions`, `breathing`, `coaching_cues`, `common_mistakes`, `safety_notes`, `default_sets`, `default_reps` (numeric compatibility/executable fallback), `default_reps_prescription` (nullable lossless display text; never parsed as reps), `tempo`, `source_type` (`yeti_first_party`/`legacy_catalog`/`custom`), `license`, `media_status`, `media_notes`, `recommended_rest_seconds`, `hypertrophy_reps`, `strength_reps`, `endurance_reps`, `metadata`, `instructions`, `gif_url`, `video_url`, `media_type`, `thumbnail_url`, `source`, `source_id`, `is_public`, `created_by_coach_id`, `default_rest_period_sec`, `created_at`, `updated_at`. `UNIQUE(name)` and `UNIQUE(slug)`. Full-text search gin indexed on `name`. RLS: viewable by all authenticated users; coach editable for custom exercises. Synced to mobile via WatermelonDB.
 - **`exercise_media`** — Cloudflare R2 media references for exercises (`exercise_id`, `media_type` [video|gif|thumbnail|image], `file_format` [mp4|gif|webp|jpg|png], `r2_bucket`, `r2_key`, `url`, `thumbnail_url`, `is_primary`, `media_status`, `media_notes`, `created_at`, `updated_at`).
 - **`exercise_aliases`** — search alias lookup (`exercise_id`, `alias`, `created_at`). Indexed for fast full-text matching.
@@ -107,6 +114,10 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 - **`coach_exercise_notes`** / **`trainer_notes`** — per-exercise and freeform per-athlete coach notes.
 
 ### Exercise Library Infrastructure (Phase 1)
+
+The external URL and coach/admin mutation rules described above remain pending until
+`20260816120000_exercise_media_external_urls.sql` is applied; this section otherwise describes the
+currently deployed R2-backed media contract.
 - **`exercises`** — First-party single source of truth for workouts, AI coaching, exercise search, and offline synchronization. Extended in `20260802_exercise_library_phase1.sql` and `20260802_exercise_library_v2_fields.sql` with: `slug`, `primary_muscle`, `movement_pattern`, `unilateral`, `setup_instructions`, `execution_instructions`, `breathing`, `coaching_cues` (JSONB), `common_mistakes` (JSONB), `safety_notes`, `default_sets`, `default_reps` (INTEGER compatibility field), `default_reps_prescription` (nullable authored display prescription), `tempo`, `source_type` (default `'legacy_catalog'`, constrained by `exercises_source_type_check` to `'yeti_first_party'`, `'legacy_catalog'`, or `'custom'`), `license`, `recommended_rest_seconds`, `hypertrophy_reps`, `strength_reps`, `endurance_reps`, `media_status`, `media_notes`, `metadata` (JSONB). Reconciled in `20260812133000_exercise_source_taxonomy_reconciliation.sql`; the additive prescription field is defined by `20260814120000_exercise_default_reps_prescription.sql`.
 - **`exercise_media`** — Multi-asset media library per exercise (`media_type`, `url`, `storage_key`, `is_primary`, `media_status`, `media_notes`).
 - **`exercise_aliases`** — Search alias table (`exercise_id`, `alias`) indexed for fast ILIKE search.
