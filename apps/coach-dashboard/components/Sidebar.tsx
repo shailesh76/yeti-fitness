@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   LayoutDashboard, Users, Calendar, Dumbbell, Utensils, MessageSquare, 
-  ClipboardCheck, BarChart3, BookOpen, Bot, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, FileText, Activity
+  BarChart3, BookOpen, Bot, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, FileText, Activity
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
@@ -17,12 +17,12 @@ const NAV_ITEMS = [
   { name: "Workouts", href: "/dashboard/live", icon: Dumbbell },
   { name: "Nutrition", href: "/dashboard/nutrition", icon: Utensils },
   { name: "AI Overrides", href: "/dashboard/ai-overrides", icon: Bot },
-  { name: "Check-ins", href: "/dashboard/checkins", icon: ClipboardCheck },
+  // Check-ins stay off primary navigation until a supported server workflow exists.
   { name: "Assessments", href: "/dashboard/assessments", icon: Activity },
   { name: "Calendar", href: "/dashboard/calendar", icon: Calendar },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Health Audit", href: "/admin/health", icon: ShieldAlert },
-  { name: "Library", href: "/exercises", icon: BookOpen, badge: "220 Yeti" },
+  { name: "Library", href: "/exercises", icon: BookOpen, badge: "396 Yeti" },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
