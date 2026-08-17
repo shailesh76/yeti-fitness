@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, checkProviderCapacity, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
 import { classifyIntentWithHistory, classifySafetySignal, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
-import { resolveExerciseAlias, extractExerciseName } from "../_shared/ai/exerciseResolver.ts";
+import { resolveExerciseAlias, extractExerciseName, normalizeExerciseInput, searchCatalogExercise, buildExerciseGroundingPrompt } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory, sanitizeSummarySensitivity } from "../_shared/ai/coachMemory.ts";
@@ -52,7 +52,7 @@ const YETI_APP_ROUTE_DIRECTORY: Record<string, { route: string; label: string; d
 const WORKOUT_INTENTS: CoachIntent[] = [
   'workout_plan_edit', 'workout_progression', 'exercise_substitution',
   'workout_program_generate', 'weekly_review', 'adaptive_coaching',
-  'exercise_logging', 'schedule_adjustment',
+  'exercise_logging', 'schedule_adjustment', 'exercise_inquiry',
 ];
 const NUTRITION_INTENTS: CoachIntent[] = ['nutrition_plan_generate', 'nutrition_plan_edit', 'nutrition_review', 'nutrition_target_lookup', 'grocery_list', 'eating_out_guidance', 'supplement_guidance', 'nutrition_status', 'nutrition_advice'];
 // Intents that receive the personal coaching context (profile + memory) but no
@@ -68,6 +68,7 @@ function engineNameForIntent(intent: CoachIntent): string {
     case 'workout_progression': return 'progression_engine';
     case 'workout_program_generate': return 'program_generator';
     case 'workout_plan_edit': return 'plan_edit_engine';
+    case 'exercise_inquiry': return 'exercise_grounding';
     case 'weekly_review':
     case 'adaptive_coaching': return 'coaching_intelligence_engine';
     case 'nutrition_target_lookup': return 'nutrition_target_lookup';
@@ -295,11 +296,9 @@ async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<
   if (!edit || edit.ambiguous || !edit.exercise) {
     return { success: false, reason: 'ambiguous', message: "I couldn't tell exactly which exercise you meant. Which movement and which day?" };
   }
-  const canonical = resolveExerciseAlias(edit.exercise);
-  const { data: exs } = await supabase.from('exercises').select('id, name').ilike('name', `%${canonical}%`).limit(1);
-  const ex = exs?.[0];
+  const ex = await searchCatalogExercise(supabase, edit.exercise);
   if (!ex && edit.action !== 'remove') {
-    return { success: false, reason: 'unknown_exercise', message: `I couldn't find "${edit.exercise}" in the exercise library.` };
+    return { success: false, reason: 'unknown_exercise', message: `I couldn't find "${edit.exercise}" in your Yeti library.` };
   }
 
   const { data: plans } = await supabase
@@ -326,7 +325,7 @@ async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<
   const dayIds = days.map((d: any) => d.id);
 
   try {
-    if (edit.action === 'add') {
+    if (edit.action === 'add' && ex) {
       const { data: existing } = await supabase
         .from('plan_exercises').select('order_index').eq('plan_day_id', day.id)
         .order('order_index', { ascending: false }).limit(1);
@@ -340,9 +339,12 @@ async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<
 
     // remove / replace / move all locate the existing plan_exercise first.
     const { data: pxs } = await supabase
-      .from('plan_exercises').select('id, exercise_id, exercises(name)').in('plan_day_id', dayIds);
+      .from('plan_exercises').select('id, exercise_id, exercises(name, slug)').in('plan_day_id', dayIds);
+    const normalizedEditName = normalizeExerciseInput(edit.exercise);
     const target = (pxs || []).find((p: any) =>
-      (ex && p.exercise_id === ex.id) || (p.exercises?.name || '').toLowerCase().includes(canonical));
+      (ex && p.exercise_id === ex.id) ||
+      (p.exercises?.name && normalizeExerciseInput(p.exercises.name).includes(normalizedEditName)) ||
+      (p.exercises?.slug && ex?.slug && p.exercises.slug === ex.slug));
     if (!target) return { success: false, reason: 'not_in_plan', message: `I couldn't find ${edit.exercise} in your current plan.` };
     const targetName = target.exercises?.name || edit.exercise;
 
@@ -352,9 +354,7 @@ async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<
       return { success: true, action: 'remove', exercise: targetName, message: `${targetName} was removed from your plan.` };
     }
     if (edit.action === 'replace') {
-      const rc = resolveExerciseAlias(edit.replacement || '');
-      const { data: rexs } = await supabase.from('exercises').select('id, name').ilike('name', `%${rc}%`).limit(1);
-      const rex = rexs?.[0];
+      const rex = await searchCatalogExercise(supabase, edit.replacement || '');
       if (!rex) return { success: false, reason: 'unknown_replacement', message: `I couldn't find "${edit.replacement}" in the library to swap in.` };
       const { error } = await supabase.from('plan_exercises').update({ exercise_id: rex.id }).eq('id', target.id);
       if (error) throw error;
@@ -725,6 +725,29 @@ serve(async (req) => {
     }
     let latestUserMessage = message || '';
     if (latestUserMessage.length > 1000) latestUserMessage = latestUserMessage.substring(0, 1000) + '... [truncated]';
+
+    // Parse partitioned context safely (supporting both structured object and legacy string)
+    let clientProfileContext = '';
+    let clientWorkoutContext = '';
+    let clientNutritionContext = '';
+
+    if (context && typeof context === 'object') {
+      clientProfileContext = typeof context.profile === 'string' ? context.profile : '';
+      clientWorkoutContext = typeof context.workout === 'string' ? context.workout : '';
+      clientNutritionContext = typeof context.nutrition === 'string' ? context.nutrition : '';
+    } else if (typeof context === 'string' && context.trim()) {
+      const profileMatch = context.match(/ATHLETE PROFILE:[\s\S]*?(?=(?:RECENT WORKOUTS|NUTRITION|$))/i);
+      const workoutMatch = context.match(/RECENT WORKOUTS[\s\S]*?(?=(?:NUTRITION|ATHLETE PROFILE|$))/i);
+      const nutritionMatch = context.match(/NUTRITION[\s\S]*?(?=(?:ATHLETE PROFILE|RECENT WORKOUTS|$))/i);
+
+      clientProfileContext = profileMatch ? profileMatch[0].trim() : '';
+      clientWorkoutContext = workoutMatch ? workoutMatch[0].trim() : '';
+      clientNutritionContext = nutritionMatch ? nutritionMatch[0].trim() : '';
+
+      if (!clientProfileContext && !clientWorkoutContext && !clientNutritionContext) {
+        clientProfileContext = context.trim();
+      }
+    }
 
     // Entitlements fetch — beta_mode_config was removed (table does not exist in
     // production and caused a logged DB error on every request).
@@ -1562,6 +1585,20 @@ serve(async (req) => {
             note: 'Ask athlete which specific plan day they wish to move or reschedule.',
           };
         }
+      } else if (intent === 'exercise_inquiry') {
+        const ex = await searchCatalogExercise(supabaseClient, latestUserMessage);
+        const grounding = buildExerciseGroundingPrompt(ex);
+        const workoutCtx = await loadWorkoutContext(supabaseClient, user.id);
+        contextBlock = `${grounding}\n\n${workoutCtx || clientWorkoutContext || ''}`.trim();
+        engineResult = ex ? {
+          type: 'exercise_inquiry',
+          resolved_exercise: ex.name,
+          primary_muscle: ex.primary_muscle || (ex as any).target_muscle,
+          equipment: ex.equipment,
+          movement_pattern: ex.movement_pattern,
+          match_strategy: ex.matchStrategy,
+          confidence: ex.confidence,
+        } : { type: 'exercise_inquiry', status: 'not_found' };
       }
     } else if (PERSONAL_CONTEXT_INTENTS.includes(intent)) {
       // Personal coaching context: for technique, recovery, rest, general chat,
@@ -1605,17 +1642,18 @@ serve(async (req) => {
         if (intent === 'goal_adjustment') {
           personalLines.push('USER WANTS TO ADJUST THEIR TRAINING GOAL. Confirm the new goal and update memory.');
         }
-        // Fall back to client-supplied context if profile is empty
+        // Fall back to domain-partitioned client context if profile is empty
+        const fallbackClientCtx = [clientProfileContext, clientWorkoutContext].filter(Boolean).join('\n\n');
         contextBlock = personalLines.length > 0
           ? personalLines.join('\n')
-          : (typeof context === 'string' ? context : '(no profile data available)');
+          : (fallbackClientCtx || '(no profile data available)');
       } catch (_e) {
-        // Fail-open: use client context if profile fetch errors
-        contextBlock = typeof context === 'string' ? context : '';
+        // Fail-open: use partitioned profile context if profile fetch errors
+        contextBlock = clientProfileContext || '';
       }
     } else if (NUTRITION_INTENTS.includes(intent)) {
       const { context: nctx, engine } = await loadNutritionContext(supabaseClient, user.id);
-      contextBlock = nctx;
+      contextBlock = nctx || [clientProfileContext, clientNutritionContext].filter(Boolean).join('\n\n');
 
       if (intent === 'nutrition_target_lookup') {
         // Deterministic read-only lookup — never computes a new value,
@@ -1687,9 +1725,9 @@ serve(async (req) => {
         engineResult = intel;
       }
     } else {
-      // meal_suggestion / and any future unclassified intents:
-      // use only the light client-supplied context; NEVER default to nutrition.
-      contextBlock = typeof context === 'string' ? context : '';
+      // general_chat / and any unclassified intents:
+      // use only minimal profile context; NEVER dump raw workout history or nutrition logs by default.
+      contextBlock = clientProfileContext || '';
     }
 
     // 5. Grounded system prompt -------------------------------------------------

@@ -51,10 +51,16 @@ interface AICoachState {
   resetChat: (userId: string) => Promise<void>;
 }
 
-// ─── Context Builder ──────────────────────────────────────────────────────────
+export interface StructuredCoachContext {
+  profile: string;
+  workout: string;
+  nutrition: string;
+}
 
-async function buildUserContext(userId: string): Promise<string> {
-  const sections: string[] = [];
+async function buildUserContext(userId: string): Promise<StructuredCoachContext> {
+  let profileSection = '';
+  let workoutSection = '';
+  let nutritionSection = '';
 
   try {
     // 1. Profile & Goals
@@ -67,13 +73,11 @@ async function buildUserContext(userId: string): Promise<string> {
     }
 
     if (profile) {
-      sections.push(
-        `ATHLETE PROFILE:
+      profileSection = `ATHLETE PROFILE:
 - Name: ${profile.full_name || 'Athlete'}
 - Goal: ${profile.goal || 'Not specified'}
 - Experience: ${profile.experience_level || 'Unknown'}
-- Age: ${profile.age || '?'}, Weight: ${profile.weight_kg || '?'}kg, Height: ${profile.height_cm || '?'}cm`,
-      );
+- Age: ${profile.age || '?'}, Weight: ${profile.weight_kg || '?'}kg, Height: ${profile.height_cm || '?'}cm`;
     }
 
     // 2. Last 5 completed workout sessions from local DB
@@ -104,11 +108,10 @@ async function buildUserContext(userId: string): Promise<string> {
           return `${date} — ${s.name} ${volume}\n${exerciseSummary}`;
         })
       );
-      sections.push(`RECENT WORKOUTS (last 5):\n${workoutSummary.join('\n\n')}`);
+      workoutSection = `RECENT WORKOUTS (last 5):\n${workoutSummary.join('\n\n')}`;
     }
 
     // 3. Nutrition last 7 days (aggregate locally)
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     let totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
     
     for (let i = 0; i < 7; i++) {
@@ -120,18 +123,20 @@ async function buildUserContext(userId: string): Promise<string> {
       totalFat += daily.fat;
     }
 
-    sections.push(
-      `NUTRITION (7-day average daily):
+    nutritionSection = `NUTRITION (7-day average daily):
 - Calories: ${Math.round(totalCalories / 7)} kcal
 - Protein: ${Math.round(totalProtein / 7)}g
 - Carbs: ${Math.round(totalCarbs / 7)}g
-- Fat: ${Math.round(totalFat / 7)}g`,
-    );
+- Fat: ${Math.round(totalFat / 7)}g`;
   } catch (e) {
     console.warn('[AICoach] Context build error (non-fatal):', e);
   }
 
-  return sections.join('\n\n');
+  return {
+    profile: profileSection,
+    workout: workoutSection,
+    nutrition: nutritionSection,
+  };
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────

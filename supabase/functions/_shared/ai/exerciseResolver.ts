@@ -12,7 +12,12 @@ const ALIASES: Record<string, string> = {
   'cable flye': 'cable fly',
   'high to low fly': 'high to low cable fly',
   'high-to-low fly': 'high to low cable fly',
+  'high to low cable fly': 'high to low cable fly',
+  'high-to-low cable fly': 'high to low cable fly',
   'low to high fly': 'low to high cable fly',
+  'low-to-high fly': 'low to high cable fly',
+  'low to high cable fly': 'low to high cable fly',
+  'low-to-high cable fly': 'low to high cable fly',
   'lat pulldown': 'lat pulldown',
   'close grip pulldown': 'close grip lat pulldown',
   'close-grip pulldown': 'close grip lat pulldown',
@@ -40,7 +45,11 @@ const ALIASES: Record<string, string> = {
 };
 
 export function normalizeExerciseInput(raw: string): string {
-  return (raw || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+  return (raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function extractExerciseName(message: string): string {
@@ -56,65 +65,137 @@ export function resolveExerciseAlias(raw: string): string {
   const extracted = extractExerciseName(raw);
   const n = normalizeExerciseInput(extracted || raw);
   if (!n) return '';
+  const nSpaces = n.replace(/-/g, ' ');
+  const nHyphens = n.replace(/\s+/g, '-');
   if (ALIASES[n]) return ALIASES[n];
+  if (ALIASES[nSpaces]) return ALIASES[nSpaces];
+  if (ALIASES[nHyphens]) return ALIASES[nHyphens];
 
   let best = '';
   let bestLen = 0;
   for (const alias of Object.keys(ALIASES)) {
-    if (n.includes(alias) && alias.length > bestLen) { best = ALIASES[alias]; bestLen = alias.length; }
+    const normAlias = normalizeExerciseInput(alias);
+    const normAliasSpaces = normAlias.replace(/-/g, ' ');
+    if ((n.includes(normAlias) || nSpaces.includes(normAliasSpaces)) && normAlias.length > bestLen) {
+      best = ALIASES[alias];
+      bestLen = normAlias.length;
+    }
   }
   return best || n;
+}
+
+export interface ExerciseCatalogSearchResult {
+  id: string;
+  name: string;
+  slug?: string;
+  source_type?: string;
+  primary_muscle?: string;
+  equipment?: string;
+  movement_pattern?: string;
+  matchStrategy?: 'exact_name_or_slug' | 'database_alias' | 'static_alias' | 'partial_name' | 'token_fallback';
+  confidence?: 'exact' | 'alias' | 'token' | 'none';
+  [key: string]: any;
 }
 
 /**
  * Searches the first-party database catalog for an exercise before calling LLM.
  */
-export async function searchCatalogExercise(supabase: any, rawInput: string): Promise<any | null> {
+export async function searchCatalogExercise(supabase: any, rawInput: string): Promise<ExerciseCatalogSearchResult | null> {
   if (!supabase || !rawInput) return null;
-  const canonical = resolveExerciseAlias(rawInput);
-  if (!canonical || canonical.length < 2) return null;
+  const extracted = extractExerciseName(rawInput);
+  const normalized = normalizeExerciseInput(extracted || rawInput);
+  if (!normalized || normalized.length < 2) return null;
+
+  const slugVariant = normalized.replace(/\s+/g, '-');
 
   // 1. Search by exact slug or exact name
-  const { data: exact } = await supabase
-    .from('exercises')
-    .select('*')
-    .eq('source_type', 'yeti_first_party')
-    .or(`slug.eq.${canonical},name.ilike.${canonical}`)
-    .maybeSingle();
+  try {
+    const { data: exact } = await supabase
+      .from('exercises')
+      .select('*')
+      .eq('source_type', 'yeti_first_party')
+      .or(`slug.eq.${slugVariant},slug.eq.${normalized},name.ilike.${normalized}`)
+      .maybeSingle();
 
-  if (exact) return exact;
+    if (exact) {
+      return { ...exact, matchStrategy: 'exact_name_or_slug', confidence: 'exact' };
+    }
+  } catch (_e) { /* continue */ }
 
-  // 2. Search by partial name match
-  const { data: matches } = await supabase
-    .from('exercises')
-    .select('*')
-    .ilike('name', `%${canonical}%`)
-    .eq('source_type', 'yeti_first_party')
-    .limit(1);
+  // 2. Search exercise_aliases table in database
+  try {
+    const { data: dbAliases } = await supabase
+      .from('exercise_aliases')
+      .select('exercise_id, alias, exercises!inner(*)')
+      .or(`alias.ilike.${normalized},alias.ilike.%${normalized}%`)
+      .eq('exercises.source_type', 'yeti_first_party')
+      .limit(3);
 
-  if (matches && matches.length > 0) return matches[0];
+    if (dbAliases && dbAliases.length > 0) {
+      const exactAlias = dbAliases.find((a: any) => normalizeExerciseInput(a.alias) === normalized);
+      const chosen = exactAlias ? (exactAlias as any).exercises : (dbAliases[0] as any).exercises;
+      if (chosen) {
+        return { ...chosen, matchStrategy: 'database_alias', confidence: exactAlias ? 'exact' : 'alias' };
+      }
+    }
+  } catch (_e) { /* continue */ }
 
-  // 3. Search exercise_aliases table
-  const { data: aliasMatch } = await supabase
-    .from('exercise_aliases')
-    .select('exercise_id, exercises!inner(*)')
-    .ilike('alias', `%${canonical}%`)
-    .eq('exercises.source_type', 'yeti_first_party')
-    .limit(1);
+  // 3. Static alias dictionary fallback
+  const canonicalAlias = resolveExerciseAlias(normalized);
+  if (canonicalAlias && canonicalAlias !== normalized) {
+    const aliasSlug = canonicalAlias.replace(/\s+/g, '-');
+    try {
+      const { data: aliasTarget } = await supabase
+        .from('exercises')
+        .select('*')
+        .eq('source_type', 'yeti_first_party')
+        .or(`slug.eq.${aliasSlug},slug.eq.${canonicalAlias},name.ilike.%${canonicalAlias}%`)
+        .limit(1);
 
-  if (aliasMatch && aliasMatch.length > 0 && (aliasMatch[0] as any).exercises) {
-    return (aliasMatch[0] as any).exercises;
+      if (aliasTarget && aliasTarget.length > 0) {
+        return { ...aliasTarget[0], matchStrategy: 'static_alias', confidence: 'alias' };
+      }
+    } catch (_e) { /* continue */ }
   }
 
-  // 4. Token-based fallback across name / slug
-  const tokens = canonical.split(/\s+/).filter(t => t.length > 2);
-  if (tokens.length > 0) {
-    let q = supabase.from('exercises').select('*').eq('source_type', 'yeti_first_party');
-    tokens.forEach(tok => {
-      q = q.or(`name.ilike.%${tok}%,slug.ilike.%${tok}%`);
-    });
-    const { data: tokenMatches } = await q.limit(1);
-    if (tokenMatches && tokenMatches.length > 0) return tokenMatches[0];
+  // 4. Partial name / slug match
+  try {
+    const { data: matches } = await supabase
+      .from('exercises')
+      .select('*')
+      .eq('source_type', 'yeti_first_party')
+      .or(`name.ilike.%${normalized}%,slug.ilike.%${slugVariant}%`)
+      .limit(3);
+
+    if (matches && matches.length > 0) {
+      return { ...matches[0], matchStrategy: 'partial_name', confidence: 'token' };
+    }
+  } catch (_e) { /* continue */ }
+
+  // 5. Token-based fallback across name for multi-word queries
+  const tokens = normalized.split(/\s+/).filter((t: string) => t.length > 2 && !['and', 'for', 'the', 'with', 'day'].includes(t));
+  if (tokens.length >= 2) {
+    try {
+      const filterClauses = tokens.map((tok: string) => `name.ilike.%${tok}%`);
+      const { data: tokenMatches } = await supabase
+        .from('exercises')
+        .select('*')
+        .eq('source_type', 'yeti_first_party')
+        .or(filterClauses.join(','))
+        .limit(10);
+
+      if (tokenMatches && tokenMatches.length > 0) {
+        const scored = tokenMatches.map((cand: any) => {
+          const candNorm = normalizeExerciseInput(cand.name);
+          const overlap = tokens.filter((tok: string) => candNorm.includes(tok)).length;
+          return { cand, score: overlap / tokens.length };
+        });
+        scored.sort((a: any, b: any) => b.score - a.score);
+        if (scored[0].score >= 0.5) {
+          return { ...scored[0].cand, matchStrategy: 'token_fallback', confidence: 'token' };
+        }
+      }
+    } catch (_e) { /* continue */ }
   }
 
   return null;

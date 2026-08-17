@@ -81,7 +81,7 @@ const NUTRITION_LEAK = /(calories?|kcal|protein\s*(target|goal|:|\d)|carb(ohydra
 
 const WORKOUT_ONLY_INTENTS = new Set([
   'workout_plan_edit', 'workout_progression', 'exercise_substitution', 'rest_pacing', 'workout_explanation',
-  'workout_program_generate',
+  'exercise_inquiry', 'workout_program_generate',
 ]);
 
 /** True if a workout-only intent's response leaks nutrition content (invalid). */
@@ -569,13 +569,58 @@ export type CoachResponseType =
   | 'safety_guidance'
   | 'error';
 
+// The client's "Save this plan" / "Adjust it first" buttons need the actual
+// generated exercises to act on. programGenerator.ts's GeneratedDay/
+// GeneratedExercise work purely with exercise NAME strings pulled from the
+// real catalog (it never carries a database id — resolving name -> id is the
+// client's job, against its own full local/remote catalog); this mirrors that
+// shape exactly rather than inventing a parallel one, so buildWorkoutPlanDraftData
+// below is a straight reshape with no semantic translation to get wrong.
+export interface WorkoutPlanDraftExercise {
+  name: string;
+  sets: number;
+  reps: string;
+  rest_seconds: number;
+}
+
+export interface WorkoutPlanDraftData {
+  name: string;
+  exercises: WorkoutPlanDraftExercise[];
+}
+
 export type CoachAction =
-  | { type: 'confirm_workout_plan'; label: string }
-  | { type: 'edit_workout_plan'; label: string }
+  | { type: 'confirm_workout_plan'; label: string; data?: WorkoutPlanDraftData }
+  | { type: 'edit_workout_plan'; label: string; data?: WorkoutPlanDraftData }
   | { type: 'confirm_nutrition_plan'; label: string }
   | { type: 'retry'; label: string };
 
 const WORKOUT_DRAFT_STATUSES = new Set(['draft_proposed', 'draft_edited']);
+
+// Minimal shape this file needs from engineResult.program — matches
+// programGenerator.ts's GeneratedDay[]/GeneratedExercise exactly, but declared
+// locally (rather than imported) since engineResult reaches here typed as
+// `unknown` from several different intents/engines, not just this one.
+interface EngineProgramDay { name: string; exercises: { name: string; sets: number; reps: string; restSeconds: number }[] }
+
+/**
+ * Flattens the deterministic program generator's day-by-day output into the
+ * flat exercise list the client's save path expects. Returns null (never a
+ * fabricated plan) when there's nothing usable to attach — computeActions
+ * then correctly emits confirm/edit actions with no `data`, and the client
+ * treats that the same as "nothing to save" rather than crashing on it.
+ */
+export function buildWorkoutPlanDraftData(planName: string, days: EngineProgramDay[] | undefined | null): WorkoutPlanDraftData | null {
+  if (!Array.isArray(days) || days.length === 0) return null;
+  const exercises: WorkoutPlanDraftExercise[] = [];
+  for (const day of days) {
+    for (const ex of day.exercises || []) {
+      if (!ex?.name) continue;
+      exercises.push({ name: ex.name, sets: ex.sets, reps: ex.reps, rest_seconds: ex.restSeconds });
+    }
+  }
+  if (exercises.length === 0) return null;
+  return { name: planName, exercises };
+}
 
 export interface ResponseTypeInput {
   intent: CoachIntent;
@@ -603,13 +648,23 @@ export function computeResponseType(input: ResponseTypeInput): CoachResponseType
   return 'text';
 }
 
-/** Only returns actions genuinely supported by the given response_type — never emits an action the payload can't back up. */
-export function computeActions(responseType: CoachResponseType): CoachAction[] {
+/**
+ * Only returns actions genuinely supported by the given response_type — never
+ * emits an action the payload can't back up. `workoutDraftData` (built via
+ * buildWorkoutPlanDraftData from the SAME deterministic engineResult.program
+ * that grounded the reply — never re-derived from the model's prose) is
+ * attached to both workout actions so the client can act on them without
+ * re-deriving or guessing the plan; omitted (both actions still returned,
+ * just without `data`) when there's nothing to attach, so the client can
+ * distinguish "no plan to save" from a network/parsing failure.
+ */
+export function computeActions(responseType: CoachResponseType, workoutDraftData?: WorkoutPlanDraftData | null): CoachAction[] {
   if (responseType === 'error') return [{ type: 'retry', label: 'Try again' }];
   if (responseType === 'workout_plan_draft') {
+    const data = workoutDraftData ?? undefined;
     return [
-      { type: 'confirm_workout_plan', label: 'Save this plan' },
-      { type: 'edit_workout_plan', label: 'Adjust it first' },
+      { type: 'confirm_workout_plan', label: 'Save this plan', data },
+      { type: 'edit_workout_plan', label: 'Adjust it first', data },
     ];
   }
   if (responseType === 'nutrition_plan_draft') {
