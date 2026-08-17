@@ -195,6 +195,15 @@ currently deployed R2-backed media contract.
 - **`notifications`** — per-user, coach-sendable-to-client, `read_at` timestamp.
 
 ### AI coach system
+- **`ai_plan_edit_proposals`** — durable proposal state for natural-language workout-plan edits (`athlete_id`,
+  `plan_id`, `plan_day_id`, `target_plan_exercise_id`, `action`
+  [`add`|`remove`|`replace`|`move`|`update_sets_reps`|`update_rest`], `exercise_id`, `replacement_exercise_id`,
+  `sets`, `reps`, `rest_seconds`, `status` [`pending`|`applied`|`cancelled`|`expired`], `expires_at`,
+  `applied_at`, `cancelled_at`, `raw_prompt`, snapshots). Athletes have SELECT only.
+  Plan edit confirmation and cancellation execute via transactional PostgreSQL RPCs
+  (`execute_ai_plan_edit_proposal` and `cancel_ai_plan_edit_proposal`, defined in
+  `supabase/migrations/20260817220000_ai_plan_edit_proposals.sql`), ensuring atomic execution, exact
+  `plan_exercises` row targeting, stale state protection, and zero false-applied mutations.
 - **`ai_memory`** — persistent per-athlete key/value memory (`category`, `memory_key`, `memory_value`).
   Athletes have SELECT only; INSERT/UPDATE happen exclusively via the Edge Function's service-role client.
 - **`ai_usage`** — per-athlete-per-day request counter, used for tier rate-limiting. Written only via

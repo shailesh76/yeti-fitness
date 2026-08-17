@@ -2,8 +2,8 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, checkProviderCapacity, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
 import { classifyIntentWithHistory, classifySafetySignal, CoachIntent } from "../_shared/ai/intent.ts";
-import { parsePlanEdit } from "../_shared/ai/planEdit.ts";
-import { resolveExerciseAlias, extractExerciseName, normalizeExerciseInput, searchCatalogExercise, buildExerciseGroundingPrompt } from "../_shared/ai/exerciseResolver.ts";
+import { parsePlanEdit, PlanEditAction, PlanEditRequest } from "../_shared/ai/planEdit.ts";
+import { resolveExerciseAlias, extractExerciseName, normalizeExerciseInput, searchCatalogExercise, buildExerciseGroundingPrompt, ExerciseCatalogSearchResult } from "../_shared/ai/exerciseResolver.ts";
 import { decideProgression, computeNutritionRemaining, estimateOneRepMax, NutritionInput } from "../_shared/ai/coachEngine.ts";
 import { buildCoachSystemPrompt } from "../_shared/ai/coachPrompt.ts";
 import { buildCoachMemoryCard, foldMemoryRows, mergeCoachMemory, sanitizeSummarySensitivity } from "../_shared/ai/coachMemory.ts";
@@ -13,7 +13,7 @@ import {
   REPAIR_INSTRUCTION, INTENT_ISOLATION_RETRY, GROUNDING_RETRY, CoachResponse,
   containsInternalLabels, sanitizeInternalLabels, LABEL_LEAK_RETRY,
   containsMemoryClaim, MEMORY_PERSISTENCE_FAILED_NOTE,
-  computeResponseType, computeActions, CoachAction, CoachResponseType,
+  computeResponseType, computeActions, CoachAction, CoachResponseType, buildWorkoutPlanDraftData, ProposedPlanEditData,
   unsupportedProseNumbers, buildProseGroundingRetryInstruction, ungroundedNumberFallbackResponse,
   unsupportedPersonalClaims, buildPersonalClaimRetryInstruction, stripUnsupportedPersonalClaims,
 } from "../_shared/ai/coachSchema.ts";
@@ -284,92 +284,15 @@ async function loadProgressionForExercise(
   return { engineInput, context };
 }
 
-// ─── Deterministic workout-plan mutation (Phase 2) ──────────────────────────────
-// Resolves the exercise, finds the athlete's active plan + target day, and
-// EXECUTES the change against plan_exercises (RLS-gated to the athlete). Returns
-// an honest { success, message } — the LLM explains this result and NEVER claims
-// success unless success === true. Offline devices pick the change up via the
-// existing plan_exercises sync-pull path.
-interface PlanEditResult { success: boolean; action?: string; message: string; exercise?: string; replacement?: string; day?: string; reason?: string }
-
-async function applyPlanEdit(supabase: any, userId: string, edit: any): Promise<PlanEditResult> {
-  if (!edit || edit.ambiguous || !edit.exercise) {
-    return { success: false, reason: 'ambiguous', message: "I couldn't tell exactly which exercise you meant. Which movement and which day?" };
-  }
-  const ex = await searchCatalogExercise(supabase, edit.exercise);
-  if (!ex && edit.action !== 'remove') {
-    return { success: false, reason: 'unknown_exercise', message: `I couldn't find "${edit.exercise}" in your Yeti library.` };
-  }
-
-  const { data: plans } = await supabase
-    .from('workout_plans').select('id, name').eq('user_id', userId)
-    .order('created_at', { ascending: false }).limit(1);
-  const plan = plans?.[0];
-  if (!plan) return { success: false, reason: 'no_plan', message: "You don't have an active workout plan yet — create one and I'll edit it." };
-
-  const { data: days } = await supabase
-    .from('plan_days').select('id, day_number, name').eq('plan_id', plan.id).order('day_number');
-  if (!days?.length) return { success: false, reason: 'no_days', message: 'Your plan has no training days set up yet.' };
-
-  // Resolve the target day (by name/number) or default to the first day.
-  let day = days[0];
-  if (edit.targetDay) {
-    const t = String(edit.targetDay).toLowerCase();
-    const num = t.match(/\d+/);
-    const found = days.find((d: any) =>
-      (d.name || '').toLowerCase().includes(t.replace(/day\s*\d*/, '').trim()) ||
-      (num && String(d.day_number) === num[0]));
-    if (found) day = found;
-  }
-  const dayLabel = day.name || `Day ${day.day_number}`;
-  const dayIds = days.map((d: any) => d.id);
-
-  try {
-    if (edit.action === 'add' && ex) {
-      const { data: existing } = await supabase
-        .from('plan_exercises').select('order_index').eq('plan_day_id', day.id)
-        .order('order_index', { ascending: false }).limit(1);
-      const nextOrder = ((existing?.[0]?.order_index) ?? -1) + 1;
-      const { error } = await supabase.from('plan_exercises').insert({
-        plan_day_id: day.id, exercise_id: ex.id, order_index: nextOrder, sets: '3', reps: '12-15',
-      });
-      if (error) throw error;
-      return { success: true, action: 'add', exercise: ex.name, day: dayLabel, message: `${ex.name} was added to ${dayLabel}.` };
-    }
-
-    // remove / replace / move all locate the existing plan_exercise first.
-    const { data: pxs } = await supabase
-      .from('plan_exercises').select('id, exercise_id, exercises(name, slug)').in('plan_day_id', dayIds);
-    const normalizedEditName = normalizeExerciseInput(edit.exercise);
-    const target = (pxs || []).find((p: any) =>
-      (ex && p.exercise_id === ex.id) ||
-      (p.exercises?.name && normalizeExerciseInput(p.exercises.name).includes(normalizedEditName)) ||
-      (p.exercises?.slug && ex?.slug && p.exercises.slug === ex.slug));
-    if (!target) return { success: false, reason: 'not_in_plan', message: `I couldn't find ${edit.exercise} in your current plan.` };
-    const targetName = target.exercises?.name || edit.exercise;
-
-    if (edit.action === 'remove') {
-      const { error } = await supabase.from('plan_exercises').delete().eq('id', target.id);
-      if (error) throw error;
-      return { success: true, action: 'remove', exercise: targetName, message: `${targetName} was removed from your plan.` };
-    }
-    if (edit.action === 'replace') {
-      const rex = await searchCatalogExercise(supabase, edit.replacement || '');
-      if (!rex) return { success: false, reason: 'unknown_replacement', message: `I couldn't find "${edit.replacement}" in the library to swap in.` };
-      const { error } = await supabase.from('plan_exercises').update({ exercise_id: rex.id }).eq('id', target.id);
-      if (error) throw error;
-      return { success: true, action: 'replace', exercise: targetName, replacement: rex.name, message: `${targetName} was replaced with ${rex.name}.` };
-    }
-    if (edit.action === 'move') {
-      const { error } = await supabase.from('plan_exercises').update({ plan_day_id: day.id }).eq('id', target.id);
-      if (error) throw error;
-      return { success: true, action: 'move', exercise: targetName, day: dayLabel, message: `${targetName} was moved to ${dayLabel}.` };
-    }
-    return { success: false, reason: 'unknown_action', message: "I couldn't process that edit." };
-  } catch (_e) {
-    return { success: false, reason: 'db_error', message: "The update didn't go through. Please try again in a moment." };
-  }
-}
+// ─── Durable workout-plan edit proposals & confirmation (Phase 3) ─────────────
+// The natural-language turn creates ONLY a pending proposal in ai_plan_edit_proposals
+// with ZERO writes to plan_exercises. The proposal must be explicitly confirmed
+// by the authenticated athlete, which re-validates the plan state and executes
+// the change atomically.
+import {
+  proposePlanEdit, executePlanEdit, cancelPlanEdit, PROPOSAL_EXPIRY_MS,
+  ProposedPlanEditResult, ExecutePlanEditResult,
+} from "../_shared/ai/planEditProposals.ts";
 
 /** True if any user-facing field of the response contains a leaked internal section label. */
 function responseLeaksInternalLabels(r: CoachResponse): boolean {
@@ -716,8 +639,25 @@ serve(async (req) => {
       { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } },
     );
 
-    // 1b. Input validation — read `context` + `messageHistory` (client field names)
-    const { message, context, messageHistory, conversationId } = await req.json();
+    const reqBody = await req.json();
+    const { message, context, messageHistory, conversationId, action, proposalId } = reqBody;
+
+    // Direct Proposal Confirmation / Cancellation Route
+    if (action === 'confirm_plan_edit' && proposalId) {
+      const result = await executePlanEdit(supabaseServiceRole, user.id, proposalId);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: result.success ? 200 : (result.reason === 'not_found' ? 404 : 400),
+      });
+    }
+    if (action === 'cancel_plan_edit' && proposalId) {
+      const result = await cancelPlanEdit(supabaseServiceRole, user.id, proposalId);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: result.success ? 200 : 400,
+      });
+    }
+
     if (message && message.length > 2000) {
       return new Response(JSON.stringify({ error: 'Message exceeds maximum length (2000 characters).' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
@@ -1066,11 +1006,10 @@ serve(async (req) => {
         contextBlock = prog.context; // workout-only — nutrition is never loaded
         engineResult = prog.engineInput ? decideProgression(prog.engineInput) : undefined;
       } else if (intent === 'workout_plan_edit') {
-        // Parse → resolve → EXECUTE the plan mutation. engineResult carries the
-        // honest { success, message }; the LLM explains it and confirms ONLY when
-        // success === true (never pretends an update happened).
+        // Parse → resolve → create a pending PROPOSAL in ai_plan_edit_proposals.
+        // ZERO writes occur to plan_exercises until explicit athlete confirmation.
         const edit = parsePlanEdit(latestUserMessage);
-        engineResult = await applyPlanEdit(supabaseClient, user.id, edit);
+        engineResult = await proposePlanEdit(supabaseServiceRole, user.id, edit, latestUserMessage);
         contextBlock = await loadWorkoutContext(supabaseClient, user.id); // no nutrition, ever
       } else if (intent === 'workout_program_generate') {
         // Compound-request check (Fix 7): does this SAME message also ask for
@@ -1197,6 +1136,11 @@ serve(async (req) => {
               status: 'draft_edited',
               editApplied: parsedEdit,
               program: editedDays,
+              // Carried alongside `program` so it's available wherever
+              // engineResult is later read (e.g. building the confirm/edit
+              // actions' data payload) without re-deriving req/recommendation,
+              // which are out of scope by then.
+              planName: recommendation.split ? `${recommendation.split} Program` : 'AI Workout Program',
               validation,
               confirmation_required: true,
             };
@@ -1236,6 +1180,7 @@ serve(async (req) => {
               rationale: recommendation.rationale,
               adherenceNote: recommendation.adherenceNote,
               program: generated.days,
+              planName: recommendation.split ? `${recommendation.split} Program` : 'AI Workout Program',
               validation,
               confirmation_required: true,
             };
@@ -1307,7 +1252,7 @@ serve(async (req) => {
           .map((m: any) => (m.memory_value as string).toLowerCase());
 
         try {
-          // 1. Resolve source exercise from catalogue. source_type='yeti_v2'
+          // 1. Resolve source exercise from catalogue. source_type='yeti_first_party'
           //    restored — the broader multi-source lookup wasn't verified
           //    against live data before this pass; keeping the previously
           //    verified, catalog-scoped behavior here. If a genuine need for
@@ -1317,7 +1262,7 @@ serve(async (req) => {
             .from('exercises')
             .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral, is_active, status, media_status')
             .ilike('name', `%${targetExerciseName}%`)
-            .eq('source_type', 'yeti_v2')
+            .eq('source_type', 'yeti_first_party')
             .limit(1);
           const sourceEx = sourceExs?.[0];
 
@@ -1337,7 +1282,7 @@ serve(async (req) => {
               .from('exercises')
               .select('id, name, primary_muscle, secondary_muscles, movement_pattern, equipment, category, difficulty, unilateral, is_active, status, media_status')
               .or(`primary_muscle.eq.${sourceEx.primary_muscle},movement_pattern.eq.${sourceEx.movement_pattern}`)
-              .eq('source_type', 'yeti_v2')
+              .eq('source_type', 'yeti_first_party')
               .neq('id', sourceEx.id)
               .limit(15);
 
@@ -1871,7 +1816,15 @@ serve(async (req) => {
       engineStatus: (engineResult as any)?.status, hasEngineResult: engineResult != null,
       memoryPersistedThisTurn,
     });
-    const actions: CoachAction[] = computeActions(responseType);
+    // The deterministic engine's own program (never the model's prose) is what
+    // the client's "Save this plan"/"Adjust it first" actions act on.
+    const workoutDraftData = responseType === 'workout_plan_draft'
+      ? buildWorkoutPlanDraftData((engineResult as any)?.planName || 'AI Workout Program', (engineResult as any)?.program)
+      : null;
+    const planEditProposalData: ProposedPlanEditData | null = responseType === 'workout_plan_edit_proposal'
+      ? ((engineResult as any)?.proposalData || null)
+      : null;
+    const actions: CoachAction[] = computeActions(responseType, workoutDraftData, planEditProposalData);
 
     // 8. Log + return -----------------------------------------------------------
     // ai_usage was already incremented atomically up-front — only the request

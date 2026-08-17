@@ -74,16 +74,87 @@ export class AICoachRepository {
     if (!this.supabase) {
       throw new Error('Supabase client not configured in AICoachRepository');
     }
-    const { data, error } = await this.supabase.functions.invoke('ai-coach', {
-      body: {
-        userId,
-        conversationId,
-        message,
-        context,
-        messageHistory
+    const body = { userId, conversationId, message, context, messageHistory };
+    const invoke = () => this.supabase.functions.invoke('ai-coach', { body });
+
+    let { data, error } = await invoke();
+
+    // A 401 here is an AUTH failure, not an AI-provider failure — the edge
+    // function rejects the request before ever touching a model. Root cause
+    // (confirmed live, 2026-08-01): a locally-cached access token can look
+    // unexpired by its own `exp` claim while its underlying session has
+    // already been invalidated server-side (auth.getUser() -> GoTrue
+    // "session_not_found") — a stale local token doesn't know its session is
+    // gone. One recoverable path: refreshSession() mints a new access token
+    // tied to a live session and the SAME request can simply be retried.
+    if (error?.context?.status === 401) {
+      try {
+        const { data: refreshed, error: refreshError } = await this.supabase.auth.refreshSession();
+        if (refreshed?.session && !refreshError) {
+          ({ data, error } = await invoke());
+        }
+      } catch {
+        // Refresh itself failed — fall through with the original 401, handled below.
       }
+    }
+
+    if (error) {
+      if (error?.context?.status === 401) {
+        // Unrecoverable: refresh didn't help (or wasn't possible). This is
+        // never an AI failure — callers must show a distinct "session
+        // expired, sign in again" message, not the generic AI-unavailable one.
+        const authError: any = new Error('SESSION_EXPIRED');
+        authError.isAuthError = true;
+        throw authError;
+      }
+      let serverMessage: string | undefined;
+      try {
+        const errorBody = await (error as any)?.context?.json?.();
+        serverMessage = errorBody?.error || errorBody?.message;
+      } catch {
+        // Body unavailable or consumed
+      }
+      if (serverMessage) throw new Error(serverMessage);
+      throw error;
+    }
+    return data;
+  }
+
+  async confirmPlanEdit(proposalId: string): Promise<any> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not configured in AICoachRepository');
+    }
+    const { data, error } = await this.supabase.functions.invoke('ai-coach', {
+      body: { action: 'confirm_plan_edit', proposalId },
     });
-    if (error) throw error;
+    if (error) {
+      let serverMessage: string | undefined;
+      try {
+        const errorBody = await (error as any)?.context?.json?.();
+        serverMessage = errorBody?.error || errorBody?.message;
+      } catch {}
+      if (serverMessage) throw new Error(serverMessage);
+      throw error;
+    }
+    return data;
+  }
+
+  async cancelPlanEdit(proposalId: string): Promise<any> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not configured in AICoachRepository');
+    }
+    const { data, error } = await this.supabase.functions.invoke('ai-coach', {
+      body: { action: 'cancel_plan_edit', proposalId },
+    });
+    if (error) {
+      let serverMessage: string | undefined;
+      try {
+        const errorBody = await (error as any)?.context?.json?.();
+        serverMessage = errorBody?.error || errorBody?.message;
+      } catch {}
+      if (serverMessage) throw new Error(serverMessage);
+      throw error;
+    }
     return data;
   }
 }

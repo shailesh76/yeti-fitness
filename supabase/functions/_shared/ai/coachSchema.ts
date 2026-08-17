@@ -564,6 +564,7 @@ export type CoachResponseType =
   | 'text'
   | 'clarification'
   | 'workout_plan_draft'
+  | 'workout_plan_edit_proposal'
   | 'nutrition_plan_draft'
   | 'memory_confirmation'
   | 'safety_guidance'
@@ -588,9 +589,31 @@ export interface WorkoutPlanDraftData {
   exercises: WorkoutPlanDraftExercise[];
 }
 
+export interface ProposedPlanEditData {
+  proposalId: string;
+  action: 'add' | 'remove' | 'replace' | 'move' | 'update_sets_reps' | 'update_rest';
+  planId: string;
+  planName: string;
+  dayId?: string;
+  dayName?: string;
+  targetPlanExerciseId?: string;
+  exerciseId?: string;
+  exerciseName: string;
+  replacementExerciseId?: string;
+  replacementExerciseName?: string;
+  sets?: string;
+  reps?: string;
+  restSeconds?: number;
+  currentValueDescription?: string;
+  proposedValueDescription: string;
+  expiresAt: number; // unix ms
+}
+
 export type CoachAction =
   | { type: 'confirm_workout_plan'; label: string; data?: WorkoutPlanDraftData }
   | { type: 'edit_workout_plan'; label: string; data?: WorkoutPlanDraftData }
+  | { type: 'confirm_plan_edit'; label: string; data: ProposedPlanEditData }
+  | { type: 'cancel_plan_edit'; label: string; data: ProposedPlanEditData }
   | { type: 'confirm_nutrition_plan'; label: string }
   | { type: 'retry'; label: string };
 
@@ -643,6 +666,9 @@ export function computeResponseType(input: ResponseTypeInput): CoachResponseType
   if (input.intent === 'workout_program_generate' && input.engineStatus && WORKOUT_DRAFT_STATUSES.has(input.engineStatus)) {
     return 'workout_plan_draft';
   }
+  if (input.intent === 'workout_plan_edit' && input.engineStatus === 'proposal_created') {
+    return 'workout_plan_edit_proposal';
+  }
   if (input.intent === 'nutrition_plan_generate' && input.hasEngineResult) return 'nutrition_plan_draft';
   if (input.memoryPersistedThisTurn) return 'memory_confirmation';
   return 'text';
@@ -650,21 +676,25 @@ export function computeResponseType(input: ResponseTypeInput): CoachResponseType
 
 /**
  * Only returns actions genuinely supported by the given response_type — never
- * emits an action the payload can't back up. `workoutDraftData` (built via
- * buildWorkoutPlanDraftData from the SAME deterministic engineResult.program
- * that grounded the reply — never re-derived from the model's prose) is
- * attached to both workout actions so the client can act on them without
- * re-deriving or guessing the plan; omitted (both actions still returned,
- * just without `data`) when there's nothing to attach, so the client can
- * distinguish "no plan to save" from a network/parsing failure.
+ * emits an action the payload can't back up.
  */
-export function computeActions(responseType: CoachResponseType, workoutDraftData?: WorkoutPlanDraftData | null): CoachAction[] {
+export function computeActions(
+  responseType: CoachResponseType,
+  workoutDraftData?: WorkoutPlanDraftData | null,
+  planEditProposalData?: ProposedPlanEditData | null,
+): CoachAction[] {
   if (responseType === 'error') return [{ type: 'retry', label: 'Try again' }];
   if (responseType === 'workout_plan_draft') {
     const data = workoutDraftData ?? undefined;
     return [
       { type: 'confirm_workout_plan', label: 'Save this plan', data },
       { type: 'edit_workout_plan', label: 'Adjust it first', data },
+    ];
+  }
+  if (responseType === 'workout_plan_edit_proposal' && planEditProposalData) {
+    return [
+      { type: 'confirm_plan_edit', label: 'Confirm Change', data: planEditProposalData },
+      { type: 'cancel_plan_edit', label: 'Cancel', data: planEditProposalData },
     ];
   }
   if (responseType === 'nutrition_plan_draft') {

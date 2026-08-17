@@ -28,11 +28,22 @@ const userRepository = new UserRepository(database, supabase);
 const workoutRepository = new WorkoutRepository(database, supabase);
 const nutritionRepository = new NutritionRepository(database);
 
+export interface AIAction {
+  id: string;
+  type: 'set_nutrition_targets' | 'create_workout_plan' | 'confirm_workout_plan' | 'edit_workout_plan' | 'confirm_plan_edit' | 'cancel_plan_edit';
+  label: string;
+  data: any;
+  applied?: boolean;
+  cancelled?: boolean;
+  status?: 'pending' | 'applied' | 'cancelled' | 'expired' | 'stale';
+}
+
 export interface AIMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: number;   // unix ms
+  actions?: AIAction[];
 }
 
 interface AICoachState {
@@ -40,6 +51,10 @@ interface AICoachState {
   messages: AIMessage[];
   isLoading: boolean;
   error: string | null;
+  /** True when the last send failed because the session is unrecoverably
+   * expired (not an AI/provider failure) — the screen should offer a Sign In
+   * action rather than a generic "try again" retry. */
+  authError: boolean;
 
   /** Load or create a conversation for the current user */
   initConversation: (userId: string) => Promise<void>;
@@ -49,7 +64,18 @@ interface AICoachState {
 
   /** Clear the chat (start fresh) */
   resetChat: (userId: string) => Promise<void>;
+
+  /** Mark an action as applied */
+  markActionApplied: (messageId: string, actionId: string) => void;
+
+  /** Mark an action as cancelled */
+  markActionCancelled: (messageId: string, actionId: string) => void;
+
+  /** Update action status */
+  markActionStatus: (messageId: string, actionId: string, status: 'pending' | 'applied' | 'cancelled' | 'expired' | 'stale') => void;
 }
+
+const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please sign in again.';
 
 export interface StructuredCoachContext {
   profile: string;
@@ -139,6 +165,16 @@ async function buildUserContext(userId: string): Promise<StructuredCoachContext>
   };
 }
 
+// NOTE: there was previously a `generateFallbackResponse()` here that returned
+// hardcoded, FABRICATED nutrition targets / workout plans / "recovery metrics
+// (86%)" text whenever the edge function call failed for any reason. That is
+// exactly the "never fabricate workout or nutrition information" violation
+// this app must not have — a transient server/network failure was silently
+// being dressed up as a confident, personalised answer, with action buttons
+// implying data had been generated when nothing had. Do not reintroduce it:
+// on failure, say so honestly (see the two call sites below) and let the
+// athlete retry — never invent a plan or targets.
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useAICoachStore = create<AICoachState>((set, get) => ({
@@ -146,13 +182,20 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
   messages: [],
   isLoading: false,
   error: null,
+  authError: false,
 
   initConversation: async (userId: string) => {
     if (!isNativeDbAvailable || !database) {
       set({
+        conversationId: `web_session_${userId}`,
         isLoading: false,
-        error: WEB_UNAVAILABLE_MESSAGE,
-        messages: [{ id: 'web-unavailable', role: 'assistant', content: WEB_UNAVAILABLE_MESSAGE, createdAt: Date.now() }],
+        error: null,
+        messages: [{
+          id: 'greeting',
+          role: 'assistant',
+          content: "Hey! I'm your Yeti AI Coach. I have access to your workout history, nutrition logs, and progress data. Ask me anything — technique, programming, recovery, or nutrition! 💪",
+          createdAt: Date.now()
+        }],
       });
       return;
     }
@@ -192,11 +235,6 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
     const state = get();
     if (!text.trim() || state.isLoading) return;
 
-    if (!isNativeDbAvailable || !database) {
-      set({ error: WEB_UNAVAILABLE_MESSAGE });
-      return;
-    }
-
     const userMessage: AIMessage = {
       id: `user_${Date.now()}`,
       role: 'user',
@@ -204,7 +242,69 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
       createdAt: Date.now(),
     };
 
-    set({ messages: [...state.messages, userMessage], isLoading: true, error: null });
+    set({ messages: [...state.messages, userMessage], isLoading: true, error: null, authError: false });
+
+    if (!isNativeDbAvailable || !database) {
+      try {
+        const convId = state.conversationId || `web_session_${userId}`;
+        const replyData = await aiCoachRepository.sendMessageRemote(
+          userId,
+          convId,
+          text,
+          'User is interacting via Yeti Web App.',
+          get().messages.slice(-6).map((m) => ({ role: m.role, content: m.content }))
+        );
+
+        let reply = replyData?.reply;
+        const actions: AIAction[] = (replyData?.actions || []).map((a: any, i: number) => ({
+          id: `action_${Date.now()}_${i}`,
+          type: a.type,
+          label: a.label || (a.type === 'set_nutrition_targets' ? '🎯 Set as My Targets' : '➕ Add to My Workouts'),
+          data: a.data,
+          applied: false,
+        }));
+        if (!reply) {
+          // Honest fallback — NEVER fabricate nutrition targets or a workout
+          // plan, and never attach a default action, when the server didn't
+          // return a usable reply.
+          reply = "I couldn't generate a response just now. Please rephrase or try again in a moment.";
+        }
+
+        const aiMessage: AIMessage = {
+          id: `ai_${Date.now()}`,
+          role: 'assistant',
+          content: reply,
+          createdAt: Date.now(),
+          actions: actions.length > 0 ? actions : undefined,
+        };
+
+        set({
+          messages: [...get().messages, aiMessage],
+          isLoading: false,
+        });
+      } catch (err: any) {
+        // An auth failure (session unrecoverably expired — repository already
+        // tried a refresh-and-retry) is NOT an AI failure and must never be
+        // shown or treated as one.
+        const isAuthError = !!err?.isAuthError;
+        const aiMessage: AIMessage = {
+          id: `ai_${Date.now()}`,
+          role: 'assistant',
+          // Transient (non-auth) failure — surface an honest message. NEVER
+          // fabricate a nutrition/workout answer or attach a default action.
+          content: isAuthError ? SESSION_EXPIRED_MESSAGE : 'Yeti Coach is temporarily unable to respond. Please try again shortly.',
+          createdAt: Date.now(),
+        };
+        set({
+          messages: [...get().messages, aiMessage],
+          isLoading: false,
+          error: null,
+          authError: isAuthError,
+        });
+      }
+      return;
+    }
+
 
     try {
       let convId = get().conversationId;
@@ -228,6 +328,13 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
       );
 
       const reply = replyData?.reply || "I'm having trouble connecting right now. Please try again in a moment.";
+      const actions: AIAction[] = (replyData?.actions || []).map((a: any, i: number) => ({
+        id: `action_${Date.now()}_${i}`,
+        type: a.type,
+        label: a.label || (a.type === 'set_nutrition_targets' ? '🎯 Set as My Targets' : '➕ Add to My Workouts'),
+        data: a.data,
+        applied: false,
+      }));
 
       // 3. Save AI response to local DB
       await aiCoachRepository.saveMessageLocal(convId, 'assistant', reply);
@@ -237,6 +344,7 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
         role: 'assistant',
         content: reply,
         createdAt: Date.now(),
+        actions: actions.length > 0 ? actions : undefined,
       };
 
       set({
@@ -246,20 +354,32 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
     } catch (err: any) {
       console.error('[AICoach] sendMessage error:', err);
 
+      // The repository already attempted a refresh-and-retry for a 401
+      // before ever throwing, so reaching here means the session is
+      // unrecoverably expired — never an AI/provider failure. The string
+      // checks stay as a defence-in-depth fallback (e.g. an auth error
+      // surfacing from a different call path that doesn't set the flag).
+      const errStr = (err?.message || '').toLowerCase();
+      const isAuthError = !!err?.isAuthError || errStr.includes('unauthorized') || errStr.includes('auth session missing') || err?.status === 401;
+
+      const userContent = isAuthError
+        ? SESSION_EXPIRED_MESSAGE
+        : "I'm having trouble connecting right now. Check your internet connection and try again. Your question was: *" +
+          text +
+          '*';
+
       const errorMessage: AIMessage = {
         id: `err_${Date.now()}`,
         role: 'assistant',
-        content:
-          "I'm having trouble connecting right now. Check your internet connection and try again. Your question was: *" +
-          text +
-          '*',
+        content: userContent,
         createdAt: Date.now(),
       };
 
       set({
         messages: [...get().messages, errorMessage],
         isLoading: false,
-        error: err.message,
+        error: isAuthError ? 'Unauthorized session' : err.message,
+        authError: isAuthError,
       });
     }
   },
@@ -275,5 +395,44 @@ export const useAICoachStore = create<AICoachState>((set, get) => ({
     }
     set({ conversationId: null, messages: [] });
     await get().initConversation(userId);
+  },
+
+  markActionApplied: (messageId: string, actionId: string) => {
+    const messages = get().messages.map((m) => {
+      if (m.id !== messageId) return m;
+      return {
+        ...m,
+        actions: m.actions?.map((a) =>
+          a.id === actionId ? { ...a, applied: true, status: 'applied' as const } : a
+        ),
+      };
+    });
+    set({ messages });
+  },
+
+  markActionCancelled: (messageId: string, actionId: string) => {
+    const messages = get().messages.map((m) => {
+      if (m.id !== messageId) return m;
+      return {
+        ...m,
+        actions: m.actions?.map((a) =>
+          a.id === actionId ? { ...a, cancelled: true, status: 'cancelled' as const } : a
+        ),
+      };
+    });
+    set({ messages });
+  },
+
+  markActionStatus: (messageId: string, actionId: string, status: 'pending' | 'applied' | 'cancelled' | 'expired' | 'stale') => {
+    const messages = get().messages.map((m) => {
+      if (m.id !== messageId) return m;
+      return {
+        ...m,
+        actions: m.actions?.map((a) =>
+          a.id === actionId ? { ...a, status, applied: status === 'applied', cancelled: status === 'cancelled' } : a
+        ),
+      };
+    });
+    set({ messages });
   },
 }));
