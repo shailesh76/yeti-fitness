@@ -127,6 +127,32 @@ export function previewErrorKey(row: Pick<ExerciseMediaRecord, 'id' | 'r2_key' |
   return `${row.id}:${row.r2_key ?? ''}:${row.url ?? ''}:${resolvedUrl ?? ''}`;
 }
 
+export type R2UrlSigner = (key: string) => Promise<string | null>;
+
+export async function resolveExerciseMediaUrl(
+  row: Pick<ExerciseMediaRecord, 'r2_key' | 'url'>,
+  signR2?: R2UrlSigner,
+): Promise<string | null> {
+  const r2Key = row.r2_key?.trim();
+  if (r2Key && signR2) {
+    try {
+      const signed = await signR2(r2Key);
+      if (signed && typeof signed === 'string' && signed.trim().length > 0) {
+        return signed.trim();
+      }
+    } catch {
+      // Fall through to optional external URL fallback
+    }
+  }
+
+  const externalUrl = row.url?.trim();
+  if (externalUrl && isValidExerciseMediaUrl(externalUrl)) {
+    return externalUrl;
+  }
+
+  return null;
+}
+
 export async function fetchAllExerciseMediaRows(
   exerciseIds: string[],
   loadPage: ExerciseMediaPageLoader,

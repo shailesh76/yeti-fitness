@@ -10,6 +10,7 @@ import {
   matchesExerciseMediaFilter,
   orderExerciseMedia,
   previewErrorKey,
+  resolveExerciseMediaUrl,
   type ExerciseMediaRecord,
 } from '../../lib/exerciseMedia';
 
@@ -207,5 +208,86 @@ describe('exercise media URL management', () => {
     expect(pageSource).toContain('<option value="missing_thumbnail">Missing Thumbnail</option>');
     expect(pageSource).not.toContain("query = query.eq('media_status', mediaStatusFilter)");
     expect(pageSource).toContain("data?.role === 'coach' || data?.role === 'admin'");
+  });
+
+  it('prefers valid signed R2 media over dead or placeholder external URLs', async () => {
+    const row = media({
+      r2_key: 'exercises/barbell-bench-press/demo.mp4',
+      url: 'https://cdn.yetifitness.app/exercises/barbell-bench-press/demo.mp4',
+    });
+    const signedUrl = 'https://signed.r2.cloudflarestorage.com/exercises/barbell-bench-press/demo.mp4?token=123';
+    const signer = async (key: string) => (key === row.r2_key ? signedUrl : null);
+
+    const resolved = await resolveExerciseMediaUrl(row, signer);
+    expect(resolved).toBe(signedUrl);
+  });
+
+  it('prefers valid signed R2 media even when external URL is syntactically valid', async () => {
+    const row = media({
+      r2_key: 'exercises/back-squat/demo.mp4',
+      url: 'https://cdn.example.com/custom-valid.mp4',
+    });
+    const signedUrl = 'https://signed.r2.cloudflarestorage.com/exercises/back-squat/demo.mp4?token=456';
+    const signer = async (key: string) => (key === row.r2_key ? signedUrl : null);
+
+    const resolved = await resolveExerciseMediaUrl(row, signer);
+    expect(resolved).toBe(signedUrl);
+  });
+
+  it('falls back to valid external URL when R2 signing fails or returns null', async () => {
+    const row = media({
+      r2_key: 'exercises/missing/demo.mp4',
+      url: 'https://cdn.example.com/fallback.mp4',
+    });
+    const failingSigner = async () => null;
+
+    const resolved = await resolveExerciseMediaUrl(row, failingSigner);
+    expect(resolved).toBe('https://cdn.example.com/fallback.mp4');
+
+    const throwingSigner = async () => { throw new Error('Signing failed'); };
+    const resolvedFromThrow = await resolveExerciseMediaUrl(row, throwingSigner);
+    expect(resolvedFromThrow).toBe('https://cdn.example.com/fallback.mp4');
+  });
+
+  it('resolves external URL normally for URL-only rows without calling R2 signer', async () => {
+    const row = media({
+      r2_key: null,
+      url: 'https://cdn.example.com/coach-upload.gif',
+    });
+    let signerCalled = false;
+    const signer = async () => { signerCalled = true; return 'https://signed.com'; };
+
+    const resolved = await resolveExerciseMediaUrl(row, signer);
+    expect(signerCalled).toBe(false);
+    expect(resolved).toBe('https://cdn.example.com/coach-upload.gif');
+  });
+
+  it('resolves signed R2 URL for R2-only rows with null external URL', async () => {
+    const row = media({
+      r2_key: 'exercises/barbell-curl/thumbnail.webp',
+      url: null,
+    });
+    const signedUrl = 'https://signed.r2.cloudflarestorage.com/thumbnail.webp';
+    const signer = async (key: string) => (key === row.r2_key ? signedUrl : null);
+
+    const resolved = await resolveExerciseMediaUrl(row, signer);
+    expect(resolved).toBe(signedUrl);
+  });
+
+  it('returns null when neither locator is valid or available', async () => {
+    const emptyRow = media({ r2_key: null, url: null });
+    expect(await resolveExerciseMediaUrl(emptyRow)).toBeNull();
+
+    const invalidUrlRow = media({ r2_key: null, url: 'not-a-valid-url' });
+    expect(await resolveExerciseMediaUrl(invalidUrlRow)).toBeNull();
+
+    const failedR2EmptyUrl = media({ r2_key: 'key', url: null });
+    expect(await resolveExerciseMediaUrl(failedR2EmptyUrl, async () => null)).toBeNull();
+  });
+
+  it('implements generic locator semantics without hardcoded CDN hostnames', () => {
+    expect(managerSource).not.toMatch(/cdn\.yeti\.fit/i);
+    expect(managerSource).not.toMatch(/cdn\.yetifitness\.app/i);
+    expect(managerSource).toContain('resolveExerciseMediaUrl(item,');
   });
 });

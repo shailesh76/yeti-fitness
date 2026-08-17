@@ -12,6 +12,7 @@ import {
   isValidExerciseMediaUrl,
   orderExerciseMedia,
   previewErrorKey,
+  resolveExerciseMediaUrl,
 } from '@/lib/exerciseMedia';
 
 type EditableMediaType = Exclude<ExerciseMediaType, 'thumbnail'>;
@@ -71,15 +72,16 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     async function resolveUrls() {
       const next: Record<string, string> = {};
       await Promise.all(orderedMedia.map(async (item) => {
-        if (item.url) {
-          next[item.id] = item.url;
-          return;
-        }
-        if (!item.r2_key) return;
-        const { data, error } = await supabase.functions.invoke('get-r2-signed-url', {
-          body: { key: item.r2_key, expiresIn: 3600 },
+        const resolved = await resolveExerciseMediaUrl(item, async (key) => {
+          const { data, error } = await supabase.functions.invoke('get-r2-signed-url', {
+            body: { key, expiresIn: 3600 },
+          });
+          if (!error && data?.success && typeof data.url === 'string') {
+            return data.url;
+          }
+          return null;
         });
-        if (!error && data?.success && typeof data.url === 'string') next[item.id] = data.url;
+        if (resolved) next[item.id] = resolved;
       }));
       if (!cancelled) setResolvedUrls(next);
     }
