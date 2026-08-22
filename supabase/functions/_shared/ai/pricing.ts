@@ -10,6 +10,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "claude-sonnet-5":         { input: 3.0,   output: 15.0 },
   "llama-3.3-70b-versatile": { input: 0.59,  output: 0.79 },
   "llama-3.1-8b-instant":    { input: 0.05,  output: 0.08 },
+  "openai/gpt-oss-20b":      { input: 0.10,  output: 0.10 },
 };
 
 export function computeCostUsd(model: string, usage: TokenUsage): number {

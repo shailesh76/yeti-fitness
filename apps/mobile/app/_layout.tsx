@@ -11,6 +11,8 @@ import { useNotificationStore } from '../store/useNotificationStore';
 
 import { useSessionStore } from '../store/useSessionStore';
 import { P } from '../constants/premiumTheme';
+import { startProfileRealtime, stopProfileRealtime } from '../services/profileRealtime';
+import { beginAuthenticatedHydration, resetAuthenticatedHydration } from '../services/authenticatedHydration';
 
 
 // Error Boundary Component to prevent app crashes
@@ -105,6 +107,8 @@ export default function RootLayout() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session as any);
       if (session?.user?.id) {
+        void beginAuthenticatedHydration(session.user.id);
+        void startProfileRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();
         if (prefs.workoutReminders) {
@@ -116,12 +120,16 @@ export default function RootLayout() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session as any);
       if (session?.user?.id) {
+        void beginAuthenticatedHydration(session.user.id);
+        void startProfileRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();
         if (prefs.workoutReminders) {
           scheduleWorkoutReminder('daily', 8, 0);
         }
       } else {
+        resetAuthenticatedHydration();
+        void stopProfileRealtime();
         // Session expired / revoked / signed out. Redirect off protected
         // screens rather than leaving them rendering with a dead session.
         const currentRoot = segmentsRef.current[0];
@@ -131,7 +139,10 @@ export default function RootLayout() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      void stopProfileRealtime();
+    };
   }, []);
 
   return (

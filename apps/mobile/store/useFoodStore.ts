@@ -7,9 +7,30 @@ import { NutritionRepository, Food as DBFood, MealLog as DBMealLog, EventReposit
 import { lookupBarcodeProduct } from '../services/nutritionApi';
 import { dedupeRecentFoods, favoritesStorageKey } from '../services/nutritionUtils';
 import { EVENTS } from '../constants/analyticsEvents';
+import { invalidateScreenData, invalidateScreenDataPrefix } from '../services/screenDataCache';
+import { patchHomeSnapshot, sumMealLogsForDay } from '../services/homeSummary';
+import { normalizeMealType, restoreMealLogsForUser } from '../services/foodDiaryGroups';
 
 const nutritionRepository = new NutritionRepository(database, supabase);
 const eventRepository = new EventRepository(database, supabase);
+let initSyncInFlight: Promise<void> | null = null;
+let loadedForUserId: string | null = null;
+
+function storageKey(kind: 'foods' | 'meal_logs', userId: string): string {
+  return `@dude_${kind}_${userId}`;
+}
+
+function invalidateFoodViews(userId: string): void {
+  invalidateScreenData(`home:${userId}`);
+  invalidateScreenDataPrefix(`food-diary:${userId}:`);
+  try {
+    const currentLogs = useFoodStore.getState().mealLogs;
+    const todayMacros = sumMealLogsForDay(currentLogs, Date.now(), userId);
+    patchHomeSnapshot(userId, { consumedMacros: todayMacros });
+  } catch {
+    /* non-fatal */
+  }
+}
 
 export interface Food {
   id: string;
@@ -48,7 +69,7 @@ interface FoodStore {
   mealLogs: MealLog[];
   loading: boolean;
 
-  loadLocalCache: () => Promise<void>;
+  loadLocalCache: (userIdOverride?: string) => Promise<void>;
   initSync: () => Promise<void>;
   searchFoods: (term: string) => Promise<Food[]>;
   addFood: (data: Partial<Food>) => Promise<Food>;
@@ -60,6 +81,7 @@ interface FoodStore {
 
   // Recent + favorite foods (beta usability)
   favoriteFoodIds: string[];
+  resetForAccount: () => void;
   recentFoods: (limit?: number) => Food[];
   loadFavorites: () => Promise<void>;
   toggleFavorite: (food: Food) => Promise<void>;
@@ -72,7 +94,19 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
   loading: false,
   favoriteFoodIds: [],
 
-  async loadLocalCache() {
+  resetForAccount() {
+    loadedForUserId = null;
+    initSyncInFlight = null;
+    set({ foods: [], mealLogs: [], favoriteFoodIds: [], loading: false });
+  },
+
+  async loadLocalCache(userIdOverride) {
+    const userId = userIdOverride || useAuthStore.getState().session?.user?.id;
+    if (!userId) {
+      get().resetForAccount();
+      return;
+    }
+    if (loadedForUserId && loadedForUserId !== userId) get().resetForAccount();
     if (isNativeDbAvailable && database) {
       try {
         const localFoods = await database.get<DBFood>('foods').query().fetch();
@@ -91,13 +125,13 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
         }));
 
         const resolvedLogs: MealLog[] = await Promise.all(
-          localLogs.map(async (log) => {
+          localLogs.filter((log) => log.athlete_id === userId).map(async (log) => {
             const food = await log.food.fetch();
             return {
               id: log.id,
               athlete_id: log.athlete_id,
               food_id: log.food_id,
-              meal_type: log.meal_type,
+              meal_type: normalizeMealType(log.meal_type),
               servings: log.servings,
               logged_at: log.logged_at,
               source: log.source,
@@ -125,20 +159,30 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
         console.warn("Failed to load local WatermelonDB cache:", e);
       }
     } else {
-      const foodsVal = await AsyncStorage.getItem('@dude_foods');
-      const logsVal = await AsyncStorage.getItem('@dude_meal_logs');
+      const foodsVal = await AsyncStorage.getItem(storageKey('foods', userId));
+      const logsVal = await AsyncStorage.getItem(storageKey('meal_logs', userId));
       set({
         foods: foodsVal ? JSON.parse(foodsVal) : [],
-        mealLogs: logsVal ? JSON.parse(logsVal) : [],
+        mealLogs: logsVal ? restoreMealLogsForUser(JSON.parse(logsVal), userId) : [],
       });
     }
+    loadedForUserId = userId;
   },
 
   async initSync() {
-    set({ loading: true });
-    await get().loadLocalCache();
-    await get().loadFavorites();
-    set({ loading: false });
+    if (initSyncInFlight) return initSyncInFlight;
+    const hasCachedData = get().foods.length > 0 || get().mealLogs.length > 0;
+    if (!hasCachedData) set({ loading: true });
+    initSyncInFlight = get().loadLocalCache()
+      .then(() => {
+        // Favorites are optional remote enrichment and must not delay meal-log hydration.
+        void get().loadFavorites().catch(() => {});
+      })
+      .finally(() => {
+        set({ loading: false });
+        initSyncInFlight = null;
+      });
+    return initSyncInFlight;
   },
 
   async searchFoods(term) {
@@ -218,7 +262,7 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
       await nutritionRepository.createFood(foodData);
     } else {
       const updatedFoods = [...get().foods, foodData];
-      await AsyncStorage.setItem('@dude_foods', JSON.stringify(updatedFoods));
+      if (userId) await AsyncStorage.setItem(storageKey('foods', userId), JSON.stringify(updatedFoods));
     }
 
     set((state) => ({ foods: [...state.foods, foodData] }));
@@ -255,35 +299,37 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
       foodObj = get().foods.find(f => f.id === foodId);
     }
 
-    let newLog: MealLog;
+    let newLog: MealLog = {
+      id: generateUUID(),
+      athlete_id: userId,
+      food_id: foodId,
+      meal_type: mType,
+      servings: serv,
+      logged_at: Date.now(),
+      source: mealDataOrId?.source || (foodObj ? 'search' : 'manual'),
+      food: foodObj,
+    };
+    const optimisticId = newLog.id;
+    set((state) => ({ mealLogs: [newLog, ...state.mealLogs] }));
+    if (userId !== 'offline_user') invalidateFoodViews(userId);
+
     if (isNativeDbAvailable && database) {
-      const dbLog = await nutritionRepository.logMeal(userId, foodId, serv);
+      const logSource = mealDataOrId?.source || (foodObj ? 'search' : 'manual');
+      const dbLog = await nutritionRepository.logMeal(userId, foodId, serv, mType, logSource);
       newLog = {
         id: dbLog.id,
         athlete_id: dbLog.athlete_id,
         food_id: dbLog.food_id,
-        meal_type: dbLog.meal_type,
+        meal_type: dbLog.meal_type || mType,
         servings: dbLog.servings,
         logged_at: dbLog.logged_at,
         source: dbLog.source,
         food: foodObj,
       };
+      set((state) => ({ mealLogs: state.mealLogs.map((log) => log.id === optimisticId ? newLog : log) }));
     } else {
-      newLog = {
-        id: generateUUID(),
-        athlete_id: userId,
-        food_id: foodId,
-        meal_type: mType,
-        servings: serv,
-        logged_at: Date.now(),
-        source: 'manual',
-        food: foodObj,
-      };
-      const updatedLogs = [newLog, ...get().mealLogs];
-      await AsyncStorage.setItem('@dude_meal_logs', JSON.stringify(updatedLogs));
+      await AsyncStorage.setItem(storageKey('meal_logs', userId), JSON.stringify(get().mealLogs));
     }
-
-    set((state) => ({ mealLogs: [newLog, ...state.mealLogs] }));
 
     if (userId !== 'offline_user') {
       eventRepository.logActivity(userId, EVENTS.MEAL_LOGGED, {
@@ -297,7 +343,9 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
   },
 
   async deleteMealLog(id) {
+    const userId = useAuthStore.getState().session?.user?.id;
     set((state) => ({ mealLogs: state.mealLogs.filter(l => l.id !== id) }));
+    if (userId) invalidateFoodViews(userId);
     if (isNativeDbAvailable && database) {
       try {
         await nutritionRepository.deleteMeal(id);
@@ -306,14 +354,16 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
       }
     } else {
       const updated = get().mealLogs;
-      await AsyncStorage.setItem('@dude_meal_logs', JSON.stringify(updated));
+      if (userId) await AsyncStorage.setItem(storageKey('meal_logs', userId), JSON.stringify(updated));
     }
   },
 
   async updateMealLog(id, servings) {
+    const userId = useAuthStore.getState().session?.user?.id;
     set((state) => ({
       mealLogs: state.mealLogs.map(l => l.id === id ? { ...l, servings } : l)
     }));
+    if (userId) invalidateFoodViews(userId);
 
     if (isNativeDbAvailable && database) {
       try {
@@ -323,7 +373,7 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
       }
     } else {
       const updated = get().mealLogs;
-      await AsyncStorage.setItem('@dude_meal_logs', JSON.stringify(updated));
+      if (userId) await AsyncStorage.setItem(storageKey('meal_logs', userId), JSON.stringify(updated));
     }
   },
 
@@ -455,3 +505,7 @@ export const useFoodStore = create<FoodStore>((set, get) => ({
     } catch { /* offline or table not applied yet — local state is authoritative */ }
   },
 }));
+
+useAuthStore.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) useFoodStore.getState().resetForAccount();
+});

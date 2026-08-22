@@ -84,15 +84,22 @@ export class NutritionRepository {
 
   // --- Meal Log Operations ---
 
-  async logMeal(athleteId: string, foodId: string, servings: number): Promise<MealLog> {
+  async logMeal(
+    athleteId: string,
+    foodId: string,
+    servings: number,
+    mealType: string = 'BREAKFAST',
+    source: string = 'manual'
+  ): Promise<MealLog> {
     this.requireDb();
     return this.db.write(async () => {
       return this.db.get<MealLog>('meal_logs').create(log => {
         log.athlete_id = athleteId;
         log.food_id = foodId;
+        log.meal_type = mealType;
         log.servings = servings;
         log.logged_at = Date.now();
-        log.source = 'manual';
+        log.source = source;
       });
     });
   }

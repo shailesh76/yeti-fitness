@@ -41,6 +41,8 @@ import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
 import { useRepositories } from '../../hooks/useRepositories';
 import { EVENTS } from '../../constants/analyticsEvents';
 import { displayLabel } from '../../utils/exerciseDisplay';
+import { sanitizeAthleteErrorMessage } from '../../utils/aiErrorSanitizer';
+import { invalidateScreenData } from '../../services/screenDataCache';
 
 const MASCOT = require('../../assets/yeti_mascot_avatar.png');
 const RPE_SCALE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -303,23 +305,29 @@ export default function WorkoutSessionScreen() {
   // Fetch real demo media + a coach tip when the current exercise changes.
   const currentExId = currentExercise?.exerciseId;
   useEffect(() => {
-    if (!currentExId) { setHeroUri(undefined); return; }
     let cancelled = false;
-    exerciseRepository.getExerciseById(currentExId).then((ex) => {
-      if (!cancelled) setHeroUri(ex?.gif_url || ex?.thumbnail_url || ex?.video_url || undefined);
-    });
-    setTip({ loading: true });
-    exerciseRepository.getGuidance(currentExId, 'form_explanation')
-      .then((text) => { if (!cancelled) setTip({ loading: false, text }); })
-      .catch((err: any) => {
+    if (currentExId) {
+      exerciseRepository.getExerciseById(currentExId).then((ex) => {
+        if (!cancelled) setHeroUri(ex?.gif_url || ex?.thumbnail_url || ex?.video_url || undefined);
+      });
+    }
+
+    const loadTip = async () => {
+      if (!currentExId) return;
+      setTip({ loading: true });
+      try {
+        const text = await exerciseRepository.getGuidance(currentExId, 'form_explanation');
+        if (!cancelled) setTip({ loading: false, text });
+      } catch (err: any) {
+        if (cancelled) return;
         const raw = String(err?.message ?? '');
         const msg = raw === 'AI_PROVIDER_NOT_CONFIGURED'
           ? "Coach tips aren't set up yet — an AI provider key is needed on the server."
-          : raw && !/non-2xx|failed to (send|fetch)|network|connection/i.test(raw)
-            ? raw
-            : "Couldn't load a coach tip right now.";
+          : sanitizeAthleteErrorMessage(err, "AI tip is temporarily unavailable. Please try again.");
         if (!cancelled) setTip({ loading: false, error: msg });
-      });
+      }
+    };
+    loadTip();
     return () => { cancelled = true; };
   }, [currentExId, exerciseRepository]);
 
@@ -348,6 +356,11 @@ export default function WorkoutSessionScreen() {
     try {
       if (userId) await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
       await finishSession();
+      if (userId) {
+        invalidateScreenData(`home:${userId}`);
+        invalidateScreenData(`progress:${userId}`);
+        invalidateScreenData(`workouts:${userId}`);
+      }
       router.replace('/workouts');
     } catch {
       notify('Save Error', 'Failed to save workout session.');

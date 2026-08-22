@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,33 +22,21 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useFoodStore, MealLog } from '../store/useFoodStore';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { useRepositories } from '../hooks/useRepositories';
-import { isValidWaterMl } from '../services/nutritionUtils';
-import { fetchNutritionTargets, saveNutritionTargets } from '../services/nutritionTargets';
-
-// The meal buckets shown in the diary. Real logs are grouped under these by
-// their meal_type — no sample/placeholder foods.
-const MEAL_TYPES: { key: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'BREAKFAST',    title: 'Breakfast',    icon: 'sunny-outline' },
-  { key: 'LUNCH',        title: 'Lunch',        icon: 'restaurant-outline' },
-  { key: 'DINNER',       title: 'Dinner',       icon: 'moon-outline' },
-  { key: 'SNACK',        title: 'Snacks',       icon: 'nutrition-outline' },
-  { key: 'PRE_WORKOUT',  title: 'Pre-Workout',  icon: 'barbell-outline' },
-  { key: 'POST_WORKOUT', title: 'Post-Workout', icon: 'flash-outline' },
-];
-
-// Normalise the various meal_type spellings the logging flows may use.
-function normalizeMealType(mt?: string): string {
-  const u = (mt || '').toUpperCase();
-  if (u.startsWith('PRE')) return 'PRE_WORKOUT';
-  if (u.startsWith('POST')) return 'POST_WORKOUT';
-  if (u.startsWith('SNACK')) return 'SNACK';
-  if (u.startsWith('BREAK')) return 'BREAKFAST';
-  if (u.startsWith('LUNCH')) return 'LUNCH';
-  if (u.startsWith('DINNER')) return 'DINNER';
-  return u || 'SNACK';
-}
+import { isValidWaterMl, calculateNutritionTargets } from '../services/nutritionUtils';
+import {
+  fetchNutritionTargets,
+  saveNutritionTargets,
+  getNutritionTargetMode,
+  setNutritionTargetMode,
+  syncProfileNutritionTargets,
+} from '../services/nutritionTargets';
+import { getScreenData, setScreenData, subscribeScreenData } from '../services/screenDataCache';
+import { createScreenPerfTrace } from '../services/screenPerf';
+import { buildMealGroups } from '../services/foodDiaryGroups';
 
 export default function FoodDiaryScreen() {
+  const perf = useRef(createScreenPerfTrace('nutrition')).current;
+  perf('T0 route render');
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
   const { width: windowWidth } = useWindowDimensions();
@@ -77,14 +65,27 @@ export default function FoodDiaryScreen() {
   const [showWaterModal, setShowWaterModal] = useState(false);
   const [customWaterText, setCustomWaterText] = useState('');
   // True when a coach has locked this athlete's nutrition targets.
-  const [targetsLocked, setTargetsLocked] = useState(false);
+  const nutritionCacheKey = session?.user?.id ? `nutrition-targets:${session.user.id}` : 'nutrition-targets:anonymous';
+  const cachedTargets = getScreenData<any>(nutritionCacheKey);
+  const [targetsLocked, setTargetsLocked] = useState(!!cachedTargets?.locked);
+  const [targetsReady, setTargetsReady] = useState(!!cachedTargets);
 
   // Goal targets — seeded from the user's profile on load (fallbacks only apply
   // if the profile has none), and editable via the Goals modal.
-  const [calorieGoal, setCalorieGoal] = useState(2400);
-  const [proteinGoal, setProteinGoal] = useState(160);
-  const [carbsGoal, setCarbsGoal] = useState(250);
-  const [fatGoal, setFatGoal] = useState(80);
+  const [calorieGoal, setCalorieGoal] = useState(cachedTargets?.calories ?? 0);
+  const [proteinGoal, setProteinGoal] = useState(cachedTargets?.protein ?? 0);
+  const [carbsGoal, setCarbsGoal] = useState(cachedTargets?.carbs ?? 0);
+  const [fatGoal, setFatGoal] = useState(cachedTargets?.fat ?? 0);
+
+  useEffect(() => subscribeScreenData<any>(nutritionCacheKey, (targets) => {
+    if (!targets) return;
+    setTargetsLocked(!!targets.locked);
+    if (targets.calories != null) setCalorieGoal(targets.calories);
+    if (targets.protein != null) setProteinGoal(targets.protein);
+    if (targets.carbs != null) setCarbsGoal(targets.carbs);
+    if (targets.fat != null) setFatGoal(targets.fat);
+    setTargetsReady(targets.calories != null);
+  }), [nutritionCacheKey]);
 
   // Modal & Target Adjustment state
   const [showGoalModal, setShowGoalModal] = useState(false);
@@ -109,22 +110,71 @@ export default function FoodDiaryScreen() {
     if (session?.user?.id) {
       loadGoal();
       initSync().catch(() => {});
-      // Seed calorie/macro goals from the canonical server targets
-      // (profiles.daily_*_target), with an offline cache. This is where a coach's
-      // or the adaptive engine's assigned targets finally reach the athlete app.
-      fetchNutritionTargets(session.user.id).then((t) => {
-        if (t.calories != null) setCalorieGoal(t.calories);
-        if (t.protein != null) setProteinGoal(t.protein);
-        if (t.carbs != null) setCarbsGoal(t.carbs);
-        if (t.fat != null) setFatGoal(t.fat);
-        setTargetsLocked(t.locked);
-      }).catch(() => {});
-      // Body metrics still come from the profile record.
-      userRepository.getProfile(session.user.id).then((profile: any) => {
-        if (!profile) return;
-        if (profile.weight_kg) setWeightKg(String(profile.weight_kg));
-        if (profile.height_cm) setHeightCm(String(profile.height_cm));
-        if (profile.age) setAge(String(profile.age));
+      perf('T1 local cache read');
+
+      // Load profile, target mode, and targets concurrently
+      perf('T3 remote start');
+      Promise.all([
+        fetchNutritionTargets(session.user.id),
+        userRepository.getProfile(session.user.id),
+        getNutritionTargetMode(session.user.id),
+      ]).then(async ([targets, profile, mode]: [any, any, any]) => {
+        perf('T2 local DB/storage read');
+        perf('T4 remote response');
+        if (mode === 'AUTO' || mode === 'MANUAL') {
+          setModalMode(mode);
+        }
+
+        if (profile) {
+          if (profile.weight_kg) setWeightKg(String(profile.weight_kg));
+          if (profile.height_cm) setHeightCm(String(profile.height_cm));
+          if (profile.age) setAge(String(profile.age));
+          if (profile.gender) setGender(String(profile.gender).toUpperCase().startsWith('F') ? 'FEMALE' : 'MALE');
+          if (profile.goal) {
+            const g = String(profile.goal).toUpperCase();
+            if (g.includes('LOSE') || g.includes('FAT')) setFitnessGoal('LOSE');
+            else if (g.includes('BUILD') || g.includes('GAIN')) setFitnessGoal('BUILD');
+            else setFitnessGoal('MAINTAIN');
+          }
+          if (profile.activity_level) {
+            const a = String(profile.activity_level).toUpperCase();
+            if (a.includes('SEDENTARY')) setActivityLevel(1.2);
+            else if (a.includes('LIGHT')) setActivityLevel(1.375);
+            else if (a.includes('MODERATE')) setActivityLevel(1.55);
+            else if (a.includes('VERY') || a.includes('ATHLETE')) setActivityLevel(1.9);
+            else if (a.includes('ACTIVE')) setActivityLevel(1.725);
+          }
+        }
+
+        setTargetsLocked(!!targets.locked);
+
+        // Target precedence contract:
+        // 1. COACH LOCKED: Always use coach targets
+        // 2. ATHLETE MANUAL OVERRIDE (mode === 'MANUAL'): Preserve athlete entered targets
+        // 3. AUTO-CALCULATED (mode === 'AUTO'): Dynamically synchronize with current profile
+        let resolvedTargets = targets;
+        if (targets.locked) {
+          if (targets.calories != null) setCalorieGoal(targets.calories);
+          if (targets.protein != null) setProteinGoal(targets.protein);
+          if (targets.carbs != null) setCarbsGoal(targets.carbs);
+          if (targets.fat != null) setFatGoal(targets.fat);
+        } else if (mode === 'MANUAL' && targets.calories != null) {
+          setCalorieGoal(targets.calories);
+          if (targets.protein != null) setProteinGoal(targets.protein);
+          if (targets.carbs != null) setCarbsGoal(targets.carbs);
+          if (targets.fat != null) setFatGoal(targets.fat);
+        } else if (profile) {
+          const synced = await syncProfileNutritionTargets(session.user.id, profile, userRepository);
+          resolvedTargets = synced;
+          setCalorieGoal(synced.calories);
+          setProteinGoal(synced.protein);
+          setCarbsGoal(synced.carbs);
+          setFatGoal(synced.fat);
+        }
+        setScreenData(nutritionCacheKey, resolvedTargets);
+        perf('T5 state reconciliation');
+        setTargetsReady(true);
+        perf('T6 visible authoritative UI');
       }).catch(() => {});
     }
   }, [session]);
@@ -180,13 +230,9 @@ export default function FoodDiaryScreen() {
   }, [activeLogs]);
 
   // Real per-meal-type groups for the selected day (no sample foods).
+  // ALL 4 CORE MEAL GROUPS (Breakfast, Lunch, Dinner, Snacks) ALWAYS RENDER.
   const mealGroups = useMemo(() => {
-    return MEAL_TYPES.map((mt) => {
-      const logs = activeLogs.filter((l) => normalizeMealType(l.meal_type) === mt.key);
-      const kcal = logs.reduce((sum, l) => sum + Math.round((l.food?.calories || 0) * l.servings), 0);
-      const description = logs.map((l) => l.food?.name).filter(Boolean).join(', ');
-      return { ...mt, logs, kcal, description };
-    }).filter((g) => g.logs.length > 0);
+    return buildMealGroups(activeLogs);
   }, [activeLogs]);
 
   // Real nutrition streak: consecutive days (ending today) with ≥1 logged meal.
@@ -249,39 +295,40 @@ export default function FoodDiaryScreen() {
       bmiColor = '#EF4444';
     }
 
-    let bmr = 10 * w + 6.25 * h - 5 * a + (gender === 'MALE' ? 5 : -161);
-    let tdee = bmr * activityLevel;
-
-    if (fitnessGoal === 'LOSE') tdee -= 450;
-    if (fitnessGoal === 'BUILD') tdee += 300;
-
-    const calcCalories = Math.round(tdee);
-    const calcProtein = Math.round((calcCalories * 0.28) / 4);
-    const calcCarbs = Math.round((calcCalories * 0.45) / 4);
-    const calcFat = Math.round((calcCalories * 0.27) / 9);
+    const calculated = calculateNutritionTargets({
+      weight_kg: w,
+      height_cm: h,
+      age: a,
+      gender,
+      activity_level: activityLevel,
+      goal: fitnessGoal === 'LOSE' ? 'LOSE_FAT' : fitnessGoal === 'BUILD' ? 'BUILD_MUSCLE' : 'MAINTAIN',
+    });
 
     return {
       bmi: bmi.toFixed(1),
       bmiCategory,
       bmiColor,
-      calcCalories,
-      calcProtein,
-      calcCarbs,
-      calcFat,
+      calcCalories: calculated.calories,
+      calcProtein: calculated.protein,
+      calcCarbs: calculated.carbs,
+      calcFat: calculated.fat,
     };
   }, [weightKg, heightCm, age, gender, activityLevel, fitnessGoal]);
 
   // Persists the athlete's self-chosen targets to the canonical server columns
   // (no-op if a coach has locked them). Local state is updated regardless so the
   // UI stays responsive; the offline cache is refreshed inside saveNutritionTargets.
-  const persistTargets = async (t: { calories: number; protein: number; carbs: number; fat: number }) => {
+  const persistTargets = async (
+    t: { calories: number; protein: number; carbs: number; fat: number },
+    mode?: 'AUTO' | 'MANUAL',
+  ) => {
     if (!session?.user?.id) return;
     if (targetsLocked) {
       if (Platform.OS === 'web') window.alert('Your coach set these targets. They can’t be edited here.');
       else Alert.alert('Locked by coach', 'Your coach set these targets. They can’t be edited here.');
       return;
     }
-    await saveNutritionTargets(session.user.id, t);
+    await saveNutritionTargets(session.user.id, t, mode);
   };
 
   const handleApplyAutoBMI = async () => {
@@ -296,12 +343,12 @@ export default function FoodDiaryScreen() {
     setCarbsGoal(t.carbs);
     setFatGoal(t.fat);
     setShowGoalModal(false);
-    await persistTargets(t);
+    await persistTargets(t, 'AUTO');
   };
 
   const handleSaveManualTargets = async () => {
     setShowGoalModal(false);
-    await persistTargets({ calories: calorieGoal, protein: proteinGoal, carbs: carbsGoal, fat: fatGoal });
+    await persistTargets({ calories: calorieGoal, protein: proteinGoal, carbs: carbsGoal, fat: fatGoal }, 'MANUAL');
   };
 
   // Honest insight derived from the day's real numbers — not a canned message.
@@ -361,6 +408,12 @@ export default function FoodDiaryScreen() {
   const renderCalorieSummaryCard = () => (
     <View style={styles.card}>
       <Text style={styles.sectionHeaderLabel}>CALORIE SUMMARY</Text>
+
+      {!targetsReady ? (
+        <View style={{ minHeight: 180, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#94A3B8', fontSize: 13 }}>Loading your nutrition targets…</Text>
+        </View>
+      ) : <>
 
       <View style={[styles.summarySplitRow, isNarrowScreen && { flexDirection: 'column', alignItems: 'center' }]}>
         <View style={styles.ringWrapper}>
@@ -442,6 +495,7 @@ export default function FoodDiaryScreen() {
           </Text>
         </View>
       </View>
+      </>}
     </View>
   );
 
@@ -453,47 +507,67 @@ export default function FoodDiaryScreen() {
       </View>
 
       <View style={styles.card}>
-        {mealGroups.length > 0 ? (
-          mealGroups.map((group, idx) => (
+        {mealGroups.map((group, idx) => {
+          const hasLogs = group.logs.length > 0;
+          return (
             <React.Fragment key={group.key}>
               {idx > 0 && <View style={styles.divider} />}
-              <TouchableOpacity
-                activeOpacity={0.75}
-                accessibilityRole="button"
-                accessibilityLabel={`${group.title}, ${group.kcal} kcal. Tap to view items.`}
-                onPress={() => setSelectedMealTypeModal(group.key)}
-                style={styles.mealItemRow}
-              >
-                <View style={styles.loggedSourceBox}>
-                  <Ionicons name={group.icon} size={20} color="#38BDF8" />
-                </View>
-                <View style={styles.mealTextCol}>
-                  <Text style={styles.mealTitleText}>{group.title}</Text>
-                  <Text style={styles.mealSubText} numberOfLines={1}>{group.description}</Text>
-                  <Text style={styles.mealKcalText}>{group.kcal} kcal</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="#64748B" />
-              </TouchableOpacity>
-            </React.Fragment>
-          ))
-        ) : (
-          <View style={styles.emptyMealsBox}>
-            <Ionicons name="restaurant-outline" size={30} color="#64748B" />
-            <Text style={styles.emptyMealsTitle}>No meals logged yet</Text>
-            <Text style={styles.emptyMealsSub}>Scan, search, or add a food to start today&apos;s diary.</Text>
-          </View>
-        )}
+              <View style={styles.mealItemRow}>
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${group.title}, ${group.kcal} kcal. ${hasLogs ? 'Tap to view items.' : 'Tap to add food.'}`}
+                  onPress={() => {
+                    if (hasLogs) {
+                      setSelectedMealTypeModal(group.key);
+                    } else {
+                      router.push({ pathname: '/food-search', params: { mealType: group.key } });
+                    }
+                  }}
+                  style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                >
+                  <View style={styles.loggedSourceBox}>
+                    <Ionicons name={group.icon as keyof typeof Ionicons.glyphMap} size={20} color="#38BDF8" />
+                  </View>
+                  <View style={styles.mealTextCol}>
+                    <Text style={styles.mealTitleText}>{group.title}</Text>
+                    <Text style={styles.mealSubText} numberOfLines={1}>
+                      {hasLogs ? group.description : 'Nothing logged yet'}
+                    </Text>
+                    <Text style={[styles.mealKcalText, !hasLogs && { color: '#64748B' }]}>
+                      {group.kcal} kcal
+                    </Text>
+                  </View>
+                </TouchableOpacity>
 
-        <TouchableOpacity
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Add meal or snack"
-          onPress={() => router.push('/food-search')}
-          style={styles.addMealBtn}
-        >
-          <Ionicons name="add-circle-outline" size={18} color="#3B82F6" style={{ marginRight: 6 }} />
-          <Text style={styles.addMealBtnText}>Add Meal / Snack</Text>
-        </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add food to ${group.title}`}
+                    onPress={() => router.push({ pathname: '/food-search', params: { mealType: group.key } })}
+                    style={styles.actionBtnSmall}
+                  >
+                    <Ionicons name="add" size={14} color="#38BDF8" style={{ marginRight: 2 }} />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#38BDF8' }}>Add</Text>
+                  </TouchableOpacity>
+
+                  {hasLogs && (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => setSelectedMealTypeModal(group.key)}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${group.title} details`}
+                    >
+                      <Ionicons name="chevron-forward" size={18} color="#64748B" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </React.Fragment>
+          );
+        })}
       </View>
     </View>
   );
@@ -766,7 +840,7 @@ export default function FoodDiaryScreen() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <View style={[styles.loggedSourceBox, { marginRight: 10 }]}>
-                      <Ionicons name={activeMealGroup.icon} size={20} color="#38BDF8" />
+                      <Ionicons name={activeMealGroup.icon as keyof typeof Ionicons.glyphMap} size={20} color="#38BDF8" />
                     </View>
                     <View>
                       <Text style={styles.modalTitle}>{activeMealGroup.title}</Text>

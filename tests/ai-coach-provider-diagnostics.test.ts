@@ -1,4 +1,16 @@
 import { describe, it, expect } from 'vitest';
+
+// Minimal Deno polyfill so Node-based Vitest runner can instantiate provider classes
+const denoEnv = new Map<string, string>();
+// @ts-expect-error — augmenting globalThis with a minimal Deno shim.
+globalThis.Deno = globalThis.Deno ?? {
+  env: {
+    get: (k: string) => denoEnv.get(k),
+    set: (k: string, v: string) => denoEnv.set(k, v),
+    delete: (k: string) => denoEnv.delete(k),
+  },
+};
+
 import { categorizeProviderFailure, summarizeFallbackReason } from '../supabase/functions/_shared/ai/service.ts';
 import { ProviderHttpError, ProviderAttemptLog } from '../supabase/functions/_shared/ai/types.ts';
 import { parseGeminiError, parseGroqRateLimitHeaders } from '../supabase/functions/_shared/ai/providers.ts';
@@ -57,7 +69,7 @@ describe('summarizeFallbackReason', () => {
   it('compact string from the first failed attempt', () => {
     const attempts: ProviderAttemptLog[] = [
       { provider: 'gemini', model: 'gemini-2.5-flash', succeeded: false, failureCategory: 'rate_limited', httpStatus: 429, latencyMs: 300 },
-      { provider: 'groq', model: 'llama-3.3-70b-versatile', succeeded: true, latencyMs: 900 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', succeeded: true, latencyMs: 900 },
     ];
     expect(summarizeFallbackReason(attempts)).toBe('gemini:rate_limited:429');
   });
@@ -65,7 +77,7 @@ describe('summarizeFallbackReason', () => {
   it('omits the status segment when there is none (e.g. timeout/network_error)', () => {
     const attempts: ProviderAttemptLog[] = [
       { provider: 'gemini', model: 'gemini-2.5-flash', succeeded: false, failureCategory: 'timeout', latencyMs: 30000 },
-      { provider: 'groq', model: 'llama-3.3-70b-versatile', succeeded: true, latencyMs: 900 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', succeeded: true, latencyMs: 900 },
     ];
     expect(summarizeFallbackReason(attempts)).toBe('gemini:timeout');
   });
@@ -73,7 +85,7 @@ describe('summarizeFallbackReason', () => {
   it('reports not_configured distinctly from an attempted-and-failed call', () => {
     const attempts: ProviderAttemptLog[] = [
       { provider: 'gemini', model: 'gemini-2.5-flash', succeeded: false, failureCategory: 'not_configured', latencyMs: 0 },
-      { provider: 'groq', model: 'llama-3.3-70b-versatile', succeeded: true, latencyMs: 900 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', succeeded: true, latencyMs: 900 },
     ];
     expect(summarizeFallbackReason(attempts)).toBe('gemini:not_configured');
   });
@@ -97,10 +109,23 @@ describe('summarizeFallbackReason', () => {
   it('joins every failed attempt, in order, when all providers fail', () => {
     const attempts: ProviderAttemptLog[] = [
       { provider: 'gemini', model: 'gemini-2.5-flash', succeeded: false, failureCategory: 'http_error', httpStatus: 400, latencyMs: 250 },
-      { provider: 'groq', model: 'llama-3.3-70b-versatile', succeeded: false, failureCategory: 'rate_limited', httpStatus: 429, latencyMs: 180 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', succeeded: false, failureCategory: 'rate_limited', httpStatus: 429, latencyMs: 180 },
       { provider: 'openai', model: 'gpt-4-turbo', succeeded: false, failureCategory: 'not_configured', latencyMs: 0 },
     ];
     expect(summarizeFallbackReason(attempts)).toBe('gemini:http_error:400 | groq:rate_limited:429 | openai:not_configured');
+  });
+});
+
+describe('GroqProvider configuration & pricing', () => {
+  it('defaults to openai/gpt-oss-20b', async () => {
+    const { GroqProvider } = await import('../supabase/functions/_shared/ai/providers.ts');
+    const provider = new GroqProvider();
+    expect(provider.model).toBe('openai/gpt-oss-20b');
+  });
+
+  it('has pricing defined for openai/gpt-oss-20b', async () => {
+    const { MODEL_PRICING } = await import('../supabase/functions/_shared/ai/pricing.ts');
+    expect(MODEL_PRICING['openai/gpt-oss-20b']).toBeDefined();
   });
 });
 

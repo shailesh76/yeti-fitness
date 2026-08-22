@@ -1,19 +1,19 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Text, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
+import { P } from '../constants/premiumTheme';
 
 interface BottomTabBarProps {
   activeTab: 'logger' | 'nutrition' | 'analytics' | 'library' | 'profile';
 }
 
 const tabs = [
-  { id: 'logger',    label: 'Logger',    path: '/home' },
-  { id: 'nutrition', label: 'Calories',  path: '/food-diary' },
-  { id: 'analytics', label: 'Analytics', path: '/analytics' },
-  { id: 'library',   label: 'Library',   path: '/workouts' },
+  { id: 'logger',    label: 'Home',      path: '/home' },
+  { id: 'library',   label: 'Workouts',  path: '/workouts' },
+  { id: 'nutrition', label: 'Nutrition', path: '/food-diary' },
+  { id: 'analytics', label: 'Progress',  path: '/analytics' },
   { id: 'profile',   label: 'Profile',   path: '/profile' },
 ] as const;
 
@@ -24,12 +24,12 @@ export default function BottomTabBar({ activeTab }: BottomTabBarProps) {
     switch (id) {
       case 'logger':
         return isFocused ? 'home' : 'home-outline';
-      case 'nutrition':
-        return isFocused ? 'nutrition' : 'nutrition-outline';
-      case 'analytics':
-        return isFocused ? 'analytics' : 'analytics-outline';
       case 'library':
         return isFocused ? 'barbell' : 'barbell-outline';
+      case 'nutrition':
+        return 'nutrition';
+      case 'analytics':
+        return isFocused ? 'stats-chart' : 'stats-chart-outline';
       case 'profile':
         return isFocused ? 'person' : 'person-outline';
       default:
@@ -39,39 +39,45 @@ export default function BottomTabBar({ activeTab }: BottomTabBarProps) {
 
   return (
     <View style={styles.tabBarContainer}>
-      <BlurView 
-        intensity={40} 
-        tint="dark" 
-        style={styles.tabBarBlur}
-      >
+      <BlurView intensity={50} tint="dark" style={styles.tabBarBlur}>
         <View style={styles.tabBarInner}>
           {tabs.map((tab) => {
             const isFocused = activeTab === tab.id;
             const iconName = getTabIcon(tab.id, isFocused);
 
             return (
-              <View key={tab.id} style={styles.tabItem}>
-                <TouchableOpacity
-                  onPress={() => router.replace(tab.path)}
-                  activeOpacity={0.7}
+              <TouchableOpacity
+                key={tab.id}
+                // `replace` removed the previous tab from the stack, forcing a
+                // remount and replaying all mount/focus data effects on return.
+                // navigate reuses an existing tab route when possible and keeps
+                // its rendered state alive like a conventional tab navigator.
+                onPress={() => router.navigate(tab.path)}
+                activeOpacity={0.7}
+                style={styles.tabItem}
+              >
+                <View
                   style={[
-                    styles.iconContainer,
-                    isFocused && styles.iconContainerActive,
+                    styles.iconBox,
+                    isFocused && tab.id === 'nutrition' && styles.iconBoxNutritionActive,
+                    isFocused && tab.id !== 'nutrition' && styles.iconBoxGenericActive,
                   ]}
                 >
                   <Ionicons
                     name={iconName as any}
                     size={22}
-                    color={isFocused ? P.ACCENT : P.TEXT_MUT}
+                    color={isFocused ? (tab.id === 'nutrition' ? '#38BDF8' : '#3B82F6') : '#64748B'}
                   />
-                </TouchableOpacity>
-                <View style={styles.labelContainer}>
-                  <View style={[
-                    styles.indicator,
-                    isFocused && styles.indicatorActive,
-                  ]} />
                 </View>
-              </View>
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    isFocused && (tab.id === 'nutrition' ? styles.tabLabelNutritionActive : styles.tabLabelActive),
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -90,45 +96,48 @@ const styles = StyleSheet.create({
   },
   tabBarBlur: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.04)',
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
   tabBarInner: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 12, // Safe area for iPhone
-    backgroundColor: 'rgba(10, 13, 10, 0.75)',
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    backgroundColor: 'rgba(9, 11, 16, 0.92)',
   },
   tabItem: {
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
   },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+  iconBox: {
+    width: 42,
+    height: 38,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 3,
   },
-  iconContainerActive: {
-    backgroundColor: P.ACCENT_DIM,
+  iconBoxNutritionActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
   },
-  labelContainer: {
-    marginTop: 4,
-    alignItems: 'center',
+  iconBoxGenericActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
   },
-  indicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'transparent',
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748B',
   },
-  indicatorActive: {
-    backgroundColor: P.ACCENT,
-    width: 20,
-    height: 4,
-    borderRadius: 2,
+  tabLabelActive: {
+    color: '#3B82F6',
+    fontWeight: '700',
+  },
+  tabLabelNutritionActive: {
+    color: '#38BDF8',
+    fontWeight: '700',
   },
 });

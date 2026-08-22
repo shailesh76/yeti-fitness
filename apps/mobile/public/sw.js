@@ -1,5 +1,5 @@
 // Yeti PWA Service Worker — Static Asset Cache for Expo Web
-const CACHE_NAME = 'yeti-pwa-v1';
+const CACHE_NAME = 'yeti-pwa-v2-20260823-beta5';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -39,12 +39,14 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
+  const cacheableDestination = ['document', 'script', 'style', 'image', 'font'].includes(event.request.destination);
 
   // Exclude API calls and remote storage endpoints from SW static cache
   if (
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('r2.cloudflarestorage.com') ||
-    url.pathname.startsWith('/api')
+    url.pathname.startsWith('/api') ||
+    !cacheableDestination
   ) {
     return;
   }

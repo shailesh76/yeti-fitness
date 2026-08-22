@@ -26,7 +26,9 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 ### Identity & coaching relationship
 - **`profiles`** — one row per `auth.users` row (auto-created by a trigger on signup, see
   `20260719_auto_create_profile_on_signup.sql`). Holds `role` (`athlete`/`coach`/`admin`), body metrics,
-  nutrition targets, push token. RLS: a user reads/updates only their own row; a coach can additionally
+  nutrition targets (`nutrition_target_mode`, `nutrition_targets_locked`, `daily_*_target`), push token.
+  Included in `supabase_realtime` publication (see `20260822230000_profiles_realtime_publication.sql`)
+  for live target synchronization. RLS: a user reads/updates only their own row; a coach can additionally
   read a profile if `coach_clients` links them to that athlete (exact match on both `coach_id` and
   `athlete_id` — see audit finding #2 for a regression that must never be reintroduced here).
 - **`coach_clients`** — `(coach_id, athlete_id)` pair, the source of truth for every coach-athlete
@@ -154,8 +156,10 @@ currently deployed R2-backed media contract.
   `supabase db query --linked -f supabase/migrations/20260727_add_food_favorites.sql`.
 
 - **Nutrition targets** live on `profiles` as the **canonical** columns `daily_calorie_target`,
-  `daily_protein_target`, `daily_carb_target`, `daily_fat_target` (INT, added 2024). The mobile app
-  reads/writes these directly via `services/nutritionTargets.ts` (offline-cached). ⚠️ The mobile
+  `daily_protein_target`, `daily_carb_target`, `daily_fat_target` (INT, added 2024), and target provenance
+  column `nutrition_target_mode` (`AUTO` | `MANUAL`, added 2026-08-22 in
+  [20260822120000_profiles_nutrition_target_mode.sql](../supabase/migrations/20260822120000_profiles_nutrition_target_mode.sql)).
+  The mobile app reads/writes these directly via `services/nutritionTargets.ts` (offline-cached). ⚠️ The mobile
   WatermelonDB `target_*` columns are a legacy phantom — never present server-side and not synced;
   do not use them. Production also carries the coach lock/audit columns
   `nutrition_targets_locked`, `nutrition_targets_updated_by`, `nutrition_targets_updated_at`, added by

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, memo } from 'react';
+import React, { useEffect, useState, useCallback, memo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,14 +14,12 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
-import { Canvas, Path, Skia } from "@shopify/react-native-skia";
 import { Q } from '@nozbe/watermelondb';
 import * as Haptics from 'expo-haptics';
 
 import { useRepositories } from '../hooks/useRepositories';
 import { EVENTS } from '../constants/analyticsEvents';
 import { useAuthStore } from '../store/useAuthStore';
-import { HealthScoreEngine } from '@yeti/training-engine';
 import { useSyncManager } from '../hooks/useSyncManager';
 import { WorkoutSession } from '@yeti/database';
 import AppShell from '../components/AppShell';
@@ -29,14 +27,20 @@ import { database, isNativeDbAvailable } from '../database';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { useHydrationStore } from '../store/useHydrationStore';
 import { fetchDailyTelemetry } from '../services/wearableService';
-import { fetchNutritionTargets } from '../services/nutritionTargets';
+import { fetchNutritionTargets, getCachedNutritionTargets } from '../services/nutritionTargets';
 import { useFoodStore } from '../store/useFoodStore';
+import { useUserStore } from '../store/useUserStore';
 import {
   Macros, ZERO_MACROS, TodaysPlanSummary, ReadinessState,
   resolveConsumedMacros, sumMealLogsForDay, pickRicherMacros,
   buildTodaysPlan, describeReadiness,
+  HomeSnapshot, getHomeSnapshot, hydrateHomeSnapshot, patchHomeSnapshot, homeCacheKey,
 } from '../services/homeSummary';
 import { SkeletonLoader } from '../components/TelemetryComponents';
+import { dedupeScreenRefresh, getScreenData, isScreenDataStale, setScreenData, subscribeScreenData } from '../services/screenDataCache';
+import type { NutritionTargets } from '../services/nutritionUtils';
+import { createScreenPerfTrace } from '../services/screenPerf';
+import { logBootStage } from '../services/authenticatedHydration';
 
 const { width } = Dimensions.get('window');
 
@@ -209,8 +213,6 @@ const TodaysPlanCard = memo(({
       <View style={sharedStyles.rowBetween}>
         <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.planTitle}>{plan.name}</Text>
-          {/* Real muscle groups from this plan's own exercises; omitted
-              entirely when the rows carry no muscle data. */}
           {!!plan.muscleSummary && <Text style={styles.planSubtitle}>{plan.muscleSummary}</Text>}
 
           {plan.exerciseCount > 0 && (
@@ -242,7 +244,6 @@ const TodaysPlanCard = memo(({
         </View>
       </View>
 
-
       <TouchableOpacity
         accessible={true}
         accessibilityRole="button"
@@ -263,10 +264,6 @@ const TodaysPlanCard = memo(({
 });
 TodaysPlanCard.displayName = 'TodaysPlanCard';
 
-// Shown when the athlete genuinely has no active session and no saved plan.
-// Replaces the previous behaviour of falling back to a hardcoded "Push Day",
-// which presented a workout the athlete had never created as though it were
-// theirs. Keeps the same card shape/CTA slot so the layout doesn't shift.
 const TodaysPlanEmptyCard = memo(({ onPressBrowse }: { onPressBrowse: () => void }) => (
   <View style={[sharedStyles.card, styles.planCard]}>
     <View style={sharedStyles.rowBetween}>
@@ -391,10 +388,6 @@ const DailyProgressWidget = memo(({
 DailyProgressWidget.displayName = 'DailyProgressWidget';
 
 // ─── 5. Nutrition Summary Bar Card (Reference UI Screen 1) ──────────────────
-// Every value is required and comes from real state. These props previously
-// had demo defaults (1980 / 152 / 205 / 62) AND the call site passed only
-// calories + targetCalories — so all three macro bars rendered those defaults
-// unconditionally, for every athlete, no matter what was logged.
 const NutritionSummaryCard = memo(({
   calories,
   targetCalories,
@@ -422,7 +415,6 @@ const NutritionSummaryCard = memo(({
   const circumference = 2 * Math.PI * radius;
   const clampedProgress = targetCalories > 0 ? Math.min(Math.max(calories / targetCalories, 0), 1) : 0;
   const strokeDashoffset = circumference * (1 - clampedProgress);
-  // Targets can legitimately be 0/unset — never divide by them.
   const barPct = (value: number, target: number) => (target > 0 ? Math.min((value / target) * 100, 100) : 0);
 
   return (
@@ -484,7 +476,6 @@ const NutritionSummaryCard = memo(({
 
       {/* 3 Macro Bars Row */}
       <View style={{ gap: 8 }}>
-        {/* Protein */}
         <View>
           <View style={sharedStyles.rowBetween}>
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Protein</Text>
@@ -495,7 +486,6 @@ const NutritionSummaryCard = memo(({
           </View>
         </View>
 
-        {/* Carbs */}
         <View>
           <View style={sharedStyles.rowBetween}>
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Carbs</Text>
@@ -506,7 +496,6 @@ const NutritionSummaryCard = memo(({
           </View>
         </View>
 
-        {/* Fat */}
         <View>
           <View style={sharedStyles.rowBetween}>
             <Text style={{ fontSize: 11, fontWeight: '600', color: P.TEXT_MUT }}>Fat</Text>
@@ -523,11 +512,6 @@ const NutritionSummaryCard = memo(({
 NutritionSummaryCard.displayName = 'NutritionSummaryCard';
 
 // ─── 6. Yeti Readiness Score Hero ────────────────────────────────────────────
-// `readiness` is a discriminated state, not a bare number: no real readiness
-// metric is computed anywhere in the app yet, and the card previously rendered
-// a hardcoded 87% "Fully Ready" with a hardcoded "+7 pts this week" for every
-// athlete on every load. Until a genuine source exists it reports unavailable
-// rather than inventing a score.
 const YetiReadinessCard = memo(({ readiness }: { readiness: ReadinessState }) => {
   const TONE_COLORS: Record<'ready' | 'moderate' | 'recover', string> = {
     ready: P.ACCENT,
@@ -544,7 +528,6 @@ const YetiReadinessCard = memo(({ readiness }: { readiness: ReadinessState }) =>
   const diff = readiness.available ? readiness.delta : null;
   const isPositive = (diff ?? 0) >= 0;
 
-  // Small ring accent sharing the BiometricRing drawing logic at a compact size
   const ringSize = 44;
   const strokeWidth = 4;
   const radius = (ringSize - strokeWidth) / 2;
@@ -573,8 +556,6 @@ const YetiReadinessCard = memo(({ readiness }: { readiness: ReadinessState }) =>
         </View>
         <Text style={styles.readinessSub}>{readinessSub}</Text>
 
-        {/* Week-over-week delta only when there's a real previous score to
-            compare against — never a difference between two seeded numbers. */}
         {diff !== null && (
           <View style={styles.deltaRow}>
             <Ionicons
@@ -627,10 +608,6 @@ const QuickActionsGrid = memo(({
 }: {
   onNavigate: (route: string) => void;
 }) => {
-  // Matches the reference's exact 4 actions, in order. Scan Food and Progress
-  // Check (both real, previously shown here as a 5th/6th tile) are dropped from
-  // this grid — they're still one tap away via the Food Diary's own scan button
-  // and the bottom tab bar's Progress tab, so nothing becomes unreachable.
   const actions = [
     { label: 'Log Workout', icon: 'barbell-outline', route: '/workouts' },
     { label: 'Add Meal', icon: 'restaurant-outline', route: '/food-diary' },
@@ -678,19 +655,11 @@ const WeeklyProgressCard = memo(({
   workoutCount: number;
   weeklyCalories: number;
   targetWeeklyCalories: number;
-  /** null when no real readiness metric exists — the tile shows '—', not a
-   * fabricated percentage. */
   readinessScore: number | null;
   onPressViewAll: () => void;
 }) => {
-  // Workouts has no real weekly target anywhere in the schema (plan_days is an
-  // ordered list of workout days, not a calendar/weekly schedule) — the bar
-  // shows calendar-day coverage (workouts / 7) rather than a fabricated target.
   const workoutPct = Math.min(workoutCount / 7, 1);
   const caloriePct = Math.min(weeklyCalories / (targetWeeklyCalories || 1), 1);
-  // Recovery mirrors the Yeti Readiness score above. There is still no real
-  // recovery metric computed anywhere, so when that's unavailable this shows
-  // an empty tile rather than a stand-in percentage.
   const recoveryPct = readinessScore === null ? 0 : Math.min(readinessScore / 100, 1);
 
   return (
@@ -742,33 +711,49 @@ WeeklyProgressCard.displayName = 'WeeklyProgressCard';
 
 // ─── Main HomeScreen Master Component ─────────────────────────────────────────
 export default function HomeScreen() {
+  const perf = useRef(createScreenPerfTrace('home')).current;
+  perf('T0 route render');
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
-  const userId = session?.user?.id;
+  const user = useAuthStore((s) => s.user);
+  const userId = session?.user?.id || user?.id;
+  const userKey = userId ? homeCacheKey(userId) : 'home:anonymous';
   const { sync } = useSyncManager();
 
   const { progressRepository, nutritionRepository, workoutRepository, userRepository, eventRepository } =
     useRepositories();
 
-  const [loading, setLoading] = useState(true);
-  const [athleteName, setAthleteName] = useState('Sailesh Shrestha');
-  // No real readiness metric is computed anywhere in the app yet, so there is
-  // nothing to hold in state and nothing to set — these are null until a
-  // genuine source exists, and the card renders an honest "Not available"
-  // instead of the seeded 87/80 every athlete used to see as their own score.
-  // (HealthScoreEngine is deliberately NOT used here: it scores engagement /
-  // churn risk from app usage, not physiological readiness to train.)
+  // 1. Immediate in-memory snapshot read for instant 0ms first paint
+  const memorySnapshot = userId ? getHomeSnapshot(userId) : null;
+  const initialTargets = userId ? getScreenData<NutritionTargets>(`nutrition-targets:${userId}`) : null;
+  const userStoreName = useUserStore.getState().full_name;
+
+  const [athleteName, setAthleteName] = useState(
+    memorySnapshot?.athleteName || userStoreName || user?.user_metadata?.full_name || 'Athlete'
+  );
   const yetiScore: number | null = null;
   const prevYetiScore: number | null = null;
-  // Seeded to zero, not to demo values: a brand-new account with nothing
-  // logged must read 0, and every field below is overwritten from real rows.
-  const [consumedMacros, setConsumedMacros] = useState<Macros>(ZERO_MACROS);
-  const [targetMacros, setTargetMacros] = useState({ calories: 2500, protein: 170, carbs: 280, fat: 80 });
-  const [todayPlan, setTodayPlan] = useState<TodaysPlanSummary | null>(null);
-  const [waterMl, setWaterMl] = useState(0);
-  const [steps, setSteps] = useState(0);
-  const [weeklyWorkoutCount, setWeeklyWorkoutCount] = useState(0);
-  const [weeklyCalories, setWeeklyCalories] = useState(0);
+  const [consumedMacros, setConsumedMacros] = useState<Macros>(
+    memorySnapshot?.consumedMacros ?? ZERO_MACROS
+  );
+  const [targetMacros, setTargetMacros] = useState<NutritionTargets | null>(
+    memorySnapshot?.targetMacros ?? initialTargets ?? null
+  );
+  const [todayPlan, setTodayPlan] = useState<TodaysPlanSummary | null>(
+    memorySnapshot?.todayPlan ?? null
+  );
+  const [waterMl, setWaterMl] = useState(memorySnapshot?.waterMl ?? 0);
+  const [steps, setSteps] = useState(memorySnapshot?.steps ?? 0);
+  const [weeklyWorkoutCount, setWeeklyWorkoutCount] = useState(memorySnapshot?.weeklyWorkoutCount ?? 0);
+  const [weeklyCalories, setWeeklyCalories] = useState(memorySnapshot?.weeklyCalories ?? 0);
+
+  const hasAnyCachedData = !!(
+    memorySnapshot ||
+    initialTargets ||
+    userStoreName ||
+    useFoodStore.getState().mealLogs.length > 0
+  );
+  const [loading, setLoading] = useState(!hasAnyCachedData);
 
   const waterGoal = useHydrationStore((s) => s.waterGoal);
   const getWaterForDate = useHydrationStore((s) => s.getWaterForDate);
@@ -779,125 +764,210 @@ export default function HomeScreen() {
     loadHydrationGoal();
   }, []);
 
+  // Hydrate persistent snapshot on cold launch if memory snapshot was empty
+  useEffect(() => {
+    if (!userId) return;
+    void hydrateHomeSnapshot(userId).then((snapshot) => {
+      if (snapshot) {
+        if (snapshot.athleteName) setAthleteName(snapshot.athleteName);
+        if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
+        if (snapshot.targetMacros) setTargetMacros(snapshot.targetMacros);
+        if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
+        if (snapshot.waterMl !== undefined) setWaterMl(snapshot.waterMl);
+        if (snapshot.steps !== undefined) setSteps(snapshot.steps);
+        if (snapshot.weeklyWorkoutCount !== undefined) setWeeklyWorkoutCount(snapshot.weeklyWorkoutCount);
+        if (snapshot.weeklyCalories !== undefined) setWeeklyCalories(snapshot.weeklyCalories);
+        setLoading(false);
+      }
+    });
+  }, [userId]);
+
+  // Subscribe to Home snapshot updates triggered by mutations & Realtime events
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeScreenData<HomeSnapshot>(userKey, (snapshot) => {
+      if (!snapshot) return;
+      if (snapshot.athleteName) setAthleteName(snapshot.athleteName);
+      if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
+      if (snapshot.targetMacros !== undefined) setTargetMacros(snapshot.targetMacros);
+      if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
+      if (snapshot.waterMl !== undefined) setWaterMl(snapshot.waterMl);
+      if (snapshot.steps !== undefined) setSteps(snapshot.steps);
+      if (snapshot.weeklyWorkoutCount !== undefined) setWeeklyWorkoutCount(snapshot.weeklyWorkoutCount);
+      if (snapshot.weeklyCalories !== undefined) setWeeklyCalories(snapshot.weeklyCalories);
+      setLoading(false);
+    });
+  }, [userId, userKey]);
+
+  // Subscribe to direct nutrition target changes
+  const nutritionCacheKey = userId ? `nutrition-targets:${userId}` : 'nutrition-targets:anonymous';
+  useEffect(() => subscribeScreenData<NutritionTargets>(nutritionCacheKey, (targets) => {
+    if (targets) setTargetMacros(targets);
+  }), [nutritionCacheKey]);
+
   const loadData = useCallback(async () => {
     if (!userId) {
       setLoading(false);
       return;
     }
-    try {
-      await eventRepository.logActivity(userId, EVENTS.APP_OPENED);
+    return dedupeScreenRefresh(userKey, async () => {
+      logBootStage('REMOTE_RECONCILE_START', userId);
+      perf('T3 remote start');
+      void eventRepository.logActivity(userId, EVENTS.APP_OPENED).catch(() => {});
 
-      const profile = await userRepository.getProfile(userId);
-      if (profile?.full_name) setAthleteName(profile.full_name);
+      // Parallelize independent data fetches so slow requests do not block other cards
+      await Promise.allSettled([
+        // Branch 1: Profile & Athlete Name
+        (async () => {
+          try {
+            const profile = await userRepository.getProfile(userId);
+            if (profile?.full_name) {
+              setAthleteName(profile.full_name);
+              patchHomeSnapshot(userId, {
+                athleteName: profile.full_name,
+                currentWeight: profile.weight_kg != null ? Number(profile.weight_kg) : null,
+              });
+            } else {
+              const { data: remoteProfile } = await userRepository.fetchProfileRemote(userId);
+              if (remoteProfile?.full_name) {
+                setAthleteName(remoteProfile.full_name);
+                patchHomeSnapshot(userId, {
+                  athleteName: remoteProfile.full_name,
+                  currentWeight: remoteProfile.weight_kg != null ? Number(remoteProfile.weight_kg) : null,
+                });
+              }
+            }
+          } catch {}
+        })(),
 
-      // Canonical nutrition targets (server daily_*_target) with offline cache.
-      const targets = await fetchNutritionTargets(userId);
-      setTargetMacros({
-        calories: targets.calories ?? 2500,
-        protein: targets.protein ?? 170,
-        carbs: targets.carbs ?? 280,
-        fat: targets.fat ?? 80,
-      });
+        // Branch 2: Nutrition Targets
+        (async () => {
+          try {
+            const localTargets = await getCachedNutritionTargets(userId);
+            perf('T1 local cache read');
+            if (localTargets) {
+              setTargetMacros(localTargets);
+              patchHomeSnapshot(userId, { targetMacros: localTargets });
+            }
+            const targets = await fetchNutritionTargets(userId);
+            perf('T4 remote response');
+            const resolved = targets.calories == null ? null : targets;
+            setTargetMacros(resolved);
+            patchHomeSnapshot(userId, { targetMacros: resolved });
+          } catch {}
+        })(),
 
-      // Set unconditionally — a real zero-calorie day must render as zero.
-      // (The previous `todayMacros.calories > 0` guard is exactly what left
-      // the seeded demo macros on screen for accounts with nothing logged.)
-      // calculateDailyNutrition reads WatermelonDB, which doesn't exist on
-      // web and returns zero there, so the AsyncStorage-backed food store is
-      // summed as well and whichever source actually has logs wins.
-      const now = Date.now();
-      const todayMacros = await nutritionRepository.calculateDailyNutrition(userId, now);
-      // useFoodStore.mealLogs is only ever hydrated from AsyncStorage by
-      // food-diary's initSync() — nothing loads it on app boot. Landing on
-      // Home without having visited Food Diary first in this session (a
-      // fresh load, or simply never opening the diary) leaves it as [],
-      // which would silently under-report a real logged day as zero, the
-      // same class of bug as the mock-data seed this replaced. Hydrating
-      // here (idempotent — it's a plain AsyncStorage read + set, safe to
-      // call every time regardless of whether it's already loaded) removes
-      // that dependency on navigation order.
-      await useFoodStore.getState().loadLocalCache();
-      // Scoped to this userId: the food store is not user-partitioned and is
-      // not cleared on sign-out, so an unfiltered sum would surface the
-      // previous account's meals here.
-      const storeMacros = sumMealLogsForDay(useFoodStore.getState().mealLogs, now, userId);
-      setConsumedMacros(pickRicherMacros(resolveConsumedMacros(todayMacros), storeMacros));
+        // Branch 3: Consumed Nutrition & Meal Logs
+        (async () => {
+          try {
+            const now = Date.now();
+            const [todayMacros] = await Promise.all([
+              nutritionRepository.calculateDailyNutrition(userId, now),
+              useFoodStore.getState().loadLocalCache(),
+            ]);
+            perf('T2 local DB/storage read');
+            const storeMacros = sumMealLogsForDay(useFoodStore.getState().mealLogs, now, userId);
+            const richer = pickRicherMacros(resolveConsumedMacros(todayMacros), storeMacros);
+            setConsumedMacros(richer);
+            patchHomeSnapshot(userId, { consumedMacros: richer });
+          } catch {}
+        })(),
 
-      const loggedWater = await getWaterForDate(new Date().toDateString());
-      setWaterMl(loggedWater);
+        // Branch 4: Hydration & Daily Telemetry
+        (async () => {
+          try {
+            const [loggedWater, telemetry] = await Promise.all([
+              getWaterForDate(new Date().toDateString()),
+              fetchDailyTelemetry(),
+            ]);
+            setWaterMl(loggedWater);
+            setSteps(telemetry.steps);
+            patchHomeSnapshot(userId, { waterMl: loggedWater, steps: telemetry.steps });
+          } catch {}
+        })(),
 
-      const telemetry = await fetchDailyTelemetry();
-      setSteps(telemetry.steps);
+        // Branch 5: Today's Plan & Weekly Session Count
+        (async () => {
+          try {
+            const startOfWeek = new Date();
+            startOfWeek.setHours(0, 0, 0, 0);
+            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+            const [history, ownPlans, activeSession] = await Promise.all([
+              workoutRepository.getWorkoutHistory(userId).catch(() => []),
+              workoutRepository.fetchOwnWorkoutPlans(userId).catch(() => []),
+              (async () => {
+                if (isNativeDbAvailable && database) {
+                  try {
+                    const activeSessions = (await database
+                      .get('workout_sessions')
+                      .query(Q.where('status', 'active'))
+                      .fetch()) as WorkoutSession[];
+                    if (activeSessions.length > 0) {
+                      return { id: activeSessions[0].id, name: activeSessions[0].name };
+                    }
+                  } catch {}
+                }
+                return null;
+              })(),
+            ]);
 
-      // Weekly Progress: real completed-session count (this calendar week) and
-      // a real 7-day trailing calorie sum — no hardcoded weekly numbers.
-      const startOfWeek = new Date();
-      startOfWeek.setHours(0, 0, 0, 0);
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-      const history = await workoutRepository.getWorkoutHistory(userId);
-      const thisWeekSessions = history.filter((s) => (s.finished_at || 0) >= startOfWeek.getTime());
-      setWeeklyWorkoutCount(thisWeekSessions.length);
+            const thisWeekSessions = (history || []).filter((s) => (s.finished_at || 0) >= startOfWeek.getTime());
+            const count = thisWeekSessions.length;
+            setWeeklyWorkoutCount(count);
 
-      const last7Days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        return d.getTime();
-      });
-      const dailyTotals = await Promise.all(
-        last7Days.map((dayMs) => nutritionRepository.calculateDailyNutrition(userId, dayMs))
-      );
-      setWeeklyCalories(dailyTotals.reduce((sum, d) => sum + d.calories, 0));
+            const builtPlan = buildTodaysPlan({ activeSession, plans: ownPlans });
+            setTodayPlan(builtPlan);
+            patchHomeSnapshot(userId, { todayPlan: builtPlan, weeklyWorkoutCount: count });
+          } catch {}
+        })(),
 
-      // Today's Plan: a real in-progress session if there is one, otherwise the
-      // athlete's most recent saved plan, otherwise nothing (honest empty
-      // state). fetchOwnWorkoutPlans works on web too — the old local-DB-only
-      // branch meant web never loaded a plan at all and simply kept showing
-      // the seeded "Push Day".
-      let activeSession: { id: string; name?: string | null } | null = null;
-      if (isNativeDbAvailable && database) {
-        const activeSessions = (await database
-          .get('workout_sessions')
-          .query(Q.where('status', 'active'))
-          .fetch()) as WorkoutSession[];
-        if (activeSessions.length > 0) {
-          activeSession = { id: activeSessions[0].id, name: activeSessions[0].name };
-        }
-      }
+        // Branch 6: Weekly 7-Day Trailing Calories
+        (async () => {
+          try {
+            const last7Days = Array.from({ length: 7 }, (_, i) => {
+              const d = new Date();
+              d.setDate(d.getDate() - i);
+              return d.getTime();
+            });
+            const dailyTotals = await Promise.all(
+              last7Days.map((dayMs) => nutritionRepository.calculateDailyNutrition(userId, dayMs))
+            );
+            const weekCals = dailyTotals.reduce((sum, d) => sum + d.calories, 0);
+            setWeeklyCalories(weekCals);
+            patchHomeSnapshot(userId, { weeklyCalories: weekCals });
+          } catch {}
+        })(),
+      ]);
 
-      let ownPlans: any[] = [];
-      try {
-        ownPlans = await workoutRepository.fetchOwnWorkoutPlans(userId);
-      } catch (planErr) {
-        // Plans unreachable (offline/unconfigured) — fall through with none,
-        // which renders the empty state rather than a stale placeholder.
-        console.warn('Failed to load workout plans for Today’s Plan:', planErr);
-      }
-
-      setTodayPlan(buildTodaysPlan({ activeSession, plans: ownPlans }));
-    } catch (e) {
-      console.warn('Failed to load local analytics:', e);
-    } finally {
       setLoading(false);
-    }
-  }, [userId]);
+      perf('T5 state reconciliation');
+      perf('T6 visible authoritative UI');
+      setScreenData(userKey, true);
+      logBootStage('REMOTE_RECONCILE_DONE', userId);
+    });
+  }, [userId, userKey]);
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      if (!getScreenData(userKey) || isScreenDataStale(userKey)) void loadData();
+    }, [loadData, userKey])
   );
 
-  if (loading) {
-    return (
-      <AppShell activeTab="home">
-        <SafeAreaView style={styles.safeArea}>
-          <View style={{ padding: 20 }}>
-            <SkeletonLoader rows={4} height={100} />
-          </View>
-        </SafeAreaView>
-      </AppShell>
-    );
-  }
+  // Cached content becomes meaningful immediately; uncached cards own their neutral loading states.
+  const hasRenderableContent = !!(
+    memorySnapshot ||
+    targetMacros != null ||
+    todayPlan != null ||
+    consumedMacros.calories > 0 ||
+    athleteName !== 'Athlete' ||
+    weeklyWorkoutCount > 0 ||
+    weeklyCalories > 0 ||
+    useFoodStore.getState().mealLogs.length > 0
+  );
+
+  useEffect(() => {
+    if (userId && hasRenderableContent) logBootStage('HOME_FIRST_MEANINGFUL_RENDER', userId);
+  }, [userId, hasRenderableContent]);
 
   return (
     <AppShell activeTab="home">
@@ -915,15 +985,16 @@ export default function HomeScreen() {
             />
           </Animated.View>
 
-          {/* 2. Yeti Readiness Score Hero — matches reference order (second, right
-              after the header, before Today's Workout) */}
+          {/* 2. Yeti Readiness Score Hero */}
           <Animated.View entering={FadeInDown.duration(400).delay(80)}>
             <YetiReadinessCard readiness={describeReadiness(yetiScore, prevYetiScore)} />
           </Animated.View>
 
-          {/* 3. Today's Plan Card — real plan, or an honest empty state */}
+          {/* 3. Today's Plan Card */}
           <Animated.View entering={FadeInDown.duration(400).delay(120)}>
-            {todayPlan ? (
+            {loading && !hasRenderableContent ? (
+              <SkeletonLoader rows={1} height={120} />
+            ) : todayPlan ? (
               <TodaysPlanCard
                 plan={todayPlan}
                 onPressWorkout={() =>
@@ -935,20 +1006,22 @@ export default function HomeScreen() {
             )}
           </Animated.View>
 
-          {/* 4. Nutrition Summary Bar — all four macros wired to real state;
-              passing only calories used to leave the other three bars showing
-              the component's demo default props. */}
+          {/* 4. Nutrition Summary Bar */}
           <Animated.View entering={FadeInDown.duration(400).delay(160)}>
-            <NutritionSummaryCard
-              calories={consumedMacros.calories}
-              targetCalories={targetMacros.calories}
-              protein={consumedMacros.protein}
-              targetProtein={targetMacros.protein}
-              carbs={consumedMacros.carbs}
-              targetCarbs={targetMacros.carbs}
-              fat={consumedMacros.fat}
-              targetFat={targetMacros.fat}
-            />
+            {targetMacros?.calories != null ? (
+              <NutritionSummaryCard
+                calories={consumedMacros.calories}
+                targetCalories={targetMacros.calories}
+                protein={consumedMacros.protein}
+                targetProtein={targetMacros.protein ?? 0}
+                carbs={consumedMacros.carbs}
+                targetCarbs={targetMacros.carbs ?? 0}
+                fat={consumedMacros.fat}
+                targetFat={targetMacros.fat ?? 0}
+              />
+            ) : (
+              <SkeletonLoader rows={1} height={120} />
+            )}
           </Animated.View>
 
           {/* 5. Quick Actions */}
@@ -961,29 +1034,31 @@ export default function HomeScreen() {
             <WeeklyProgressCard
               workoutCount={weeklyWorkoutCount}
               weeklyCalories={weeklyCalories}
-              targetWeeklyCalories={targetMacros.calories * 7}
+              targetWeeklyCalories={(targetMacros?.calories ?? 0) * 7}
               readinessScore={yetiScore}
               onPressViewAll={() => router.push('/analytics')}
             />
           </Animated.View>
 
-          {/* 7. Daily Progress 4-Ring Widget — not in the reference; kept below
-              the reference-matched flow rather than removed (real, wired data). */}
+          {/* 7. Daily Progress 4-Ring Widget */}
           <Animated.View entering={FadeInDown.duration(400).delay(240)}>
-            <DailyProgressWidget
-              calories={consumedMacros.calories}
-              targetCalories={targetMacros.calories}
-              protein={consumedMacros.protein}
-              targetProtein={targetMacros.protein}
-              waterMl={waterMl}
-              targetWaterMl={waterGoal}
-              steps={steps}
-              targetSteps={10000}
-            />
+            {targetMacros?.calories != null ? (
+              <DailyProgressWidget
+                calories={consumedMacros.calories}
+                targetCalories={targetMacros.calories}
+                protein={consumedMacros.protein}
+                targetProtein={targetMacros.protein ?? 0}
+                waterMl={waterMl}
+                targetWaterMl={waterGoal}
+                steps={steps}
+                targetSteps={10000}
+              />
+            ) : (
+              <SkeletonLoader rows={1} height={120} />
+            )}
           </Animated.View>
 
-          {/* 8. Hero Motivational Banner — not in the reference; kept as a
-              secondary Coach entry point rather than removed. */}
+          {/* 8. Hero Motivational Banner */}
           <Animated.View entering={FadeInDown.duration(400).delay(280)}>
             <MotivationalBanner onPressAsk={() => router.push('/coach')} />
           </Animated.View>
@@ -1077,7 +1152,7 @@ const styles = StyleSheet.create({
   },
   planMascotImg: { width: '100%', height: '100%' },
   primaryRoyalBtn: {
-    backgroundColor: P.ACCENT, // Royal Blue #2563EB
+    backgroundColor: P.ACCENT,
     paddingVertical: 14,
     minHeight: 48,
     borderRadius: P.RADIUS_PILL,
@@ -1141,8 +1216,7 @@ const styles = StyleSheet.create({
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
   deltaText: { fontSize: 11, fontWeight: '800' },
 
-  // Quick Actions Grid — icon centered above label, matching the reference's
-  // vertical tile layout (not the previous icon-left/label-right row).
+  // Quick Actions Grid
   actionGridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionGridTile: {
     width: (width - 50) / 2,

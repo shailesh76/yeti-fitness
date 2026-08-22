@@ -12,6 +12,7 @@ import { Exercise, ExerciseGuidanceType } from '@yeti/database';
 import { useWorkoutBuilderStore } from '../../../store/useWorkoutBuilderStore';
 import { P, glowStyle, sharedStyles } from '../../../constants/premiumTheme';
 import { displayLabel, parseSecondaryMuscles } from '../../../utils/exerciseDisplay';
+import { sanitizeAthleteErrorMessage } from '../../../utils/aiErrorSanitizer';
 
 const MASCOT = require('../../../assets/yeti_mascot_avatar.png');
 
@@ -140,15 +141,9 @@ export default function ExerciseDetailScreen() {
         const raw = String(err?.message ?? '');
         let message: string;
         if (raw === 'AI_PROVIDER_NOT_CONFIGURED') {
-          // The edge function is reachable but no AI provider key is set on the
-          // backend — a config/ops issue, not a user-side connection problem.
           message = "AI Coach isn't set up yet — an AI provider key needs to be added on the server.";
-        } else if (raw && !/non-2xx|failed to (send|fetch)|network|connection/i.test(raw)) {
-          // A specific, user-facing reason from the function (daily limit,
-          // temporarily unavailable, exercise not found) — show it verbatim.
-          message = raw;
         } else {
-          message = "Couldn't reach the AI Coach — check your connection and try again.";
+          message = sanitizeAthleteErrorMessage(err, "AI tip is temporarily unavailable. Please try again.");
         }
         setGuidance((prev) => ({ ...prev, [type]: { loading: false, error: message } }));
       });

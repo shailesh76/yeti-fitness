@@ -10,7 +10,8 @@ import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
 import { EVENTS } from '../constants/analyticsEvents';
-import { decidePostLoginRoute } from '@yeti/database';
+import { decidePostLoginRoute, POST_LOGIN_PROFILE_COLUMNS } from '@yeti/database';
+import { beginAuthenticatedHydration, logBootStage } from '../services/authenticatedHydration';
 
 // Required so openAuthSessionAsync's underlying browser session correctly
 // dismisses and returns control to the app once Google redirects back.
@@ -84,19 +85,32 @@ export default function AuthScreen() {
    * redirect for an existing user.
    */
   async function resolvePostLogin(userId: string) {
-    const result = await userRepository.fetchProfileRemote(userId);
-    const decision = decidePostLoginRoute(result);
+    try {
+      logBootStage('AUTH_READY', userId);
+      void beginAuthenticatedHydration(userId);
+      const profilePromise = userRepository.fetchProfileRemote(userId, POST_LOGIN_PROFILE_COLUMNS);
+      const timeoutPromise = new Promise<any>((_, reject) =>
+        setTimeout(() => reject(new Error('Profile check timed out')), 7000)
+      );
 
-    if (decision.outcome === 'home') {
-      setProfileCheckUserId(null);
-      router.replace('/home');
-    } else if (decision.outcome === 'onboarding') {
-      setProfileCheckUserId(null);
-      router.replace('/onboarding/BetaAgreementScreen');
-    } else {
-      eventRepository.logError(userId, 'PostLoginProfileCheck', decision.code).catch(() => {});
+      const result = await Promise.race([profilePromise, timeoutPromise]);
+      const decision = decidePostLoginRoute(result);
+
+      if (decision.outcome === 'home') {
+        setProfileCheckUserId(null);
+        router.replace('/home');
+      } else if (decision.outcome === 'onboarding') {
+        setProfileCheckUserId(null);
+        router.replace('/onboarding/BetaAgreementScreen');
+      } else {
+        eventRepository.logError(userId, 'PostLoginProfileCheck', decision.code).catch(() => {});
+        setProfileCheckUserId(userId);
+        setError('We couldn’t verify your profile. Please try again.');
+      }
+    } catch (err: any) {
+      eventRepository.logError(userId, 'PostLoginProfileCheck', 'TIMEOUT').catch(() => {});
       setProfileCheckUserId(userId);
-      setError('We couldn’t verify your profile. Please try again.');
+      setError('We couldn’t verify your profile in time. Please tap Retry.');
     }
   }
 
@@ -159,11 +173,10 @@ export default function AuthScreen() {
       }
 
       if (data?.user) {
-        // Log login completed event
-        await eventRepository.logActivity(data.user.id, EVENTS.LOGIN_COMPLETED);
+        // Log login completed event non-blockingly so telemetry doesn't delay navigation
+        eventRepository.logActivity(data.user.id, EVENTS.LOGIN_COMPLETED).catch(() => {});
 
         // Check if user has completed onboarding profile, and route accordingly
-        // (a failed lookup shows a retryable error, not a false onboarding redirect).
         await resolvePostLogin(data.user.id);
       }
     } catch (e: any) {

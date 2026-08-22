@@ -184,20 +184,21 @@ describe('nutrition targets — canonical field mapping (drift fix)', () => {
       daily_fat_target: 70,
       nutrition_targets_locked: true,
     });
-    expect(t).toEqual({ calories: 2200, protein: 165, carbs: 240, fat: 70, locked: true });
+    expect(t).toEqual({ calories: 2200, protein: 165, carbs: 240, fat: 70, locked: true, mode: 'AUTO' });
   });
 
-  it('keeps unset targets null (never 0) and defaults locked to false', () => {
+  it('keeps unset targets null (never 0) and defaults locked to false and mode to AUTO', () => {
     const t = mapProfileTargets({ daily_calorie_target: 2000 });
     expect(t.calories).toBe(2000);
     expect(t.protein).toBeNull();
     expect(t.carbs).toBeNull();
     expect(t.fat).toBeNull();
     expect(t.locked).toBe(false);
+    expect(t.mode).toBe('AUTO');
   });
 
   it('handles a null/absent row', () => {
-    expect(mapProfileTargets(null)).toEqual({ calories: null, protein: null, carbs: null, fat: null, locked: false });
+    expect(mapProfileTargets(null)).toEqual({ calories: null, protein: null, carbs: null, fat: null, locked: false, mode: 'AUTO' });
   });
 
   it('round-trips app object → canonical columns', () => {

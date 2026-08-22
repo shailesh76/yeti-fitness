@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, StyleSheet, Image, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,7 +14,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNotificationHistoryStore } from '../store/useNotificationHistoryStore';
 import { useLogStore } from '../store/useLogStore';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
+import { calculateNutritionTargets } from '../services/nutritionUtils';
+import { applyNutritionTargetsLocal, saveNutritionTargets, fetchNutritionTargets } from '../services/nutritionTargets';
+import { APP_BUILD_LABEL } from '../constants/version';
 import Constants from 'expo-constants';
+import { dedupeScreenRefresh, getScreenData, hydrateScreenData, invalidateScreenData, persistScreenData, subscribeScreenData } from '../services/screenDataCache';
+import { createScreenPerfTrace } from '../services/screenPerf';
+import { markLocalProfileWrite } from '../services/profileRealtime';
 
 // The Yeti mascot portrait the athlete's avatar defaults to (no photo upload yet).
 const YETI_AVATAR = require('../assets/yeti_avatar_portrait.png');
@@ -89,13 +95,17 @@ function SettingsRow({
 }
 
 export default function MoreScreen() {
+  const perf = useRef(createScreenPerfTrace('profile')).current;
+  perf('T0 route render');
   const router = useRouter();
   const session = useAuthStore((state) => state.session);
   const setSession = useAuthStore((state) => state.setSession);
   const { userRepository } = useRepositories();
 
-  const [profile, setProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const profileCacheKey = session?.user?.id ? `profile:${session.user.id}` : 'profile:anonymous';
+  const cachedProfile = getScreenData<any>(profileCacheKey);
+  const [profile, setProfile] = useState<any>(cachedProfile ?? null);
+  const [loading, setLoading] = useState(!cachedProfile);
   const [updating, setUpdating] = useState(false);
   const [wearablesConnected, setWearablesConnected] = useState(false);
   const [goalsExpanded, setGoalsExpanded] = useState(false);
@@ -116,6 +126,20 @@ export default function MoreScreen() {
       fetchPRs(session.user.id);
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!session?.user?.id || cachedProfile) return;
+    void hydrateScreenData<any>(profileCacheKey).then((cached) => {
+      perf('T1 local cache read');
+      if (!cached) return;
+      setProfile(cached);
+      setLoading(false);
+    });
+  }, [session?.user?.id, profileCacheKey]);
+
+  useEffect(() => subscribeScreenData<any>(profileCacheKey, (next) => {
+    if (next) setProfile(next);
+  }), [profileCacheKey]);
 
   // Real profile stats (workout history/PRs are native-only, so these read 0
   // on web and populate on device — never fabricated).
@@ -153,7 +177,7 @@ export default function MoreScreen() {
     return new Date(created).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   }, [session]);
   const isVerified = !!(session?.user as any)?.email_confirmed_at;
-  const appVersion = Constants.expoConfig?.version || '1.0.0';
+  const appVersion = APP_BUILD_LABEL;
 
   const checkWearables = async () => {
     try {
@@ -166,22 +190,33 @@ export default function MoreScreen() {
 
   const fetchProfile = async () => {
     if (!session?.user?.id) return;
+    return dedupeScreenRefresh(profileCacheKey, async () => {
     try {
-      setLoading(true);
+      // Background refresh must never replace usable content with a spinner.
+      if (!profile && !getScreenData(profileCacheKey)) setLoading(true);
 
       // 1. Try local profile
       let localProf = await userRepository.getProfile(session.user.id);
+      perf('T2 local DB/storage read');
       if (localProf) {
         setProfile(localProf);
+          void persistScreenData(profileCacheKey, localProf);
+        setLoading(false);
       }
 
       // 2. Fetch remote profile
-      const { data: remoteProf, error: remoteErr } = await userRepository.fetchProfileRemote(session.user.id);
+      perf('T3 remote start');
+      const { data: remoteProf, error: remoteErr } = await userRepository.fetchProfileRemote(session.user.id, '*');
+      perf('T4 remote response');
       if (remoteErr) {
         console.error("Could not fetch remote user profile:", remoteErr);
       } else if (remoteProf) {
         // Remote profile immediately updates UI
-        setProfile((prev: any) => ({ ...(prev || {}), ...remoteProf }));
+        setProfile((prev: any) => {
+          const next = { ...(prev || {}), ...remoteProf };
+          void persistScreenData(profileCacheKey, next);
+          return next;
+        });
 
         // Best-effort local cache write
         try {
@@ -193,35 +228,50 @@ export default function MoreScreen() {
           }
         }
       }
+      perf('T5 state reconciliation');
     } catch (e) {
       console.error("Could not fetch user profile:", e);
     } finally {
       setLoading(false);
+      perf('T6 visible authoritative UI');
     }
+    });
   };
 
   const handleUpdateGoal = async (goal: 'BUILD_MUSCLE' | 'LOSE_FAT' | 'MAINTAIN') => {
     if (!session?.user?.id || updating) return;
     setUpdating(true);
     try {
+      const updatedProfile = { ...profile, goal };
       setProfile((prev: any) => ({ ...prev, goal }));
-      const result = await userRepository.updateProfile(session.user.id, { goal });
-      if (result?.profile) {
-        setProfile((prev: any) => ({ ...prev, ...result.profile }));
+      useUserStore.getState().updateField('goal', goal);
+      void persistScreenData(profileCacheKey, updatedProfile);
+      markLocalProfileWrite(session.user.id, { goal });
+
+      const targets = calculateNutritionTargets(updatedProfile);
+      const currentTargets = getScreenData<any>(`nutrition-targets:${session.user.id}`) ||
+        await fetchNutritionTargets(session.user.id).catch(() => ({ locked: false } as any));
+
+      const updates: any = { goal };
+      if (!currentTargets.locked && currentTargets.mode === 'AUTO') {
+        updates.daily_calorie_target = targets.calories;
+        updates.daily_protein_target = targets.protein;
+        updates.daily_carb_target = targets.carbs;
+        updates.daily_fat_target = targets.fat;
+        applyNutritionTargetsLocal(session.user.id, targets, 'AUTO');
       }
-      if (result?.remoteSuccess === false) {
-        if (Platform.OS === 'web') {
-          alert('Goal Updated (Offline)\nChanges saved locally and will sync when online.');
-        } else {
-          Alert.alert('Goal Updated (Offline)', 'Changes saved locally and will sync when online.');
-        }
-      } else {
-        if (Platform.OS === 'web') {
-          alert('Goal Updated!\nYour nutrition targets have been adjusted.');
-        } else {
-          Alert.alert('Goal Updated', 'Your nutrition targets have been adjusted.');
-        }
+
+      void userRepository.updateProfile(session.user.id, updates).then((result) => {
+        if (result?.profile) setProfile((prev: any) => ({ ...prev, ...result.profile }));
+      }).catch(() => {});
+      if (!currentTargets.locked && currentTargets.mode === 'AUTO') {
+        void saveNutritionTargets(session.user.id, targets, 'AUTO');
       }
+      invalidateScreenData(`home:${session.user.id}`);
+      invalidateScreenData(`progress:${session.user.id}`);
+
+      if (Platform.OS === 'web') alert('Goal Updated');
+      else Alert.alert('Goal Updated', currentTargets.mode === 'AUTO' ? 'Your nutrition targets have been adjusted.' : 'Your manual nutrition targets were preserved.');
     } catch (e: any) {
       Alert.alert('Update Failed', e?.message || 'Failed to save new goal. Please try again.');
     } finally {
@@ -302,7 +352,7 @@ export default function MoreScreen() {
   const displayName = profile?.full_name || 'Dude Athlete';
   const currentGoal = profile?.goal ? GOAL_LABEL[profile.goal] : undefined;
 
-  if (loading) {
+  if (loading && !profile) {
     return (
       <AppShell activeTab="more">
         <SafeAreaView style={[styles.safeArea, { justifyContent: 'center' }]}>
@@ -441,6 +491,7 @@ export default function MoreScreen() {
               icon="body"
               title="Body Metrics"
               subtitle="View and update your body measurements"
+              value={profile?.weight_kg ? `${profile.weight_kg} kg` : undefined}
               onPress={() => router.push('/onboarding/body-metrics')}
             />
             <SettingsRow

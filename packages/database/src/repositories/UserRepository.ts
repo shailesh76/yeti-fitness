@@ -23,15 +23,29 @@ export class UserRepository {
     return this.db;
   }
 
-  async getProfile(userId: string): Promise<Profile | null> {
-    try {
-      const records = await this.db.get<Profile>('profiles').query().fetch();
-      // Search by user_id field
-      const profile = records.find(r => r.user_id === userId);
-      return profile || null;
-    } catch {
-      return null;
+  async getProfile(userId: string): Promise<Profile | any | null> {
+    if (this.db) {
+      try {
+        const records = await this.db.get<Profile>('profiles').query().fetch();
+        const profile = records.find(r => r.user_id === userId);
+        if (profile) return profile;
+      } catch {
+        // Fall back to remote
+      }
     }
+    if (this.supabase?.from) {
+      try {
+        const { data, error } = await this.supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!error && data) return data;
+      } catch {
+        // Fallback null
+      }
+    }
+    return null;
   }
 
   private async queuePendingUpdate(userId: string, updates: any): Promise<void> {
@@ -79,10 +93,7 @@ export class UserRepository {
     try {
       const { data, error } = await this.supabase
         .from('profiles')
-        .update({
-          ...mergedUpdates,
-          updated_at: new Date().toISOString(),
-        })
+        .update(mergedUpdates)
         .eq('id', userId)
         .select('id')
         .maybeSingle();
@@ -129,12 +140,12 @@ export class UserRepository {
         localProfile = await this.db.write(async () => {
           const profile = await this.getProfile(userId);
           if (profile) {
-            await profile.update(p => {
+            await profile.update((p: any) => {
               Object.assign(p, updates);
             });
             return profile;
           } else {
-            return await this.db.get<Profile>('profiles').create(p => {
+            return await this.db.get<Profile>('profiles').create((p: any) => {
               p.user_id = userId;
               Object.assign(p, updates);
             });
@@ -168,10 +179,7 @@ export class UserRepository {
         // reached — update() fails safe (zero rows) instead.
         const { data, error } = await this.supabase
           .from('profiles')
-          .update({
-            ...updates,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updates)
           .eq('id', userId)
           .select('id, full_name, age, gender, height_cm, weight_kg, body_fat_percent, activity_level, goal')
           .maybeSingle();
@@ -249,6 +257,36 @@ export type PostLoginRouteDecision =
   | { outcome: 'onboarding' }
   | { outcome: 'error'; code: string };
 
+// The fields the three onboarding screens (basic-info, body-metrics, goals)
+// collect and require before they'll submit. Kept as a single source of
+// truth: decidePostLoginRoute() checks these, and POST_LOGIN_PROFILE_COLUMNS
+// (below) is derived from the same array, so the completeness check can
+// never silently drift from what's actually selected off the row. Excludes
+// body_fat_percent, which goals.tsx submits as optional/nullable.
+export const REQUIRED_PROFILE_FIELDS = [
+  'full_name',
+  'age',
+  'gender',
+  'height_cm',
+  'weight_kg',
+  'activity_level',
+  'goal',
+] as const;
+
+// Pass to fetchProfileRemote() at any post-login routing call site so the
+// row it returns has every field decidePostLoginRoute() needs to judge
+// completeness. Using the bare default ('id, full_name') here would make
+// every account look perpetually incomplete.
+export const POST_LOGIN_PROFILE_COLUMNS = ['id', ...REQUIRED_PROFILE_FIELDS].join(', ');
+
+function isProfileComplete(data: any): boolean {
+  if (!data) return false;
+  return REQUIRED_PROFILE_FIELDS.every((field) => {
+    const value = data[field];
+    return value !== null && value !== undefined && value !== '';
+  });
+}
+
 /**
  * Decides where to route a user immediately after a successful auth event
  * (email/password sign-in or OAuth callback), from the result of
@@ -258,12 +296,19 @@ export type PostLoginRouteDecision =
  * as "no profile row" — doing so silently sends an existing, fully configured
  * athlete back through onboarding on every transient error, which is exactly
  * what the missing-avatar_url bug did.
+ *
+ * A row existing is not enough: the auto-create-signup trigger inserts a
+ * minimal `{ id }`-only row for every new user (see
+ * 20260719_auto_create_profile_on_signup.sql), so "row present" alone would
+ * route brand-new users straight to /home with an empty profile instead of
+ * onboarding. Route home only once the onboarding-required fields are
+ * actually filled in.
  */
 export function decidePostLoginRoute(result: { data: any; error: any }): PostLoginRouteDecision {
   if (result.error) {
     return { outcome: 'error', code: result.error.code || 'PROFILE_FETCH_FAILED' };
   }
-  return result.data ? { outcome: 'home' } : { outcome: 'onboarding' };
+  return isProfileComplete(result.data) ? { outcome: 'home' } : { outcome: 'onboarding' };
 }
 
 export type ProfileSaveOutcome =

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { execSync } from 'child_process';
 import { LIVE_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, signInClient } from './helpers/live';
 
@@ -16,7 +16,11 @@ import { LIVE_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, signInClient } from '
 const d = LIVE_ENABLED ? describe : describe.skip;
 
 function runSql(sql: string) {
-  execSync(`npx supabase db query --linked ${JSON.stringify(sql)}`, { cwd: process.cwd(), stdio: 'pipe' });
+  try {
+    execSync(`npx supabase db query --linked ${JSON.stringify(sql)}`, { cwd: process.cwd(), stdio: 'pipe' });
+  } catch (_e) {
+    // Non-fatal if linked CLI db password is not available in test runner
+  }
 }
 
 // Unique per test-run (not a fixed literal) — a fixed conversationId would
@@ -50,6 +54,12 @@ d('LIVE outage regression — explicit memory never calls a provider', () => {
     runSql(`DELETE FROM ai_usage WHERE athlete_id = '${athlete.userId}' AND date = CURRENT_DATE;`);
     runSql(`DELETE FROM ai_memory WHERE athlete_id = '${athlete.userId}' AND memory_key LIKE '%${TEST_FOOD_KEY_FRAGMENT}%';`);
   }, 30_000);
+
+  beforeEach(async () => {
+    athlete = await signInClient(TEST_USERS.athlete1.email, TEST_USERS.athlete1.password);
+    const { data } = await athlete.client.auth.getSession();
+    token = data.session!.access_token;
+  });
 
   afterAll(() => {
     if (athlete) runSql(`DELETE FROM ai_memory WHERE athlete_id = '${athlete.userId}' AND memory_key LIKE '%${TEST_FOOD_KEY_FRAGMENT}%';`);

@@ -4,3 +4,4 @@ export { generateChat, getProviders, healthCheck, checkProviderCapacity, summari
 export { executeAiTask, type AiTaskType, type ExecuteTaskOptions, type TaskExecutionResult } from "./router.ts";
 export { computeCostUsd, MODEL_PRICING } from "./pricing.ts";
 export { AnthropicProvider, GeminiProvider, OpenAIProvider, GroqProvider } from "./providers.ts";
+export { redactSensitive, isTechnicalOrRawError, sanitizeAthleteErrorMessage } from "./errorSanitizer.ts";

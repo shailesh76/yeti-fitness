@@ -9,6 +9,9 @@
 // Rule for everything in this file: derive from real rows or report absence.
 // Never substitute a plausible-looking placeholder for missing data.
 
+import type { NutritionTargets } from './nutritionUtils';
+import { getScreenData, setScreenData, persistScreenData, hydrateScreenData } from './screenDataCache';
+
 export interface Macros {
   calories: number;
   protein: number;
@@ -17,6 +20,61 @@ export interface Macros {
 }
 
 export const ZERO_MACROS: Macros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+export interface HomeSnapshot {
+  athleteName: string;
+  currentWeight: number | null;
+  targetMacros: NutritionTargets | null;
+  consumedMacros: Macros;
+  todayPlan: TodaysPlanSummary | null;
+  waterMl: number;
+  steps: number;
+  weeklyWorkoutCount: number;
+  weeklyCalories: number;
+  streakDays?: number;
+  updatedAt: number;
+}
+
+export const EMPTY_HOME_SNAPSHOT: HomeSnapshot = {
+  athleteName: 'Athlete',
+  currentWeight: null,
+  targetMacros: null,
+  consumedMacros: ZERO_MACROS,
+  todayPlan: null,
+  waterMl: 0,
+  steps: 0,
+  weeklyWorkoutCount: 0,
+  weeklyCalories: 0,
+  updatedAt: 0,
+};
+
+export function homeCacheKey(userId: string): string {
+  return `home:${userId}`;
+}
+
+export function getHomeSnapshot(userId: string): HomeSnapshot | null {
+  const cached = getScreenData<HomeSnapshot>(homeCacheKey(userId));
+  return cached || null;
+}
+
+export async function hydrateHomeSnapshot(userId: string): Promise<HomeSnapshot | null> {
+  const memory = getHomeSnapshot(userId);
+  if (memory) return memory;
+  const hydrated = await hydrateScreenData<HomeSnapshot>(homeCacheKey(userId));
+  return hydrated || null;
+}
+
+export function patchHomeSnapshot(userId: string, patch: Partial<HomeSnapshot>): HomeSnapshot {
+  const current = getHomeSnapshot(userId) || { ...EMPTY_HOME_SNAPSHOT };
+  const next: HomeSnapshot = { ...current, ...patch, updatedAt: Date.now() };
+  void persistScreenData(homeCacheKey(userId), next).catch(() => {});
+  return next;
+}
+
+export async function persistHomeSnapshot(userId: string, snapshot: HomeSnapshot): Promise<HomeSnapshot> {
+  await persistScreenData(homeCacheKey(userId), snapshot).catch(() => {});
+  return snapshot;
+}
 
 /**
  * Normalizes whatever the nutrition source returned into real numbers.

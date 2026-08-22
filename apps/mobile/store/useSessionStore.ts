@@ -3,6 +3,7 @@ import { database, isNativeDbAvailable } from '../database';
 import { supabase } from '../lib/supabase';
 import { WorkoutRepository } from '@yeti/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLogStore } from './useLogStore';
 
 const workoutRepository = new WorkoutRepository(database, supabase);
 
@@ -338,7 +339,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         });
     });
 
-    // Complete session locally in WatermelonDB
+    // Publish workout history before persistence so every mounted summary sees it.
+    useLogStore.getState().prependWorkoutLog({
+      id: session.localId,
+      name: session.name,
+      completed_at: new Date(finishedAt).toISOString(),
+      total_volume: totalVolume,
+      exercises: session.exercises.map((exercise) => ({
+        id: `${session.localId}:${exercise.exerciseId}`,
+        exercise_id: exercise.exerciseId,
+        exercise_name: exercise.exerciseName,
+        sets: exercise.sets.map((item) => ({
+          reps: item.reps,
+          weight: String(item.weightKg),
+          completed: item.isCompleted,
+          tempo: item.tempo,
+          rpe: item.rpe,
+        })),
+      })),
+    });
+    set({ activeSession: null, isSaving: false, elapsedSeconds: 0 });
+
+    // Complete the already-created local session after the visible mutation.
     const suggestions: string[] = [];
     session.exercises.forEach((ex) => {
       if (ex.progressionSuggestion) {
@@ -347,8 +369,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     });
     const suggestionText = suggestions.join('\n') || undefined;
 
-    if (isNativeDbAvailable && database) {
-      try {
+    void (async () => {
+      if (isNativeDbAvailable && database) {
         await workoutRepository.completeWorkoutSession(
           session.localId,
           durationSeconds,
@@ -356,14 +378,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           session.notes || '',
           suggestionText
         );
-      } catch (e) {
-        console.warn('[Session] Failed to complete session locally:', e);
       }
-    }
-
-    // Clear local active session cache
-    await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
-    set({ activeSession: null, isSaving: false, elapsedSeconds: 0 });
+      await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
+    })().catch((e) => console.warn('[Session] Failed to persist completed session:', e));
 
     return { sessionId: session.localId || null, totalVolume };
   },

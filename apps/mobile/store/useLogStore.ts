@@ -3,6 +3,8 @@ import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { Q } from '@nozbe/watermelondb';
 import { WorkoutRepository, SessionSet, PersonalRecord } from '@yeti/database';
+import { getHomeSnapshot, patchHomeSnapshot } from '../services/homeSummary';
+import { invalidateScreenData } from '../services/screenDataCache';
 
 const workoutRepository = new WorkoutRepository(database, supabase);
 
@@ -61,6 +63,7 @@ interface LogState {
   fetchLogsHistory: (userId: string) => Promise<void>;
   fetchPRs: (userId: string) => Promise<void>;
   createPR: (athleteId: string, exerciseId: string, type: string, value: number) => Promise<void>;
+  prependWorkoutLog: (log: WorkoutLog) => void;
 }
 
 export const useLogStore = create<LogState>((set, get) => ({
@@ -68,6 +71,10 @@ export const useLogStore = create<LogState>((set, get) => ({
   prs: [],
   activeSession: null,
   loading: false,
+
+  prependWorkoutLog: (log) => set((state) => ({
+    logsHistory: state.logsHistory.some((item) => item.id === log.id) ? state.logsHistory : [log, ...state.logsHistory],
+  })),
 
   startSession: (planId, planName, exercises) => {
     const exercisesMapped = (exercises || []).map((pe: any) => {
@@ -168,6 +175,10 @@ export const useLogStore = create<LogState>((set, get) => ({
       );
 
       set({ loading: false, activeSession: null });
+      const currentHome = getHomeSnapshot(userId);
+      const prevCount = currentHome?.weeklyWorkoutCount ?? 0;
+      patchHomeSnapshot(userId, { weeklyWorkoutCount: prevCount + 1 });
+      invalidateScreenData(`home:${userId}`);
       await get().fetchLogsHistory(userId);
       return true;
     } catch (e) {

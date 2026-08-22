@@ -253,29 +253,36 @@ export interface NutritionTargets {
   carbs: number | null;
   fat: number | null;
   locked: boolean; // set true when a coach has locked the athlete's targets
+  mode: NutritionTargetMode; // 'AUTO' | 'MANUAL'
 }
 
 /** Supabase profiles row → the app's target object (missing values stay null). */
 export function mapProfileTargets(row: any): NutritionTargets {
+  const mode: NutritionTargetMode = row?.nutrition_target_mode === 'MANUAL' ? 'MANUAL' : 'AUTO';
   return {
     calories: row?.daily_calorie_target ?? null,
     protein: row?.daily_protein_target ?? null,
     carbs: row?.daily_carb_target ?? null,
     fat: row?.daily_fat_target ?? null,
     locked: !!row?.nutrition_targets_locked,
+    mode,
   };
 }
 
 /** App target object → canonical `profiles` columns for persistence. */
 export function toProfileTargetColumns(t: {
   calories?: number | null; protein?: number | null; carbs?: number | null; fat?: number | null;
-}): Record<string, number | null> {
-  return {
+}, mode?: NutritionTargetMode): Record<string, any> {
+  const cols: Record<string, any> = {
     daily_calorie_target: t.calories ?? null,
     daily_protein_target: t.protein ?? null,
     daily_carb_target: t.carbs ?? null,
     daily_fat_target: t.fat ?? null,
   };
+  if (mode) {
+    cols.nutrition_target_mode = mode;
+  }
+  return cols;
 }
 
 /** Per-user AsyncStorage key for the offline targets cache. */
@@ -283,7 +290,74 @@ export function targetsStorageKey(userId: string): string {
   return `@yeti_targets_${userId}`;
 }
 
+export type NutritionTargetMode = 'AUTO' | 'MANUAL';
+
+/** Per-user AsyncStorage key for whether targets are auto-calculated or manually overridden. */
+export function targetModeStorageKey(userId: string): string {
+  return `@yeti_target_mode_${userId}`;
+}
+
 /** An athlete may edit their own targets only when a coach hasn't locked them. */
 export function canAthleteEditTargets(locked: boolean): boolean {
   return !locked;
+}
+
+export interface ProfileMetrics {
+  weight_kg?: number | null;
+  height_cm?: number | null;
+  age?: number | null;
+  gender?: string | null;
+  activity_level?: string | number | null;
+  goal?: string | null;
+}
+
+/**
+ * Computes canonical daily nutrition targets from athlete profile metrics using
+ * the Mifflin-St Jeor formula + activity multiplier + goal adjustments.
+ * Authoritative single formula for calculated nutrition targets.
+ */
+export function calculateNutritionTargets(profile: ProfileMetrics): {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+} {
+  const w = Number(profile.weight_kg) || 75;
+  const h = Number(profile.height_cm) || 175;
+  const a = Number(profile.age) || 28;
+  const genderStr = (profile.gender || 'MALE').toUpperCase();
+  const genderOffset = genderStr.startsWith('M') ? 5 : genderStr.startsWith('F') ? -161 : -78;
+
+  // Mifflin-St Jeor base BMR
+  const bmr = 10 * w + 6.25 * h - 5 * a + genderOffset;
+
+  // Activity Multiplier
+  let mult = 1.375; // default LIGHT
+  if (typeof profile.activity_level === 'number' && profile.activity_level > 0) {
+    mult = profile.activity_level;
+  } else if (typeof profile.activity_level === 'string') {
+    const act = profile.activity_level.toUpperCase();
+    if (act.includes('SEDENTARY')) mult = 1.2;
+    else if (act.includes('LIGHT')) mult = 1.375;
+    else if (act.includes('MODERATE')) mult = 1.55;
+    else if (act.includes('VERY') || act.includes('EXTRA') || act.includes('ATHLETE')) mult = 1.9;
+    else if (act.includes('ACTIVE')) mult = 1.725;
+  }
+
+  let tdee = bmr * mult;
+
+  // Goal adjustment
+  const goalStr = (profile.goal || 'MAINTAIN').toUpperCase();
+  if (goalStr.includes('LOSE') || goalStr.includes('DEFICIT') || goalStr.includes('FAT_LOSS')) {
+    tdee -= 450;
+  } else if (goalStr.includes('BUILD') || goalStr.includes('GAIN') || goalStr.includes('BULK') || goalStr.includes('SURPLUS')) {
+    tdee += 350;
+  }
+
+  const calories = Math.max(Math.round(tdee), 1200); // Safe minimum floor
+  const protein = Math.round(w * 2.2); // 2.2g per kg bodyweight
+  const fat = Math.round((calories * 0.25) / 9); // 25% of calories from fat
+  const carbs = Math.max(Math.round((calories - protein * 4 - fat * 9) / 4), 50);
+
+  return { calories, protein, carbs, fat };
 }

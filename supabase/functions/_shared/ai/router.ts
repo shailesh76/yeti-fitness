@@ -1,8 +1,8 @@
 // Task-Based Dual-Provider AI Router (Gemini 2.5 Flash + Groq)
 // Routes AI calls according to task specialization and provider quotas/latency:
-//   - workout_plan: Gemini 2.5 Flash (Primary) → Groq llama-3.3-70b-versatile (Fallback)
-//   - exercise_swap: Groq llama-3.1-8b-instant (Primary) → Gemini 2.5 Flash (Fallback)
-//   - workout_summary: Groq llama-3.1-8b-instant (Primary) → Gemini 2.5 Flash (Fallback)
+//   - workout_plan: Gemini 2.5 Flash (Primary) → Groq openai/gpt-oss-20b (Fallback)
+//   - exercise_swap: Groq openai/gpt-oss-20b (Primary) → Gemini 2.5 Flash (Fallback)
+//   - workout_summary: Groq openai/gpt-oss-20b (Primary) → Gemini 2.5 Flash (Fallback)
 //   - nutrition_image: Gemini 2.5 Flash (Exclusive multimodal)
 import { AIProvider, AINotConfiguredError, ChatRequest, ProviderHttpError, TokenUsage } from "./types.ts";
 import { GeminiProvider, GroqProvider } from "./providers.ts";
@@ -33,12 +33,12 @@ function getProviderChainForTask(taskType: AiTaskType): AIProvider[] {
     case 'workout_plan':
       return [
         new GeminiProvider(),
-        new GroqProvider('llama-3.3-70b-versatile'),
+        new GroqProvider('openai/gpt-oss-20b'),
       ];
     case 'exercise_swap':
     case 'workout_summary':
       return [
-        new GroqProvider('llama-3.1-8b-instant'),
+        new GroqProvider('openai/gpt-oss-20b'),
         new GeminiProvider(),
       ];
     case 'nutrition_image':

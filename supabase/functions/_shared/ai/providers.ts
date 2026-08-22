@@ -339,7 +339,7 @@ export class GroqProvider implements AIProvider {
   readonly model: string;
   private key = Deno.env.get("GROQ_API_KEY") ?? "";
 
-  constructor(model = "llama-3.3-70b-versatile") {
+  constructor(model = "openai/gpt-oss-20b") {
     this.model = model;
   }
 
@@ -348,6 +348,8 @@ export class GroqProvider implements AIProvider {
   }
 
   async chat(req: ChatRequest): Promise<ProviderResult> {
+    const isGptOss = this.model.startsWith("openai/gpt-oss");
+    const maxTokens = req.maxTokens ? Math.max(req.maxTokens, isGptOss ? 50 : 1) : undefined;
     const res = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -358,7 +360,8 @@ export class GroqProvider implements AIProvider {
         model: this.model,
         messages: req.messages,
         temperature: req.temperature ?? 0.5,
-        ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),
+        ...(isGptOss ? { reasoning_effort: "low" } : {}),
+        ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(req.jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     });

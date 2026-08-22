@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Session, User } from '@supabase/supabase-js';
 import { useUserStore } from './useUserStore';
+import { clearScreenDataForUser } from '../services/screenDataCache';
 
 interface AuthState {
   session: Session | null;
@@ -16,8 +17,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const nextUserId = session?.user?.id;
     if (!nextUserId || (currentUserId && currentUserId !== nextUserId)) {
       useUserStore.getState().reset();
+      if (currentUserId) void clearScreenDataForUser(currentUserId);
     }
     set({ session, user: session?.user || null });
   },
 }));
-
