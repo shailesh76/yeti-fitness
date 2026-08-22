@@ -88,21 +88,24 @@ describe('Task 96 — Profile Consistency & Remote Persistence', () => {
       expect(mockSupabase.eq).toHaveBeenCalledWith('id', 'user-456');
     });
 
-    it('treats zero rows updated as a distinct, non-queued failure (no profiles row for this user)', async () => {
+    it('bootstraps a missing profile row after an error-free zero-row update', async () => {
       const mockSupabase = {
         from: vi.fn().mockReturnThis(),
         update: vi.fn().mockReturnThis(),
+        insert: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        maybeSingle: vi.fn()
+          .mockResolvedValueOnce({ data: null, error: null })
+          .mockResolvedValueOnce({ data: { id: 'user-ghost', full_name: 'Nobody' }, error: null }),
       };
 
       const repo = new UserRepository(null as any, mockSupabase);
       const res = await repo.updateProfile('user-ghost', { full_name: 'Nobody' });
 
-      expect(res.remoteSuccess).toBe(false);
+      expect(res.remoteSuccess).toBe(true);
       expect(res.queued).toBe(false);
-      expect(res.remoteError?.message).toMatch(/PROFILE_NOT_FOUND/);
+      expect(mockSupabase.insert).toHaveBeenCalledWith({ id: 'user-ghost', full_name: 'Nobody' });
     });
 
     it('does not queue a permanent RLS rejection as if it were an offline/network failure', async () => {

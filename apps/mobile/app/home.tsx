@@ -41,6 +41,7 @@ import { dedupeScreenRefresh, getScreenData, isScreenDataStale, setScreenData, s
 import type { NutritionTargets } from '../services/nutritionUtils';
 import { createScreenPerfTrace } from '../services/screenPerf';
 import { logBootStage } from '../services/authenticatedHydration';
+import { resolveProfileDisplayName } from '../services/profileIdentity';
 
 const { width } = Dimensions.get('window');
 
@@ -727,9 +728,10 @@ export default function HomeScreen() {
   const memorySnapshot = userId ? getHomeSnapshot(userId) : null;
   const initialTargets = userId ? getScreenData<NutritionTargets>(`nutrition-targets:${userId}`) : null;
   const userStoreName = useUserStore.getState().full_name;
+  const authDisplayName = resolveProfileDisplayName(null, user, userStoreName);
 
   const [athleteName, setAthleteName] = useState(
-    memorySnapshot?.athleteName || userStoreName || user?.user_metadata?.full_name || 'Athlete'
+    resolveProfileDisplayName(userStoreName, user, memorySnapshot?.athleteName)
   );
   const yetiScore: number | null = null;
   const prevYetiScore: number | null = null;
@@ -769,7 +771,7 @@ export default function HomeScreen() {
     if (!userId) return;
     void hydrateHomeSnapshot(userId).then((snapshot) => {
       if (snapshot) {
-        if (snapshot.athleteName) setAthleteName(snapshot.athleteName);
+        if (snapshot.athleteName) setAthleteName(resolveProfileDisplayName(null, user, snapshot.athleteName));
         if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
         if (snapshot.targetMacros) setTargetMacros(snapshot.targetMacros);
         if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
@@ -787,7 +789,7 @@ export default function HomeScreen() {
     if (!userId) return;
     return subscribeScreenData<HomeSnapshot>(userKey, (snapshot) => {
       if (!snapshot) return;
-      if (snapshot.athleteName) setAthleteName(snapshot.athleteName);
+      if (snapshot.athleteName) setAthleteName(resolveProfileDisplayName(null, user, snapshot.athleteName));
       if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
       if (snapshot.targetMacros !== undefined) setTargetMacros(snapshot.targetMacros);
       if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
@@ -822,7 +824,7 @@ export default function HomeScreen() {
           try {
             const profile = await userRepository.getProfile(userId);
             if (profile?.full_name) {
-              setAthleteName(profile.full_name);
+              setAthleteName(resolveProfileDisplayName(profile.full_name, user, authDisplayName));
               patchHomeSnapshot(userId, {
                 athleteName: profile.full_name,
                 currentWeight: profile.weight_kg != null ? Number(profile.weight_kg) : null,
@@ -830,7 +832,7 @@ export default function HomeScreen() {
             } else {
               const { data: remoteProfile } = await userRepository.fetchProfileRemote(userId);
               if (remoteProfile?.full_name) {
-                setAthleteName(remoteProfile.full_name);
+                setAthleteName(resolveProfileDisplayName(remoteProfile.full_name, user, authDisplayName));
                 patchHomeSnapshot(userId, {
                   athleteName: remoteProfile.full_name,
                   currentWeight: remoteProfile.weight_kg != null ? Number(remoteProfile.weight_kg) : null,

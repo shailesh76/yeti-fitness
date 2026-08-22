@@ -107,7 +107,7 @@ export default function RootLayout() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session as any);
       if (session?.user?.id) {
-        void beginAuthenticatedHydration(session.user.id);
+        void beginAuthenticatedHydration(session.user.id, session.user);
         void startProfileRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();
@@ -120,7 +120,7 @@ export default function RootLayout() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session as any);
       if (session?.user?.id) {
-        void beginAuthenticatedHydration(session.user.id);
+        void beginAuthenticatedHydration(session.user.id, session.user);
         void startProfileRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();

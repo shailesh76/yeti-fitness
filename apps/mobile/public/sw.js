@@ -1,5 +1,5 @@
 // Yeti PWA Service Worker — Static Asset Cache for Expo Web
-const CACHE_NAME = 'yeti-pwa-v2-20260823-beta5';
+const CACHE_NAME = 'yeti-pwa-v2-20260823-beta6';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',

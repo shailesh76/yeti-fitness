@@ -9,7 +9,8 @@ import { parseAuthTokensFromUrl } from '../lib/authTokens';
 import { useRepositories } from '../hooks/useRepositories';
 import { EVENTS } from '../constants/analyticsEvents';
 import { P, glowStyle, sharedStyles } from '../constants/premiumTheme';
-import { decidePostLoginRoute } from '@yeti/database';
+import { decidePostLoginRoute, POST_LOGIN_PROFILE_COLUMNS } from '@yeti/database';
+import { beginAuthenticatedHydration } from '../services/authenticatedHydration';
 
 /**
  * Lands here after a Google (or future Apple) OAuth redirect. Owns the entire
@@ -35,8 +36,9 @@ export default function OAuthCallbackScreen() {
   // never drift: a failed profile lookup shows a retryable error, never a
   // silent onboarding redirect for an existing user. Also used by the Retry
   // button below, so it's defined outside the mount-only effect.
-  async function resolvePostLogin(userId: string, opts: { skipIfUnmounted?: () => boolean } = {}) {
-    const result = await userRepository.fetchProfileRemote(userId);
+  async function resolvePostLogin(userId: string, authUser?: any, opts: { skipIfUnmounted?: () => boolean } = {}) {
+    void beginAuthenticatedHydration(userId, authUser);
+    const result = await userRepository.fetchProfileRemote(userId, POST_LOGIN_PROFILE_COLUMNS);
     if (opts.skipIfUnmounted?.()) return;
     const decision = decidePostLoginRoute(result);
 
@@ -55,7 +57,8 @@ export default function OAuthCallbackScreen() {
     if (!profileCheckUserId || profileCheckRetrying) return;
     setProfileCheckRetrying(true);
     try {
-      await resolvePostLogin(profileCheckUserId);
+      const { data: { user } } = await supabase.auth.getUser();
+      await resolvePostLogin(profileCheckUserId, user);
     } finally {
       setProfileCheckRetrying(false);
     }
@@ -72,7 +75,8 @@ export default function OAuthCallbackScreen() {
 
     async function routeAfterAuth(userId: string) {
       await eventRepository.logActivity(userId, EVENTS.LOGIN_COMPLETED);
-      await resolvePostLogin(userId, { skipIfUnmounted: () => cancelled });
+      const { data: { user } } = await supabase.auth.getUser();
+      await resolvePostLogin(userId, user, { skipIfUnmounted: () => cancelled });
     }
 
     async function finish(url: string | null) {

@@ -9,6 +9,11 @@ import { useAuthStore } from '../../store/useAuthStore';
 /* removed supabase */
 import { decideProfileSaveOutcome } from '@yeti/database';
 import { P, glowStyle, sharedStyles } from '../../constants/premiumTheme';
+import { calculateNutritionTargets } from '../../services/nutritionUtils';
+import { fetchNutritionTargets, getCachedNutritionTargets, saveNutritionTargets, setNutritionTargetMode } from '../../services/nutritionTargets';
+import { patchHomeSnapshot } from '../../services/homeSummary';
+import { persistScreenData } from '../../services/screenDataCache';
+import { getAuthDisplayName, shouldPreserveOnboardingTargets } from '../../services/profileIdentity';
 
 const GOALS_DATA = [
   {
@@ -79,8 +84,21 @@ export default function GoalsScreen() {
     setLoading(true);
     setSaveOutcome(null);
     try {
-      const result = await userRepository.updateProfile(session.user.id, {
-        full_name: userStore.full_name,
+      const calculatedTargets = calculateNutritionTargets({
+        weight_kg: parseFloat(userStore.weight_kg),
+        height_cm: parseFloat(userStore.height_cm),
+        age: parseInt(userStore.age),
+        gender: userStore.gender,
+        activity_level: userStore.activity_level,
+        goal: userStore.goal,
+      });
+
+      const currentTargets = (await getCachedNutritionTargets(session.user.id))
+        || (await fetchNutritionTargets(session.user.id));
+      const preserveTargets = shouldPreserveOnboardingTargets(currentTargets);
+      const fullName = userStore.full_name.trim() || getAuthDisplayName(session.user) || '';
+      const profileUpdates = {
+        full_name: fullName,
         age: parseInt(userStore.age),
         gender: userStore.gender,
         height_cm: parseFloat(userStore.height_cm),
@@ -88,7 +106,14 @@ export default function GoalsScreen() {
         body_fat_percent: userStore.body_fat_percent ? parseFloat(userStore.body_fat_percent) : null,
         activity_level: userStore.activity_level,
         goal: userStore.goal,
-      });
+        ...(!preserveTargets ? {
+          daily_calorie_target: calculatedTargets.calories,
+          daily_protein_target: calculatedTargets.protein,
+          daily_carb_target: calculatedTargets.carbs,
+          daily_fat_target: calculatedTargets.fat,
+        } : {}),
+      };
+      const result = await userRepository.updateProfile(session.user.id, profileUpdates);
 
       // Never treat a returned result as automatic success — decide from
       // the actual flags, the same way auth.tsx/oauth-callback.tsx decide
@@ -96,6 +121,18 @@ export default function GoalsScreen() {
       // success.
       const outcome = decideProfileSaveOutcome(result);
       if (outcome.kind === 'success') {
+        const savedProfile = { ...profileUpdates, ...result.profile, id: session.user.id };
+        userStore.initializeFromProfile(savedProfile, session.user.id);
+        await persistScreenData(`profile:${session.user.id}`, savedProfile).catch(() => {});
+        patchHomeSnapshot(session.user.id, {
+          ...(fullName ? { athleteName: fullName } : {}),
+          currentWeight: Number(profileUpdates.weight_kg),
+          ...(!preserveTargets ? { targetMacros: { ...calculatedTargets, locked: false, mode: 'AUTO' as const } } : {}),
+        });
+        if (!preserveTargets) {
+          await saveNutritionTargets(session.user.id, calculatedTargets, 'AUTO').catch(() => false);
+          await setNutritionTargetMode(session.user.id, 'AUTO').catch(() => {});
+        }
         router.replace('/onboarding/notifications');
       } else if (outcome.kind === 'offline-queued') {
         setSaveOutcome({
@@ -103,6 +140,15 @@ export default function GoalsScreen() {
           message: "You're offline. Your info is saved on this device and will sync automatically once you're back online.",
         });
       } else {
+        if ((globalThis as any).__DEV__) {
+          const err = result.remoteError;
+          console.error('[YETI ONBOARDING] profile save blocked', {
+            operation: 'profiles.update-or-bootstrap',
+            code: err?.code || err?.name || 'PROFILE_SAVE_BLOCKED',
+            status: err?.status || null,
+            message: err?.message || 'No profile row returned',
+          });
+        }
         setSaveOutcome({
           kind: 'blocked',
           message: 'Could not save your profile. Please try again.',

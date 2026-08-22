@@ -3,6 +3,7 @@ import { useUserStore } from '../store/useUserStore';
 import { hydrateHomeSnapshot, patchHomeSnapshot } from './homeSummary';
 import { getCachedNutritionTargets } from './nutritionTargets';
 import { hydrateScreenData } from './screenDataCache';
+import { getAuthDisplayName, resolveProfileDisplayName } from './profileIdentity';
 
 const inFlight = new Map<string, Promise<void>>();
 const completed = new Set<string>();
@@ -23,7 +24,7 @@ export function logBootStage(stage: string, userId?: string): void {
 }
 
 /** Starts durable, user-scoped hydration as soon as auth reveals an identity. */
-export function beginAuthenticatedHydration(userId: string): Promise<void> {
+export function beginAuthenticatedHydration(userId: string, authUser?: any): Promise<void> {
   if (!userId || completed.has(userId)) return Promise.resolve();
   const existing = inFlight.get(userId);
   if (existing) return existing;
@@ -45,10 +46,20 @@ export function beginAuthenticatedHydration(userId: string): Promise<void> {
         .then((value) => { logBootStage('NUTRITION_CACHE_READY', userId); return value; }),
     ]);
 
-    if (profile) useUserStore.getState().initializeFromProfile(profile, userId);
-    if (profile || targets) {
+    const authName = getAuthDisplayName(authUser);
+    if (profile) {
+      useUserStore.getState().initializeFromProfile({
+        ...profile,
+        full_name: resolveProfileDisplayName(profile.full_name, authUser),
+      }, userId);
+    } else if (authName) {
+      useUserStore.getState().initializeFromProfile({ id: userId, full_name: authName }, userId);
+    }
+    if (profile || targets || authName) {
       patchHomeSnapshot(userId, {
-        ...(profile?.full_name ? { athleteName: profile.full_name } : {}),
+        ...(profile?.full_name || authName
+          ? { athleteName: resolveProfileDisplayName(profile?.full_name, authUser, home?.athleteName) }
+          : {}),
         ...(profile?.weight_kg != null ? { currentWeight: Number(profile.weight_kg) } : {}),
         ...(targets ? { targetMacros: targets } : {}),
       });

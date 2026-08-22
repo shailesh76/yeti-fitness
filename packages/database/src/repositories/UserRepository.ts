@@ -171,18 +171,40 @@ export class UserRepository {
 
     if (this.supabase?.from) {
       try {
-        // update(), not upsert(): id is the profiles PK and a row is always
-        // created for every signed-up user by the SECURITY DEFINER trigger
-        // in 20260719_auto_create_profile_on_signup.sql, which bypasses RLS.
-        // There is no INSERT policy on profiles for any client role, so
-        // upsert()'s insert branch would be RLS-rejected if it were ever
-        // reached — update() fails safe (zero rows) instead.
-        const { data, error } = await this.supabase
+        let { data, error } = await this.supabase
           .from('profiles')
           .update(updates)
           .eq('id', userId)
           .select('id, full_name, age, gender, height_cm, weight_kg, body_fat_percent, activity_level, goal')
           .maybeSingle();
+
+        // OAuth can expose a valid auth identity before the signup trigger's
+        // profile row is visible (and older accounts can pre-date the trigger).
+        // Only insert after an error-free update matched zero rows. Existing
+        // profile data is therefore never replaced by this bootstrap branch.
+        if (!error && !data) {
+          const inserted = await this.supabase
+            .from('profiles')
+            .insert({ ...updates, id: userId })
+            .select('id, full_name, age, gender, height_cm, weight_kg, body_fat_percent, activity_level, goal')
+            .maybeSingle();
+          data = inserted.data;
+          error = inserted.error;
+
+          // If the signup trigger won the race after the first update, the
+          // insert sees the PK conflict. Re-run the update once against the
+          // now-existing row instead of surfacing a false onboarding error.
+          if (error?.code === '23505') {
+            const retried = await this.supabase
+              .from('profiles')
+              .update(updates)
+              .eq('id', userId)
+              .select('id, full_name, age, gender, height_cm, weight_kg, body_fat_percent, activity_level, goal')
+              .maybeSingle();
+            data = retried.data;
+            error = retried.error;
+          }
+        }
 
         if (error) {
           // The request reached the server and was rejected (RLS,
@@ -196,7 +218,7 @@ export class UserRepository {
           // Zero rows updated: no profiles row exists for this user. A
           // data-integrity condition, not connectivity — queuing it would
           // retry forever without ever succeeding.
-          remoteError = new Error('PROFILE_NOT_FOUND: no profiles row exists for this user');
+          remoteError = new Error('PROFILE_BOOTSTRAP_FAILED: profile update and self-owned insert returned no row');
           remoteSuccess = false;
         } else {
           remoteData = data;

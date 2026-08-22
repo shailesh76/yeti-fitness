@@ -84,10 +84,10 @@ export default function AuthScreen() {
    * profile lookup must show a retryable error, never a silent onboarding
    * redirect for an existing user.
    */
-  async function resolvePostLogin(userId: string) {
+  async function resolvePostLogin(userId: string, authUser?: any) {
     try {
       logBootStage('AUTH_READY', userId);
-      void beginAuthenticatedHydration(userId);
+      void beginAuthenticatedHydration(userId, authUser);
       const profilePromise = userRepository.fetchProfileRemote(userId, POST_LOGIN_PROFILE_COLUMNS);
       const timeoutPromise = new Promise<any>((_, reject) =>
         setTimeout(() => reject(new Error('Profile check timed out')), 7000)
@@ -177,7 +177,7 @@ export default function AuthScreen() {
         eventRepository.logActivity(data.user.id, EVENTS.LOGIN_COMPLETED).catch(() => {});
 
         // Check if user has completed onboarding profile, and route accordingly
-        await resolvePostLogin(data.user.id);
+        await resolvePostLogin(data.user.id, data.user);
       }
     } catch (e: any) {
       setError(describeAuthError(e));

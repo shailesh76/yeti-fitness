@@ -21,6 +21,7 @@ import Constants from 'expo-constants';
 import { dedupeScreenRefresh, getScreenData, hydrateScreenData, invalidateScreenData, persistScreenData, subscribeScreenData } from '../services/screenDataCache';
 import { createScreenPerfTrace } from '../services/screenPerf';
 import { markLocalProfileWrite } from '../services/profileRealtime';
+import { resolveProfileDisplayName } from '../services/profileIdentity';
 
 // The Yeti mascot portrait the athlete's avatar defaults to (no photo upload yet).
 const YETI_AVATAR = require('../assets/yeti_avatar_portrait.png');
@@ -349,7 +350,7 @@ export default function MoreScreen() {
     }
   };
 
-  const displayName = profile?.full_name || 'Dude Athlete';
+  const displayName = resolveProfileDisplayName(profile?.full_name, session?.user, useUserStore.getState().full_name);
   const currentGoal = profile?.goal ? GOAL_LABEL[profile.goal] : undefined;
 
   if (loading && !profile) {
