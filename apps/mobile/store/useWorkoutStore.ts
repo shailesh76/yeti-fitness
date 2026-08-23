@@ -1,9 +1,13 @@
 import { create } from 'zustand';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
-import { WorkoutRepository, ExerciseRepository, Exercise } from '@yeti/database';
+import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
+import { ExerciseRepository } from '@yeti/database/src/repositories/ExerciseRepository';
+import type { Exercise } from '@yeti/database/src/models/Exercise';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendLocalNotification } from '../services/notificationService';
+
+export type { Exercise };
 
 export interface WorkoutPlan {
   id: string;
@@ -33,10 +37,8 @@ export interface WorkoutPlanExercise {
   target_weight_kg?: number;
   notes?: string;
   superset_group?: string;
-  exercise?: Exercise;
+  exercise?: any;
 }
-
-export type { Exercise };
 
 const notifiedPlanIdsInMemory = new Set<string>();
 
@@ -48,6 +50,10 @@ interface WorkoutState {
   workoutPlans: WorkoutPlan[];
   loading: boolean;
   lastSyncedAt: string | null;
+  /** Authoritative active assignment metadata resolved from highest assigned_at */
+  activeAssignmentId: string | null;
+  activePlanId: string | null;
+  assignedAt: string | null;
   fetchExercises: () => Promise<void>;
   fetchWorkoutPlans: (userId: string) => Promise<void>;
   syncWorkoutPlans: (userId: string) => Promise<void>;
@@ -63,6 +69,9 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   workoutPlans: [],
   loading: false,
   lastSyncedAt: null,
+  activeAssignmentId: null,
+  activePlanId: null,
+  assignedAt: null,
   
   fetchExercises: async () => {
     set({ loading: true });
@@ -82,14 +91,30 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   syncWorkoutPlans: async (userId: string) => {
     set({ loading: true });
     
-    // Read the local WatermelonDB graph. SyncManager refreshes it separately.
+    // Read the local WatermelonDB graph on native, or direct PostgREST on web.
     try {
       const remoteAssigned = await workoutRepository.fetchWorkoutPlansRemote(userId);
 
-      if (remoteAssigned) {
+      if (remoteAssigned && remoteAssigned.length > 0) {
+        // Authoritative active assignment resolver:
+        // Contract: active assignment = highest assigned_at for authenticated athlete.
+        // Deterministic secondary tie-breaker if timestamps are equal.
+        const sortedAssignments = [...remoteAssigned].sort((a: any, b: any) => {
+          const timeA = new Date(a.assigned_at || a.created_at || 0).getTime();
+          const timeB = new Date(b.assigned_at || b.created_at || 0).getTime();
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+
+        const activeAssignment = sortedAssignments[0] || null;
+        const activeAssignmentId = activeAssignment?.id || null;
+        const activePlanId = activeAssignment?.plan?.id || null;
+        const assignedAt = activeAssignment?.assigned_at || null;
+
         const mappedPlans: any[] = [];
         const assignmentIds: string[] = [];
-        remoteAssigned.forEach((assigned: any) => {
+
+        sortedAssignments.forEach((assigned: any) => {
           const plan = assigned.plan;
           if (!plan) return;
           const coachName = plan.coach?.full_name || 'Coach';
@@ -112,11 +137,11 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
                 workout_plan_exercises: sortedExercises.map((ex: any) => ({
                   id: ex.id,
                   workout_plan_id: plan.id,
-                  exercise_id: ex.exercise?.id,
+                  exercise_id: ex.exercise?.id || ex.exercise_id,
                   sets: parseInt(ex.sets) || 3,
                   reps: parseInt(ex.reps) || 10,
                   weight: ex.weight || '',
-                  rest_seconds: 60,
+                  rest_seconds: ex.rest_seconds || 60,
                   order_index: ex.order_index,
                   superset_group: ex.superset_group ?? undefined,
                   exercise: ex.exercise
@@ -156,13 +181,22 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
 
         const nowStr = new Date().toISOString();
         set({ 
-          workoutPlans: mappedPlans as any, 
+          workoutPlans: mappedPlans as any,
+          activeAssignmentId,
+          activePlanId,
+          assignedAt,
           lastSyncedAt: nowStr,
           loading: false 
         });
 
       } else {
-        set({ loading: false });
+        set({
+          workoutPlans: [],
+          activeAssignmentId: null,
+          activePlanId: null,
+          assignedAt: null,
+          loading: false
+        });
       }
     } catch (e) {
       console.warn("Failed to load local workout plans:", e);

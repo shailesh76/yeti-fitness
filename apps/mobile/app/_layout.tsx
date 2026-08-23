@@ -12,6 +12,7 @@ import { useNotificationStore } from '../store/useNotificationStore';
 import { useSessionStore } from '../store/useSessionStore';
 import { P } from '../constants/premiumTheme';
 import { startProfileRealtime, stopProfileRealtime } from '../services/profileRealtime';
+import { startPlanRealtime, stopPlanRealtime } from '../services/planRealtime';
 import { beginAuthenticatedHydration, resetAuthenticatedHydration } from '../services/authenticatedHydration';
 
 
@@ -109,6 +110,7 @@ export default function RootLayout() {
       if (session?.user?.id) {
         void beginAuthenticatedHydration(session.user.id, session.user);
         void startProfileRealtime(session.user.id);
+        void startPlanRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();
         if (prefs.workoutReminders) {
@@ -122,6 +124,7 @@ export default function RootLayout() {
       if (session?.user?.id) {
         void beginAuthenticatedHydration(session.user.id, session.user);
         void startProfileRealtime(session.user.id);
+        void startPlanRealtime(session.user.id);
         registerPushToken(session.user.id);
         const prefs = useNotificationStore.getState();
         if (prefs.workoutReminders) {
@@ -130,6 +133,7 @@ export default function RootLayout() {
       } else {
         resetAuthenticatedHydration();
         void stopProfileRealtime();
+        void stopPlanRealtime();
         // Session expired / revoked / signed out. Redirect off protected
         // screens rather than leaving them rendering with a dead session.
         const currentRoot = segmentsRef.current[0];
@@ -142,6 +146,7 @@ export default function RootLayout() {
     return () => {
       subscription.unsubscribe();
       void stopProfileRealtime();
+      void stopPlanRealtime();
     };
   }, []);
 

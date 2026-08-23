@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { Q } from '@nozbe/watermelondb';
-import { WorkoutRepository, SessionSet, PersonalRecord } from '@yeti/database';
+import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
+import type { SessionSet } from '@yeti/database/src/models/SessionSet';
 import { getHomeSnapshot, patchHomeSnapshot } from '../services/homeSummary';
 import { invalidateScreenData } from '../services/screenDataCache';
 

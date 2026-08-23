@@ -16,8 +16,11 @@ import {
   AIConversation,
   AIMessage,
   AIMemory,
-  AIUsage
-  ,WorkoutPlan, PlanDay, PlanExercise, AssignedPlan
+  AIUsage,
+  WorkoutPlan,
+  PlanDay,
+  PlanExercise,
+  AssignedPlan,
 } from '@yeti/database';
 
 const ALL_MODELS = [

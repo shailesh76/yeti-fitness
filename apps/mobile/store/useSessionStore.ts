@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { database, isNativeDbAvailable } from '../database';
 import { supabase } from '../lib/supabase';
-import { WorkoutRepository } from '@yeti/database';
+import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLogStore } from './useLogStore';
 

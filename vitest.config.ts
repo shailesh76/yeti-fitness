@@ -13,6 +13,8 @@ export default defineConfig({
       '@yeti/training-engine': path.resolve(__dirname, './packages/training-engine/src'),
       '@yeti/sync': path.resolve(__dirname, './packages/sync/src'),
       '@yeti/types': path.resolve(__dirname, './packages/types'),
+      '@': path.resolve(__dirname, './apps/coach-dashboard'),
+      'zustand': path.resolve(__dirname, './apps/mobile/node_modules/zustand'),
     }
   }
 });
