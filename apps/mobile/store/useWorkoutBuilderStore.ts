@@ -64,6 +64,12 @@ interface WorkoutBuilderState {
 
   reset: () => void;
   loadExisting: (planId: string) => Promise<void>;
+  /** Pre-populates a brand-new (unsaved) draft from the AI Coach's
+   * edit_workout_plan action, already resolved to real exercise ids by
+   * services/aiCoachWorkoutPlan.ts's buildDraftFromAction. Distinct from
+   * loadExisting: there is no plan_id yet, so `save()` will create a new
+   * plan, exactly like starting a template from scratch. */
+  loadDraftFromAI: (name: string, notes: string, exercises: DraftExercise[]) => void;
   setName: (name: string) => void;
   setNotes: (notes: string) => void;
   setPendingPick: (pick: PendingPick) => void;
@@ -106,6 +112,20 @@ export const useWorkoutBuilderStore = create<WorkoutBuilderState>((set, get) => 
   ...initialState,
 
   reset: () => set({ ...initialState, exercises: [], originalExerciseIds: new Set() }),
+
+  loadDraftFromAI: (name, notes, exercises) => set({
+    planId: null,
+    planDayId: null,
+    name,
+    notes,
+    exercises,
+    loading: false,
+    saving: false,
+    error: null,
+    pendingPick: null,
+    replacingTempId: null,
+    originalExerciseIds: new Set(),
+  }),
 
   loadExisting: async (planId: string) => {
     set({ loading: true, error: null });

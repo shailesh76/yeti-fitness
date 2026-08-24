@@ -292,3 +292,94 @@ describe('P0 — workout builder reset race', () => {
     });
   });
 });
+
+describe('AI Coach workout-builder draft handoff', () => {
+  beforeEach(() => {
+    useWorkoutBuilderStore.getState().reset();
+  });
+
+  it('loads the resolved AI draft as a new unsaved plan without losing exercise configuration', () => {
+    const exercises = [
+      {
+        tempId: 'ai-draft-1',
+        exerciseId: 'exercise-1',
+        exerciseName: 'Incline Dumbbell Press',
+        muscleGroup: 'Chest',
+        sets: '4',
+        reps: '8-10',
+        weight: '',
+        restSeconds: 90,
+        warmupSets: 2,
+        isDropset: false,
+        supersetGroup: 'A',
+      },
+      {
+        tempId: 'ai-draft-2',
+        exerciseId: 'exercise-2',
+        exerciseName: 'Cable Row',
+        muscleGroup: 'Back',
+        sets: '3',
+        reps: '12',
+        weight: '',
+        targetRpe: 8,
+        warmupSets: 0,
+        isDropset: true,
+        supersetGroup: 'A',
+      },
+    ];
+
+    useWorkoutBuilderStore.setState({
+      planId: 'old-plan',
+      planDayId: 'old-day',
+      name: 'Old draft',
+      error: 'Old error',
+      replacingTempId: 'old-row',
+      originalExerciseIds: new Set(['old-plan-exercise']),
+    });
+
+    useWorkoutBuilderStore.getState().loadDraftFromAI(
+      'AI Upper Day',
+      'Created from Yeti AI Coach recommendation',
+      exercises,
+    );
+
+    const state = useWorkoutBuilderStore.getState();
+    expect(state.planId).toBeNull();
+    expect(state.planDayId).toBeNull();
+    expect(state.name).toBe('AI Upper Day');
+    expect(state.notes).toBe('Created from Yeti AI Coach recommendation');
+    expect(state.exercises).toEqual(exercises);
+    expect(state.originalExerciseIds.size).toBe(0);
+    expect(state.error).toBeNull();
+    expect(state.replacingTempId).toBeNull();
+  });
+
+  it('clears transient picker state so it cannot mutate the imported AI draft', () => {
+    useWorkoutBuilderStore.getState().setPendingPick({
+      exerciseId: 'stale-exercise',
+      exerciseName: 'Stale Exercise',
+    });
+    useWorkoutBuilderStore.getState().beginReplace('stale-row');
+
+    useWorkoutBuilderStore.getState().loadDraftFromAI('AI Draft', '', []);
+
+    const state = useWorkoutBuilderStore.getState();
+    expect(state.pendingPick).toBeNull();
+    expect(state.replacingTempId).toBeNull();
+    expect(state.exercises).toEqual([]);
+    expect(state.loading).toBe(false);
+    expect(state.saving).toBe(false);
+  });
+
+  it('handles an empty resolved draft without retaining exercises from an older plan', () => {
+    useWorkoutBuilderStore.getState().addExercise('old-exercise', 'Old Exercise');
+
+    expect(() => {
+      useWorkoutBuilderStore.getState().loadDraftFromAI('Empty AI Draft', '', []);
+    }).not.toThrow();
+
+    const state = useWorkoutBuilderStore.getState();
+    expect(state.name).toBe('Empty AI Draft');
+    expect(state.exercises).toEqual([]);
+  });
+});
