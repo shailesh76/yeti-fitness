@@ -450,4 +450,29 @@ describe('Workout Lifecycle: Start, Cancel, Abandon, Complete, and State Reconci
     // The assigned plans array still retains all days for future cycles/tracking
     expect(useWorkoutStore.getState().workoutPlans).toHaveLength(2);
   });
+
+  it('13. repeated finish persists once and discard cannot become completion history', async () => {
+    await useSessionStore.getState().startSession({
+      userId: athleteId,
+      planDayId: 'day-push',
+      sessionName: 'Repeated Finish',
+      exercises: [],
+    });
+    await Promise.all([
+      useSessionStore.getState().finishSession(),
+      useSessionStore.getState().finishSession(),
+    ]);
+    expect(mockSupabaseData.insertedSessions).toHaveLength(1);
+
+    mockSupabaseData.insertedSessions.length = 0;
+    await useSessionStore.getState().startSession({
+      userId: athleteId,
+      planDayId: 'day-pull',
+      sessionName: 'Discard Me',
+      exercises: [],
+    });
+    await useSessionStore.getState().abandonSession();
+    await useSessionStore.getState().finishSession();
+    expect(mockSupabaseData.insertedSessions).toHaveLength(0);
+  });
 });

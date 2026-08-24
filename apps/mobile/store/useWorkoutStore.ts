@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
-import { ExerciseRepository } from '@yeti/database/src/repositories/ExerciseRepository';
+import { ExerciseRepository, canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
 import type { Exercise } from '@yeti/database/src/models/Exercise';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendLocalNotification } from '../services/notificationService';
@@ -146,7 +146,10 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
                   rest_seconds: ex.rest_seconds || 60,
                   order_index: ex.order_index,
                   superset_group: ex.superset_group ?? undefined,
-                  exercise: ex.exercise
+                  exercise: ex.exercise ? {
+                    ...ex.exercise,
+                    name: canonicalExerciseName(ex.exercise.name, ex.exercise.id),
+                  } : ex.exercise
                 }))
               });
             });

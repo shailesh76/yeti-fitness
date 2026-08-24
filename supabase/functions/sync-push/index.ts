@@ -115,6 +115,7 @@ serve(async (req) => {
       const { created = [], updated = [], deleted = [] } = changes.workout_sessions;
       const toUpsert = [];
       for (const row of [...created, ...updated]) {
+        if (row.status === 'abandoned') continue;
         toUpsert.push({
           id: await toUUID(row.id),
           athlete_id: user.id,
@@ -134,7 +135,12 @@ serve(async (req) => {
         for (const id of deleted) {
           idsToDelete.push(await toUUID(id));
         }
-        const { error } = await supabaseClient.from('workout_sessions').delete().in('id', idsToDelete);
+        const { error } = await supabaseClient
+          .from('workout_sessions')
+          .delete()
+          .in('id', idsToDelete)
+          .eq('athlete_id', user.id)
+          .is('completed_at', null);
         if (error) throw error;
       }
     }

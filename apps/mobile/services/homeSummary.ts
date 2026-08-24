@@ -247,13 +247,15 @@ export interface ActiveSessionLike {
  * fabrication as the "75 min" it replaces.
  */
 export function buildTodaysPlan(input: {
-  activeSession?: ActiveSessionLike | null;
+  activeSession?: (ActiveSessionLike & { planDayId?: string | null; plan_day_id?: string | null }) | null;
   plans?: PlanLike[] | null;
   completedPlanDayIds?: Set<string> | null;
 }): TodaysPlanSummary | null {
   const { activeSession, plans, completedPlanDayIds } = input;
 
-  if (activeSession?.id) {
+  const activePlanDayId = activeSession?.planDayId || activeSession?.plan_day_id;
+  const activeDayIsCompleted = Boolean(activePlanDayId && completedPlanDayIds?.has(activePlanDayId));
+  if (activeSession?.id && !activeDayIsCompleted) {
     // An active session carries no exercise rows here (it's a live log, not a
     // template), so counts stay 0 and the caller omits the meta row rather
     // than showing zeros that read as "this workout has no exercises".

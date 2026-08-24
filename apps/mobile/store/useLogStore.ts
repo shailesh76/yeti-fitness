@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { Q } from '@nozbe/watermelondb';
-import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
+import { WorkoutRepository, dedupePersonalRecords } from '@yeti/database/src/repositories/WorkoutRepository';
+import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
 import type { SessionSet } from '@yeti/database/src/models/SessionSet';
 import { getHomeSnapshot, patchHomeSnapshot } from '../services/homeSummary';
 import { invalidateScreenData } from '../services/screenDataCache';
@@ -69,6 +70,7 @@ interface LogState {
   fetchPRs: (userId: string) => Promise<void>;
   createPR: (athleteId: string, exerciseId: string, type: string, value: number) => Promise<void>;
   prependWorkoutLog: (log: WorkoutLog) => void;
+  removeWorkoutLog: (id: string) => void;
 }
 
 export const useLogStore = create<LogState>((set, get) => ({
@@ -81,6 +83,9 @@ export const useLogStore = create<LogState>((set, get) => ({
     logsHistory: state.logsHistory.some((item) => item.id === log.id)
       ? state.logsHistory.map((item) => item.id === log.id ? { ...item, ...log } : item)
       : [log, ...state.logsHistory],
+  })),
+  removeWorkoutLog: (id) => set((state) => ({
+    logsHistory: state.logsHistory.filter((item) => item.id !== id),
   })),
 
   startSession: (planId, planName, exercises) => {
@@ -230,7 +235,7 @@ export const useLogStore = create<LogState>((set, get) => ({
           
           sets.forEach((setObj: any) => {
             const exId = setObj.exercise_id || 'unknown';
-            const exName = setObj.exercise_name || 'Exercise';
+            const exName = canonicalExerciseName(setObj.exercise_name || 'Exercise', setObj.exercise_id);
             if (!exercisesMap[exId]) {
               exercisesMap[exId] = {
                 id: setObj.id,
@@ -278,7 +283,7 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   fetchPRs: async (userId) => {
     try {
-      const data = await workoutRepository.getPersonalRecords(userId);
+      const data = dedupePersonalRecords(await workoutRepository.getPersonalRecords(userId));
       // Map PRs to legacy shape
       const mapped = await Promise.all(
         data.map(async (pr) => {
@@ -287,7 +292,7 @@ export const useLogStore = create<LogState>((set, get) => ({
             if (!database) throw new Error('No native database');
             const ex = await database.get('exercises').find(pr.exercise_id);
             if (ex) {
-              exerciseData = { name: (ex as any).name, muscle_group: (ex as any).muscle_group || 'Strength' };
+              exerciseData = { name: canonicalExerciseName((ex as any).name, pr.exercise_id), muscle_group: (ex as any).muscle_group || 'Strength' };
             }
           } catch {}
           return {
@@ -297,7 +302,7 @@ export const useLogStore = create<LogState>((set, get) => ({
             record_type: pr.record_type,
             value: pr.value,
             achieved_at: new Date(pr.achieved_at).toISOString(),
-            exercises: exerciseData,
+            exercises: { ...exerciseData, name: canonicalExerciseName(exerciseData.name, pr.exercise_id) },
           };
         })
       );

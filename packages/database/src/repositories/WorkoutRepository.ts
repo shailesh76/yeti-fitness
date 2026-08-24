@@ -115,6 +115,51 @@ export class WorkoutRepository {
     });
   }
 
+  async abandonWorkoutSession(sessionId: string): Promise<void> {
+    if (!this.db) return;
+    await this.db.write(async () => {
+      const sessions = await this.db.get<WorkoutSession>('workout_sessions')
+        .query(Q.where('id', sessionId), Q.take(1))
+        .fetch();
+      const session = sessions[0];
+      if (!session) return;
+
+      const sets = await this.db.get<SessionSet>('session_sets')
+        .query(Q.where('session_id', sessionId))
+        .fetch();
+      await this.db.batch(
+        ...sets.map((set) => set.prepareMarkAsDeleted()),
+        session.prepareMarkAsDeleted(),
+      );
+    });
+  }
+
+  async reconcileStaleActiveSession(
+    sessionId: string,
+    completedSessionId: string | null,
+    completedAt?: string | number | null,
+  ): Promise<void> {
+    if (!this.db) return;
+    if (completedSessionId !== sessionId) {
+      await this.abandonWorkoutSession(sessionId);
+      return;
+    }
+    await this.db.write(async () => {
+      const sessions = await this.db.get<WorkoutSession>('workout_sessions')
+        .query(Q.where('id', sessionId), Q.take(1))
+        .fetch();
+      const session = sessions[0];
+      if (!session) return;
+      await session.update((row) => {
+        row.status = 'completed';
+        const completedMs = typeof completedAt === 'number'
+          ? completedAt
+          : completedAt ? new Date(completedAt).getTime() : Date.now();
+        row.finished_at = Number.isFinite(completedMs) ? completedMs : Date.now();
+      });
+    });
+  }
+
   async saveExerciseSet(
     sessionId: string,
     userId: string,
@@ -148,22 +193,6 @@ export class WorkoutRepository {
         set.is_synced = false;
       });
     });
-  }
-
-  async abandonWorkoutSession(sessionId: string): Promise<void> {
-    if (!this.db) return;
-    try {
-      await this.db.write(async () => {
-        const session = await this.db.get<WorkoutSession>('workout_sessions').find(sessionId);
-        await session.update(s => {
-          s.status = 'abandoned';
-          s.finished_at = Date.now();
-          s.is_synced = false;
-        });
-      });
-    } catch (err) {
-      console.warn('[WorkoutRepository] Failed to mark session abandoned:', err);
-    }
   }
 
   async getWorkoutHistory(userId: string, limit = 50): Promise<any[]> {
@@ -216,7 +245,7 @@ export class WorkoutRepository {
         user_id: s.athlete_id,
         athlete_id: s.athlete_id,
         plan_day_id: s.plan_day_id,
-        name: s.plan_day?.workout_plan?.name || s.plan_day?.name || 'Workout Session',
+        name: [s.plan_day?.workout_plan?.name, s.plan_day?.name].filter(Boolean).join(' - ') || 'Workout Session',
         status: 'completed',
         started_at: new Date(s.started_at).getTime(),
         finished_at: new Date(s.completed_at).getTime(),
@@ -305,7 +334,7 @@ export class WorkoutRepository {
         user_id: s.athlete_id,
         athlete_id: s.athlete_id,
         plan_day_id: s.plan_day_id,
-        name: s.plan_day?.workout_plan?.name || s.plan_day?.name || 'Workout Session',
+        name: [s.plan_day?.workout_plan?.name, s.plan_day?.name].filter(Boolean).join(' - ') || 'Workout Session',
         status: 'completed',
         started_at: new Date(s.started_at).getTime(),
         finished_at: new Date(s.completed_at).getTime(),
@@ -813,4 +842,17 @@ function planExerciseRow(planDayId: string, ex: { exerciseId: string } & PlanExe
     superset_group: ex.supersetGroup ?? null,
     order_index: orderIndex,
   };
+}
+
+export function dedupePersonalRecords<T extends { exercise_id?: string; record_type?: string; value?: number; achieved_at?: string | number }>(records: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const r of records) {
+    const key = `${r.exercise_id}:${r.record_type}:${r.value}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(r);
+    }
+  }
+  return result;
 }

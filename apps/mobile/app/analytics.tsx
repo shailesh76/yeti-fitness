@@ -47,6 +47,8 @@ import { patchHomeSnapshot } from '../services/homeSummary';
 import { P, glowStyle } from '../constants/premiumTheme';
 import { dedupeScreenRefresh, getScreenData, hydrateScreenData, invalidateScreenData, isScreenDataStale, persistScreenData, subscribeScreenData } from '../services/screenDataCache';
 import { createScreenPerfTrace } from '../services/screenPerf';
+import { currentPersonalRecords } from '../services/personalRecordPresentation';
+import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
 
 const MASCOT = require('../assets/yeti_2d_mascot_exact.png');
 
@@ -326,15 +328,8 @@ export default function AnalyticsScreen() {
   const scoreDash = ((yetiScore ?? 0) / 100) * scoreCirc;
 
   // ── Strength (real PRs, newest per exercise) ────────────────────────────────
-  const strengthList = useMemo(() => {
-    const byExercise = new Map<string, any>();
-    (prs || []).forEach((pr) => {
-      const key = pr.exercise_id;
-      const prev = byExercise.get(key);
-      if (!prev || pr.achieved_at > prev.achieved_at) byExercise.set(key, pr);
-    });
-    return Array.from(byExercise.values()).slice(0, 6);
-  }, [prs]);
+  const currentPrs = useMemo(() => currentPersonalRecords(prs || []), [prs]);
+  const strengthList = useMemo(() => currentPrs.slice(0, 6), [currentPrs]);
 
   // ── Nutrition averages (real meal logs, last 30 days) ───────────────────────
   const nutritionAvg = useMemo(() => {
@@ -507,7 +502,7 @@ export default function AnalyticsScreen() {
                   style={[s.tabBtn, isActive && s.tabBtnActive]}
                   activeOpacity={0.75}
                 >
-                  <Text style={[s.tabBtnText, isActive && s.tabBtnTextActive]}>{tab.label}</Text>
+                  <Text style={[s.tabBtnText, isActive && s.tabBtnTextActive]} numberOfLines={1}>{tab.label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -590,7 +585,7 @@ export default function AnalyticsScreen() {
                     <View style={s.scoreStat}>
                       <View style={s.scoreStatIconRow}>
                         <Ionicons name="trophy" size={13} color="#EAB308" />
-                        <Text style={s.scoreStatValue}>{prs.length}</Text>
+                        <Text style={s.scoreStatValue}>{currentPrs.length}</Text>
                       </View>
                       <Text style={s.scoreStatLabel}>PRs set</Text>
                     </View>
@@ -783,7 +778,7 @@ export default function AnalyticsScreen() {
                             <Ionicons name="barbell-outline" size={18} color="#3B82F6" />
                           </View>
                           <View style={{ flex: 1, marginLeft: 12 }}>
-                            <Text style={s.strengthExName}>{pr.exercises?.name || 'Exercise'}</Text>
+                            <Text style={s.strengthExName}>{canonicalExerciseName(pr.exercises?.name || 'Exercise', pr.exercise_id)}</Text>
                             <Text style={s.strengthExType}>{(pr.record_type || 'PR').replace(/_/g, ' ')}</Text>
                           </View>
                           <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
@@ -1059,19 +1054,27 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
 
-  tabsScrollView: { marginBottom: 12 },
-  tabsRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 4 },
+  tabsScrollView: { height: 42, maxHeight: 42, flexGrow: 0, flexShrink: 0, marginBottom: 12 },
+  tabsRow: { height: 42, paddingHorizontal: 16, gap: 8, alignItems: 'center' },
   tabBtn: {
+    minWidth: 84,
+    height: 36,
+    minHeight: 36,
+    maxHeight: 36,
     paddingHorizontal: 16,
-    paddingVertical: 8,
     borderRadius: 99,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    flexGrow: 0,
+    alignSelf: 'center',
   },
   tabBtnActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
   tabBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
-  tabBtnTextActive: { color: '#FFFFFF', fontWeight: '700' },
+  tabBtnTextActive: { color: '#FFFFFF' },
 
   card: {
     backgroundColor: '#141822',

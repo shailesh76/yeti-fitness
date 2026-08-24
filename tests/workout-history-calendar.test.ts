@@ -235,7 +235,7 @@ describe('Workout History Calendar & Previous Date Navigation Suite', () => {
 
     expect(dayLogs).toHaveLength(1);
     expect(dayLogs[0].id).toBe('sess-modern-20');
-    expect(dayLogs[0].name).toBe('Strength Block A');
+    expect(dayLogs[0].name).toBe('Strength Block A - Leg Day');
   });
 
   it('3. Selecting an empty date (2026-08-21) returns an honest empty state with 0 logs', async () => {

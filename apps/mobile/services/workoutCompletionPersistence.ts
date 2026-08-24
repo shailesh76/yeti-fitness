@@ -24,10 +24,35 @@ type SupabaseLike = {
   from: (table: string) => any;
 };
 
+export interface WorkoutCompletionPersistenceResult {
+  sessionId: string;
+  status: 'complete' | 'sets_pending';
+  error?: unknown;
+}
+
+async function hasDurableCompletedSession(
+  client: SupabaseLike,
+  completion: DurableWorkoutCompletion,
+): Promise<boolean> {
+  try {
+    const query = client
+      .from('workout_sessions')
+      .select('id, completed_at')
+      .eq('id', completion.session.id)
+      .eq('athlete_id', completion.session.athlete_id);
+    const { data, error } = typeof query.maybeSingle === 'function'
+      ? await query.maybeSingle()
+      : await query.single();
+    return !error && String(data?.id || '') === completion.session.id && Boolean(data?.completed_at);
+  } catch {
+    return false;
+  }
+}
+
 export async function persistWorkoutCompletion(
   client: SupabaseLike,
   completion: DurableWorkoutCompletion,
-): Promise<string> {
+): Promise<WorkoutCompletionPersistenceResult> {
   const sessions = client.from('workout_sessions');
   const sessionWrite = typeof sessions.upsert === 'function'
     ? sessions.upsert(completion.session, { onConflict: 'id' })
@@ -37,11 +62,15 @@ export async function persistWorkoutCompletion(
     ? await selected.single()
     : await selected.maybeSingle();
 
-  if (error || !data?.id) {
-    throw error || new Error('Workout session persistence returned no id');
+  let persistedSessionId = data?.id ? String(data.id) : null;
+  if (error || !persistedSessionId) {
+    if (await hasDurableCompletedSession(client, completion)) {
+      persistedSessionId = completion.session.id;
+    } else {
+      throw error || new Error('Workout session persistence returned no id');
+    }
   }
 
-  const persistedSessionId = String(data.id);
   if (completion.sets.length > 0) {
     const rows = completion.sets.map((set) => ({
       ...set,
@@ -51,8 +80,10 @@ export async function persistWorkoutCompletion(
     const { error: setsError } = typeof sets.upsert === 'function'
       ? await sets.upsert(rows, { onConflict: 'id' })
       : await sets.insert(rows);
-    if (setsError) throw setsError;
+    if (setsError) {
+      return { sessionId: persistedSessionId, status: 'sets_pending', error: setsError };
+    }
   }
 
-  return persistedSessionId;
+  return { sessionId: persistedSessionId, status: 'complete' };
 }

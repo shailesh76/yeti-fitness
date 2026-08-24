@@ -23,9 +23,11 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import AppShell from '../components/AppShell';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
 import { P, sharedStyles } from '../constants/premiumTheme';
 import { getWorkoutLocalDate, formatWorkoutDisplayDate } from '../utils/workoutDate';
-import { completedPlanDayIds as deriveCompletedPlanDayIds, nextUncompletedPlanDay } from '../services/workoutLifecycle';
+import { completedPlanDayIds as deriveCompletedPlanDayIds, nextUncompletedPlanDay, assignedPlanProgress } from '../services/workoutLifecycle';
+import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
 
 const { width } = Dimensions.get('window');
 
@@ -43,6 +45,8 @@ export default function WorkoutScreen() {
   const pendingCompletion = useSessionStore((s) => s.pendingCompletion);
   const completionError = useSessionStore((s) => s.completionError);
   const retryPendingCompletion = useSessionStore((s) => s.retryPendingCompletion);
+  const resumeSession = useSessionStore((s) => s.resumeSession);
+  const clearStaleActiveSession = useSessionStore((s) => s.clearStaleActiveSession);
   const { logsHistory, fetchLogsHistory } = useLogStore();
   const { unreadCount, fetchNotifications } = useNotificationHistoryStore();
   const { exerciseRepository } = useRepositories();
@@ -51,11 +55,17 @@ export default function WorkoutScreen() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [weekOffset, setWeekOffset] = useState<number>(0);
+  const [historyReady, setHistoryReady] = useState(false);
 
   useEffect(() => {
     if (session?.user?.id) {
-      syncWorkoutPlans(session.user.id);
-      fetchLogsHistory(session.user.id);
+      setHistoryReady(false);
+      void Promise.all([
+        syncWorkoutPlans(session.user.id),
+        fetchLogsHistory(session.user.id),
+      ]).finally(() => setHistoryReady(true));
+    } else {
+      setHistoryReady(true);
     }
     fetchExercises();
     fetchNotifications();
@@ -97,10 +107,16 @@ export default function WorkoutScreen() {
     }, [session?.user?.id])
   );
 
-  // Redirect if a session is already active (returning to Workouts mid-session).
   useEffect(() => {
-    if (activeSession) router.replace('/workouts/session');
-  }, [activeSession?.localId]);
+    let wasConnected: boolean | null = null;
+    return NetInfo.addEventListener((state) => {
+      const connected = Boolean(state.isConnected && state.isInternetReachable !== false);
+      if (connected && wasConnected === false) {
+        void resumeSession();
+      }
+      wasConnected = connected;
+    });
+  }, [resumeSession]);
 
   // Map a plan's exercises into the session store's ExerciseInSession shape and
   // start a REAL tracked session (the screen no longer seeds demo data).
@@ -115,7 +131,7 @@ export default function WorkoutScreen() {
       assignmentId: plan.assignment_id,
       exercises: planExercises.map((pe: any) => ({
         exerciseId: pe.exercise_id,
-        exerciseName: pe.exercise?.name || 'Exercise',
+        exerciseName: canonicalExerciseName(pe.exercise?.name || 'Exercise', pe.exercise_id),
         targetSets: pe.sets || 3,
         targetReps: String(pe.reps ?? '8-10'),
         targetWeightKg: pe.weight ? parseFloat(pe.weight) : undefined,
@@ -241,8 +257,30 @@ export default function WorkoutScreen() {
     return deriveCompletedPlanDayIds(logsHistory ?? []);
   }, [logsHistory]);
 
+  // Normalized completion wins over a stale local active row for the same day.
+  useEffect(() => {
+    if (!historyReady || !activeSession) return;
+    if (activeSession.planDayId && completedPlanDayIds.has(activeSession.planDayId)) {
+      const completedMatch: any = (logsHistory || []).find((log: any) => (
+        log.plan_day_id === activeSession.planDayId && (log.completed_at || log.finished_at)
+      ));
+      void clearStaleActiveSession(
+        activeSession.localId,
+        completedMatch?.id || null,
+        completedMatch?.completed_at || completedMatch?.finished_at || null,
+      );
+      return;
+    }
+    router.replace('/workouts/session');
+  }, [historyReady, activeSession?.localId, activeSession?.planDayId, completedPlanDayIds, logsHistory, clearStaleActiveSession, router]);
+
   const currentAssignedDayId = useMemo(
     () => nextUncompletedPlanDay(uniquePlans, completedPlanDayIds)?.plan_day_id || null,
+    [uniquePlans, completedPlanDayIds],
+  );
+
+  const planProgress = useMemo(
+    () => assignedPlanProgress(uniquePlans, completedPlanDayIds),
     [uniquePlans, completedPlanDayIds],
   );
 
@@ -405,54 +443,72 @@ export default function WorkoutScreen() {
                 <Text style={styles.emptyStateText}>No workouts assigned yet</Text>
                 <Text style={styles.emptyStateSub}>Ask your coach, or build your own template below.</Text>
               </View>
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 12, paddingBottom: 4 }}
-              >
-                {uniquePlans.map((plan, idx) => {
-                  const isDone = completedPlanDayIds.has(plan.plan_day_id || '');
-                  const isCurrent = plan.plan_day_id === currentAssignedDayId;
-                  const muscleSummary = planMuscleSummary(plan);
-                  return (
-                    <Animated.View key={plan.id} entering={FadeInDown.delay(120 + idx * 60).duration(400)}>
-                      <TouchableOpacity
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel={isDone ? `${plan.name}, completed` : isCurrent ? `Start workout: ${plan.name}` : `${plan.name}, upcoming`}
-                        disabled={isDone || !isCurrent}
-                        onPress={() => handleStartWorkout(plan)}
-                        style={styles.featuredCard}
-                        activeOpacity={0.85}
-                      >
-                        <View style={styles.featuredIconTile}>
-                          <Ionicons name="barbell" size={26} color={P.ACCENT} />
-                        </View>
-                        {isDone ? (
-                          <View style={styles.featuredBadgeDone}>
-                            <Ionicons name="checkmark" size={12} color={P.ACCENT} />
-                          </View>
-                        ) : (
-                          <Ionicons name="chevron-forward" size={16} color={P.TEXT_MUT} style={styles.featuredChevron} />
-                        )}
-                        <Text style={styles.featuredName} numberOfLines={1}>{plan.name}</Text>
-                        {!!muscleSummary && (
-                          <Text style={styles.featuredMuscle} numberOfLines={1}>{muscleSummary}</Text>
-                        )}
-                        <View style={[sharedStyles.row, { gap: 4, marginTop: 6 }]}>
-                          <Ionicons name="barbell-outline" size={11} color={P.TEXT_MUT} />
-                          <Text style={styles.featuredMeta}>
-                            {plan.workout_plan_exercises?.length || 0} exercises
-                          </Text>
-                        </View>
-                        <Text style={styles.featuredMeta}>{isDone ? 'Completed' : isCurrent ? 'Current' : 'Upcoming'}</Text>
-                      </TouchableOpacity>
-                    </Animated.View>
-                  );
-                })}
-              </ScrollView>
-            )}
+            ) : planProgress.isComplete ? (
+              <View style={[sharedStyles.card, styles.planCompletedCard]}>
+                <View style={styles.planCompletedIcon}>
+                  <Ionicons name="checkmark" size={18} color={P.ACCENT} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.emptyStateText, { color: P.TEXT_PRI, textAlign: 'left' }]}>✓ Plan completed</Text>
+                  <Text style={[styles.featuredPlanTitle, { marginTop: 2 }]} numberOfLines={1}>
+                    {uniquePlans[0]?.name?.split(' - ')[0] || 'Assigned Plan'}
+                  </Text>
+                  <Text style={[styles.emptyStateSub, { textAlign: 'left', marginTop: 2 }]}>
+                    {planProgress.completed.length} / {uniquePlans.length} workouts completed
+                  </Text>
+                </View>
+              </View>
+            ) : planProgress.next ? (() => {
+              const plan: any = planProgress.next;
+              const parts = (plan?.name || '').split(' - ');
+              const mainPlanTitle = parts[0] || plan?.name || 'Assigned Plan';
+              const daySubTitle = parts.length > 1 ? parts.slice(1).join(' - ') : (plan?.day_number ? `Day ${plan.day_number}` : 'Day 1');
+              const muscleSummary = planMuscleSummary(plan);
+              const isCurrentActive = Boolean(activeSession && (activeSession as any).planDayId === plan?.plan_day_id);
+
+              return (
+                <Animated.View entering={FadeInDown.delay(120).duration(400)}>
+                  <TouchableOpacity
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start workout: ${mainPlanTitle}, ${daySubTitle}`}
+                    onPress={() => handleStartWorkout(plan)}
+                    style={styles.featuredActionableCard}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.featuredCardHeaderRow}>
+                      <View style={styles.featuredIconTile}>
+                        <Ionicons name="barbell" size={24} color={P.ACCENT} />
+                      </View>
+                      <View style={[styles.featuredStatusBadge, isCurrentActive && { backgroundColor: P.ACCENT_DIM, borderColor: P.ACCENT_BORDER }]}>
+                        <Text style={[styles.featuredStatusText, isCurrentActive && { color: P.ACCENT }]}>
+                          {isCurrentActive ? 'IN PROGRESS' : 'NEXT WORKOUT'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.featuredPlanHeader} numberOfLines={1}>{mainPlanTitle.toUpperCase()}</Text>
+                    <Text style={styles.featuredDayHeader} numberOfLines={1}>{daySubTitle}</Text>
+                    {!!muscleSummary && (
+                      <Text style={styles.featuredMuscleFocus} numberOfLines={1}>{muscleSummary}</Text>
+                    )}
+
+                    <View style={styles.featuredFooterRow}>
+                      <View style={[sharedStyles.row, { gap: 5 }]}>
+                        <Ionicons name="barbell-outline" size={13} color={P.TEXT_MUT} />
+                        <Text style={styles.featuredMetaText}>
+                          {plan.workout_plan_exercises?.length || 0} exercises
+                        </Text>
+                      </View>
+                      <View style={styles.startActionPill}>
+                        <Text style={styles.startActionPillText}>{isCurrentActive ? 'Resume' : 'Start'}</Text>
+                        <Ionicons name="play" size={11} color="#000" />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            })() : null}
 
             {/* ── Muscle Groups — real exercise counts per group ─────────── */}
             {muscleGroupCounts.length > 0 && (
@@ -825,7 +881,7 @@ export default function WorkoutScreen() {
                       {isExpanded && exercisesList.length > 0 && (
                         <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)', paddingTop: 8 }}>
                           {exercisesList.map((ex: any, exIdx: number) => {
-                            const exName = ex.exercise_name || ex.name || 'Exercise';
+                            const exName = canonicalExerciseName(ex.exercise_name || ex.name || 'Exercise', ex.exercise_id);
                             const sets = ex.sets || [];
                             return (
                               <View key={ex.exercise_id || ex.id || exIdx} style={styles.historyExerciseRow}>
@@ -1082,60 +1138,116 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Featured Workouts
-  featuredCard: {
-    width: (width - 60) / 2,
+  planCompletedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
     backgroundColor: P.CARD_BG,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
     borderRadius: P.RADIUS_CARD,
-    padding: 14,
+  },
+  planCompletedIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: P.ACCENT_DIM,
+    borderWidth: 1,
+    borderColor: P.ACCENT_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featuredPlanTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: P.TEXT_PRI,
+  },
+
+  // Actionable Assigned Workout Card
+  featuredActionableCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 18,
+    marginBottom: 4,
+  },
+  featuredCardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   featuredIconTile: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: P.RADIUS_SM,
     backgroundColor: P.ACCENT_DIM,
     borderWidth: 1,
     borderColor: P.ACCENT_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
   },
-  featuredBadgeDone: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: P.ACCENT_DIM,
+  featuredStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: P.RADIUS_PILL,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: P.ACCENT_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  featuredChevron: {
-    position: 'absolute',
-    top: 16,
-    right: 14,
-  },
-  featuredName: {
-    fontSize: 15,
-    fontWeight: '800',
+  featuredStatusText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
     color: P.TEXT_PRI,
-    letterSpacing: -0.2,
   },
-  featuredMuscle: {
-    fontSize: 11,
-    color: P.TEXT_SEC,
-    fontWeight: '500',
+  featuredPlanHeader: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: P.TEXT_PRI,
+    letterSpacing: -0.3,
+  },
+  featuredDayHeader: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: P.ACCENT,
     marginTop: 2,
   },
-  featuredMeta: {
-    fontSize: 10,
+  featuredMuscleFocus: {
+    fontSize: 12,
+    color: P.TEXT_SEC,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  featuredFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  featuredMetaText: {
+    fontSize: 12,
     color: P.TEXT_MUT,
-    fontWeight: '700',
+    fontWeight: '600',
+  },
+  startActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: P.ACCENT,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: P.RADIUS_PILL,
+  },
+  startActionPillText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#000',
   },
 
   viewAllText: {

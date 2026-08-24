@@ -39,7 +39,7 @@ export function mapExerciseRowToDTO(row: any): ExerciseDTO {
   return {
     id: row.id,
     slug: row.slug || (row.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    name: row.name,
+    name: canonicalExerciseName(row.name, row.id),
     category: row.category ?? null,
     equipment: row.equipment ?? null,
     primary_muscle: row.primary_muscle ?? null,
@@ -80,6 +80,34 @@ export function mapExerciseRowToDTO(row: any): ExerciseDTO {
     created_at: row.created_at ?? undefined,
     updated_at: row.updated_at ?? undefined,
   };
+}
+
+/**
+ * Removes only the technical collision suffix generated from legacy imports
+ * (e.g. `(Legacy a45e)`, `(Legacy 30ee)`), including repeated suffixes at the end of the string.
+ * Arbitrary legitimate names containing "Legacy" (e.g. "Legacy Strength Press", "Legacy Press Variation")
+ * are preserved intact. Historical references and UUIDs remain stable.
+ */
+export function canonicalExerciseName(name: string, exerciseId?: string | null): string {
+  let canonical = (name || '').trim();
+  if (!canonical) return '';
+
+  const idPrefix = (exerciseId || '').replace(/-/g, '').slice(0, 4).toLowerCase();
+  if (idPrefix) {
+    const specificSuffix = new RegExp(`\\s*\\(Legacy\\s+${idPrefix}\\)$`, 'i');
+    while (specificSuffix.test(canonical)) {
+      canonical = canonical.replace(specificSuffix, '').trimEnd();
+    }
+  }
+
+  // A historical snapshot may retain the suffix from a pre-merge exercise id.
+  // Strip the technical import marker even when it no longer matches the id.
+  const legacyCollisionSuffix = /\s*\((?:Legacy|legacy)\s+[a-f0-9]{3,8}\)$/i;
+  while (legacyCollisionSuffix.test(canonical)) {
+    canonical = canonical.replace(legacyCollisionSuffix, '').trimEnd();
+  }
+
+  return canonical;
 }
 
 // ─── AI Coach exercise-name resolution ───────────────────────────────────────

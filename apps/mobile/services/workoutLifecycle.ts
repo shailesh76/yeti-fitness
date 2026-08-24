@@ -37,3 +37,12 @@ export function nextUncompletedPlanDay<T extends { plan_day_id?: string }>(
 ): T | null {
   return plans.find((plan) => !plan.plan_day_id || !completedIds.has(plan.plan_day_id)) || null;
 }
+
+export function assignedPlanProgress<T extends { plan_day_id?: string }>(
+  plans: T[],
+  completedIds: Set<string>,
+): { next: T | null; completed: T[]; isComplete: boolean } {
+  const completed = plans.filter((plan) => Boolean(plan.plan_day_id && completedIds.has(plan.plan_day_id)));
+  const next = nextUncompletedPlanDay(plans, completedIds);
+  return { next, completed, isComplete: plans.length > 0 && next === null };
+}

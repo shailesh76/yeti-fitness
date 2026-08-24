@@ -264,7 +264,12 @@ describe('Scenario A: Coach Edit While Athlete Offline', () => {
     // 6. Athlete finishes workout offline
     const finishResult = await useSessionStore.getState().finishSession();
     expect(finishResult.sessionId).not.toBeNull();
-    expect(useSessionStore.getState().activeSession).toBeNull();
+    expect(finishResult.persisted).toBe(false);
+    expect(finishResult.pendingRetry).toBe(true);
+    expect(useSessionStore.getState().activeSession?.id).toBe(activeSession?.id);
+    expect(useSessionStore.getState().terminalState).toBe('ACTIVE');
+    expect(remoteTables.workout_sessions).toHaveLength(0);
+    expect(remoteTables.session_sets).toHaveLength(0);
 
     // 7. Athlete reconnects and syncs (push changes to server)
     const sessionId = finishResult.sessionId!;

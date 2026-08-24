@@ -905,8 +905,8 @@ export default function HomeScreen() {
             const allCandidatePlans = [...assignedPlans, ...(ownPlans || [])];
 
             const currentActive = useSessionStore.getState().activeSession;
-            let activeSession: { id: string; name?: string | null } | null = currentActive
-              ? { id: currentActive.localId, name: currentActive.name }
+            let activeSession: { id: string; name?: string | null; planDayId?: string | null } | null = currentActive
+              ? { id: currentActive.localId, name: currentActive.name, planDayId: currentActive.planDayId }
               : null;
 
             if (!activeSession && isNativeDbAvailable && database) {
@@ -916,7 +916,7 @@ export default function HomeScreen() {
                   .query(Q.where('status', 'active'))
                   .fetch()) as WorkoutSession[];
                 if (activeSessions.length > 0) {
-                  activeSession = { id: activeSessions[0].id, name: activeSessions[0].name };
+                  activeSession = { id: activeSessions[0].id, name: activeSessions[0].name, planDayId: activeSessions[0].plan_day_id };
                 }
               } catch {}
             }

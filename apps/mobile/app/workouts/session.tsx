@@ -43,6 +43,7 @@ import { EVENTS } from '../../constants/analyticsEvents';
 import { displayLabel } from '../../utils/exerciseDisplay';
 import { sanitizeAthleteErrorMessage } from '../../utils/aiErrorSanitizer';
 import { invalidateScreenData } from '../../services/screenDataCache';
+import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
 
 const MASCOT = require('../../assets/yeti_mascot_avatar.png');
 const RPE_SCALE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -190,7 +191,7 @@ const ProgressRow = memo(function ProgressRow({
     <TouchableOpacity
       accessible={true}
       accessibilityRole="button"
-      accessibilityLabel={`${ex.exerciseName}, ${state === 'done' ? 'completed' : state === 'current' ? 'in progress' : 'upcoming'}`}
+      accessibilityLabel={`${canonicalExerciseName(ex.exerciseName, ex.exerciseId)}, ${state === 'done' ? 'completed' : state === 'current' ? 'in progress' : 'upcoming'}`}
       activeOpacity={0.8}
       onPress={onPress}
       style={styles.progressRow}
@@ -207,7 +208,7 @@ const ProgressRow = memo(function ProgressRow({
         />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.progressName} numberOfLines={1}>{ex.exerciseName}</Text>
+        <Text style={styles.progressName} numberOfLines={1}>{canonicalExerciseName(ex.exerciseName, ex.exerciseId)}</Text>
         <Text style={styles.progressMeta}>{ex.sets.length} sets × {ex.targetReps} reps</Text>
       </View>
       <Text style={[styles.progressStatus, state === 'done' && { color: P.STEPS }]}>
@@ -228,6 +229,7 @@ export default function WorkoutSessionScreen() {
   const finishSession = useSessionStore((s) => s.finishSession);
   const abandonSession = useSessionStore((s) => s.abandonSession);
   const resumeSession = useSessionStore((s) => s.resumeSession);
+  const terminalState = useSessionStore((s) => s.terminalState);
 
   const timer = useTimerStore();
   const userId = useAuthStore((s) => s.session?.user?.id);
@@ -235,6 +237,8 @@ export default function WorkoutSessionScreen() {
 
   const [isFinishing, setIsFinishing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [endMenuOpen, setEndMenuOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string; message: string; confirmLabel: string; onConfirm: () => void;
   } | null>(null);
@@ -242,6 +246,7 @@ export default function WorkoutSessionScreen() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [heroUri, setHeroUri] = useState<string | undefined>(undefined);
   const [tip, setTip] = useState<{ loading: boolean; text?: string; error?: string }>({ loading: false });
+  const isTerminalBusy = terminalState === 'FINISHING' || terminalState === 'DISCARDING';
 
   // One interval drives both the elapsed clock and the rest countdown.
   useEffect(() => {
@@ -354,8 +359,18 @@ export default function WorkoutSessionScreen() {
   const doFinish = useCallback(async () => {
     setIsFinishing(true);
     try {
-      if (userId) await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
-      await finishSession();
+      const result = await finishSession();
+      if (!result.persisted) {
+        if (result.pendingRetry) notify('Save Error', 'Workout completion is pending. You can retry or discard this workout.');
+        return;
+      }
+      if (userId) {
+        try {
+          await eventRepository.logActivity(userId, EVENTS.WORKOUT_COMPLETED);
+        } catch (eventError) {
+          console.warn('[WorkoutSession] Completion saved but activity event logging failed:', eventError);
+        }
+      }
       if (userId) {
         invalidateScreenData(`home:${userId}`);
         invalidateScreenData(`progress:${userId}`);
@@ -371,22 +386,14 @@ export default function WorkoutSessionScreen() {
 
   const handleEndWorkout = useCallback(() => {
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setConfirmDialog({
-      title: 'End Workout',
-      message: 'Save and finish this workout session?',
-      confirmLabel: 'End Workout',
-      onConfirm: doFinish,
-    });
-  }, [doFinish]);
+    setEndMenuOpen(true);
+  }, []);
 
   const handleMenu = useCallback(() => {
-    setConfirmDialog({
-      title: activeSession?.name || 'Workout',
-      message: 'Discard this workout without saving?',
-      confirmLabel: 'Discard',
-      onConfirm: () => { abandonSession(); router.replace('/home'); },
-    });
-  }, [activeSession?.name, abandonSession, router]);
+    if (isTerminalBusy) return;
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEndMenuOpen(true);
+  }, [isTerminalBusy]);
 
   const saveNote = useCallback(() => {
     setNotes(noteDraft.trim());
@@ -456,8 +463,9 @@ export default function WorkoutSessionScreen() {
           accessible={true}
           accessibilityRole="button"
           accessibilityLabel="Workout options"
+          disabled={isTerminalBusy}
           onPress={handleMenu}
-          style={styles.circleBtn}
+          style={[styles.circleBtn, isTerminalBusy && { opacity: 0.5 }]}
         >
           <Ionicons name="ellipsis-vertical" size={18} color={P.TEXT_PRI} />
         </TouchableOpacity>
@@ -495,7 +503,7 @@ export default function WorkoutSessionScreen() {
                 <View style={styles.currentHeaderRow}>
                   <View style={{ flex: 1, paddingRight: 12 }}>
                     <Text style={styles.currentLabel}>CURRENT EXERCISE</Text>
-                    <Text style={styles.currentName} numberOfLines={2}>{currentExercise.exerciseName}</Text>
+                    <Text style={styles.currentName} numberOfLines={2}>{canonicalExerciseName(currentExercise.exerciseName, currentExercise.exerciseId)}</Text>
                     <View style={styles.currentMetaRow}>
                       <Ionicons name="body-outline" size={13} color={P.ACCENT} />
                       <Text style={styles.currentMeta}>
@@ -595,10 +603,10 @@ export default function WorkoutSessionScreen() {
               </View>
               {supersetInfo ? (
                 <View style={{ marginTop: 8 }}>
-                  <Text style={styles.supersetCurrent} numberOfLines={1}>{currentExercise?.exerciseName}</Text>
+                  <Text style={styles.supersetCurrent} numberOfLines={1}>{canonicalExerciseName(currentExercise?.exerciseName || '', currentExercise?.exerciseId)}</Text>
                   <View style={[sharedStyles.row, { gap: 5, marginTop: 4 }]}>
                     <Ionicons name="arrow-forward" size={12} color={P.TEXT_MUT} />
-                    <Text style={styles.supersetNext} numberOfLines={1}>Next: {supersetInfo.next.exerciseName}</Text>
+                    <Text style={styles.supersetNext} numberOfLines={1}>Next: {canonicalExerciseName(supersetInfo.next.exerciseName, supersetInfo.next.exerciseId)}</Text>
                   </View>
                 </View>
               ) : (
@@ -686,7 +694,7 @@ export default function WorkoutSessionScreen() {
                     <Ionicons name="barbell-outline" size={20} color={P.ACCENT} />
                   </View>
                   <View style={{ flex: 1, marginHorizontal: 12 }}>
-                    <Text style={styles.nextName} numberOfLines={1}>{nextExercise.exerciseName}</Text>
+                    <Text style={styles.nextName} numberOfLines={1}>{canonicalExerciseName(nextExercise.exerciseName, nextExercise.exerciseId)}</Text>
                     <Text style={styles.nextMeta}>{nextExercise.sets.length} sets · {nextExercise.targetReps} reps</Text>
                   </View>
                   <TouchableOpacity
@@ -802,12 +810,14 @@ export default function WorkoutSessionScreen() {
           accessible={true}
           accessibilityRole="button"
           accessibilityLabel="End workout"
-          disabled={isFinishing}
+          disabled={isTerminalBusy}
           onPress={handleEndWorkout}
           style={[styles.barBtnPrimary, glowStyle(P.DESTRUCTIVE, 12, 0.35)]}
         >
           <Ionicons name="stop-circle-outline" size={16} color="#FFF" />
-          <Text style={styles.barBtnPrimaryText}>End Workout</Text>
+          <Text style={styles.barBtnPrimaryText}>
+            {terminalState === 'FINISHING' ? 'Finishing…' : terminalState === 'DISCARDING' ? 'Discarding…' : 'End Workout'}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -822,8 +832,7 @@ export default function WorkoutSessionScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* In-app confirm modal — reliable across web, native, and preview frames
-          where Alert.alert / window.confirm are no-ops or suppressed */}
+      {/* In-app confirm modal — general fallback */}
       {confirmDialog && (
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -847,6 +856,114 @@ export default function WorkoutSessionScreen() {
                 style={styles.modalConfirmBtn}
               >
                 <Text style={styles.modalConfirmText}>{confirmDialog.confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* End Workout Modal — 3-option ActionSheet */}
+      {endMenuOpen && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxWidth: 380 }]}>
+            <Text style={styles.modalTitle}>End Workout</Text>
+            <Text style={[styles.modalMessage, { marginBottom: 16 }]}>Choose how you want to wrap up this workout.</Text>
+
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Finish Workout"
+              disabled={isTerminalBusy}
+              onPress={() => {
+                setEndMenuOpen(false);
+                doFinish();
+              }}
+              style={styles.endMenuOption}
+            >
+              <View style={[styles.endMenuIconBox, { backgroundColor: 'rgba(34, 197, 94, 0.15)' }]}>
+                <Ionicons name="checkmark-circle" size={22} color="#22C55E" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.endMenuOptionTitle}>Finish Workout</Text>
+                <Text style={styles.endMenuOptionSub}>Save the workout and add it to your history.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Discard Workout"
+              disabled={isTerminalBusy}
+              onPress={() => {
+                setEndMenuOpen(false);
+                setDiscardConfirmOpen(true);
+              }}
+              style={styles.endMenuOption}
+            >
+              <View style={[styles.endMenuIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <Ionicons name="trash-outline" size={20} color="#EF4444" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.endMenuOptionTitle, { color: '#EF4444' }]}>Discard Workout</Text>
+                <Text style={styles.endMenuOptionSub}>Delete this attempt without affecting your assigned workout.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Continue Workout"
+              disabled={isTerminalBusy}
+              onPress={() => setEndMenuOpen(false)}
+              style={[styles.endMenuOption, { borderBottomWidth: 0, marginBottom: 4 }]}
+            >
+              <View style={[styles.endMenuIconBox, { backgroundColor: 'rgba(255, 255, 255, 0.08)' }]}>
+                <Ionicons name="arrow-back" size={20} color={P.TEXT_PRI} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.endMenuOptionTitle}>Continue Workout</Text>
+                <Text style={styles.endMenuOptionSub}>Return to the workout.</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Second-step Discard Confirmation Modal */}
+      {discardConfirmOpen && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Discard this workout?</Text>
+            <Text style={styles.modalMessage}>
+              Your completed sets from this attempt will not be saved. The assigned workout will remain available to start again.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Keep Workout"
+                onPress={() => setDiscardConfirmOpen(false)}
+                style={styles.modalCancelBtn}
+              >
+                <Text style={styles.modalCancelText}>Keep Workout</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Discard"
+                  disabled={isTerminalBusy}
+                  onPress={async () => {
+                    setDiscardConfirmOpen(false);
+                    try {
+                      await abandonSession();
+                      router.replace('/workouts');
+                    } catch {
+                      notify('Discard Failed', 'Your workout is still active. Please try discarding it again.');
+                    }
+                  }}
+                style={[styles.modalConfirmBtn, { backgroundColor: '#EF4444' }]}
+              >
+                <Text style={styles.modalConfirmText}>Discard</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1122,6 +1239,35 @@ const styles = StyleSheet.create({
     borderRadius: P.RADIUS_PILL, backgroundColor: P.DESTRUCTIVE,
   },
   modalConfirmText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
+
+  // End workout options
+  endMenuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    gap: 14,
+  },
+  endMenuIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endMenuOptionTitle: {
+    color: P.TEXT_PRI,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  endMenuOptionSub: {
+    color: P.TEXT_MUT,
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+    lineHeight: 16,
+  },
 
   // Lock overlay
   lockOverlay: {

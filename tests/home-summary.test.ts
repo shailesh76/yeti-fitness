@@ -196,6 +196,15 @@ describe("Today's Plan — real metadata or an honest empty state", () => {
     expect(result?.name).toBe('Upper/Lower Program');
   });
 
+  it('does not resume an active session whose plan day is already completed', () => {
+    const result = buildTodaysPlan({
+      activeSession: { id: 'stale-active', name: 'Day 3', planDayId: 'day-3' },
+      plans: [{ id: 'p3', name: 'Day 3', plan_day_id: 'day-3' }],
+      completedPlanDayIds: new Set(['day-3']),
+    });
+    expect(result).toBeNull();
+  });
+
   it('falls back to an honest generic label (never a fake plan) for an unnamed session', () => {
     const result = buildTodaysPlan({ activeSession: { id: 'sess-9', name: '' }, plans: [] });
     expect(result?.name).toBe('Workout in progress');

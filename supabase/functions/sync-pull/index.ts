@@ -61,7 +61,7 @@ serve(async (req) => {
     // 1. Fetch Workout Sessions
     const { data: sessions, error: sessionErr } = await supabaseClient
       .from('workout_sessions')
-      .select('*')
+      .select('*, plan_day:plan_days(name, workout_plans(name))')
       .eq('athlete_id', user.id)
       .gte('updated_at', pullDate)
 
@@ -73,7 +73,7 @@ serve(async (req) => {
           id: row.id,
           user_id: row.athlete_id,
           plan_day_id: row.plan_day_id || null,
-          name: 'Workout',
+          name: [row.plan_day?.workout_plans?.name, row.plan_day?.name].filter(Boolean).join(' - ') || 'Workout Session',
           status: row.completed_at ? 'completed' : 'active',
           started_at: new Date(row.started_at).getTime(),
           finished_at: row.completed_at ? new Date(row.completed_at).getTime() : null,

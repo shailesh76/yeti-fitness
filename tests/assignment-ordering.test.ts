@@ -100,8 +100,9 @@ describe('Scenario B: Assignment Ordering & Resolution', () => {
     expect(state.activePlanId).toBe('plan-a');
     expect(state.assignedAt).toBe(t3);
 
-    // All days from all active and historical assignments are mapped, sorted by day_number
-    expect(state.workoutPlans).toHaveLength(3);
+    // Only the deterministic newest assignment drives the athlete's active
+    // lifecycle. Historical assignments remain remote history, not startable days.
+    expect(state.workoutPlans).toHaveLength(1);
     expect(state.workoutPlans[0].assignment_id).toBe('assign-3');
     expect(state.workoutPlans[0].name).toBe('Plan Alpha - Upper');
   });
