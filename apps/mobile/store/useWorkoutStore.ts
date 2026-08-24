@@ -114,7 +114,9 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         const mappedPlans: any[] = [];
         const assignmentIds: string[] = [];
 
-        sortedAssignments.forEach((assigned: any) => {
+        // Only the deterministic newest assignment is active. Older repeated
+        // assignments remain on the server as history and cannot resurrect days.
+        [activeAssignment].filter(Boolean).forEach((assigned: any) => {
           const plan = assigned.plan;
           if (!plan) return;
           const coachName = plan.coach?.full_name || 'Coach';

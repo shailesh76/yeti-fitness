@@ -29,14 +29,15 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')!
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || ''
+    const token = authHeader.replace(/^Bearer\s+/i, '')
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    const { data: { user } } = await supabaseClient.auth.getUser()
+    const { data: { user } } = await supabaseClient.auth.getUser(token || undefined)
     if (!user) throw new Error("Unauthorized")
 
     // Guard: reject excessively large payloads (> 512KB JSON)
@@ -121,7 +122,6 @@ serve(async (req) => {
           started_at: new Date(row.started_at).toISOString(),
           completed_at: row.finished_at ? new Date(row.finished_at).toISOString() : null,
           duration_seconds: row.duration_seconds || null,
-          progression_suggestion: row.progression_suggestion || null,
           updated_at: new Date().toISOString(),
         });
       }
@@ -149,11 +149,9 @@ serve(async (req) => {
           session_id: await toUUID(row.session_id),
           plan_exercise_id: row.plan_exercise_id ? await toUUID(row.plan_exercise_id) : null,
           weight: Math.min(Math.max(Number(row.weight_kg) || 0, 0), 1500),   // 0–1500 kg bounds
-          weight_kg: Math.min(Math.max(Number(row.weight_kg) || 0, 0), 1500),
           reps: Math.min(Math.max(Number(row.reps) || 0, 0), 200),           // 0–200 reps bounds
           completed_at: new Date(row.completed_at).toISOString(),
           exercise_id: row.exercise_id ? await toUUID(row.exercise_id) : null,
-          exercise_name: String(row.exercise_name || 'Exercise').slice(0, 200),
           updated_at: new Date().toISOString(),
         });
       }
@@ -167,6 +165,33 @@ serve(async (req) => {
           idsToDelete.push(await toUUID(id));
         }
         const { error } = await supabaseClient.from('session_sets').delete().in('id', idsToDelete);
+        if (error) throw error;
+      }
+    }
+
+    // Personal records are athlete-owned. Local display metadata stays local;
+    // only columns in the live personal_records contract are transported.
+    if (changes.personal_records) {
+      const { created = [], updated = [], deleted = [] } = changes.personal_records;
+      const toUpsert = [];
+      for (const row of [...created, ...updated]) {
+        toUpsert.push({
+          id: await toUUID(row.id),
+          athlete_id: user.id,
+          exercise_id: await toUUID(row.exercise_id),
+          record_type: row.record_type,
+          value: Number(row.value),
+          achieved_at: new Date(row.achieved_at).toISOString(),
+        });
+      }
+      if (toUpsert.length > 0) {
+        const { error } = await supabaseClient.from('personal_records').upsert(toUpsert);
+        if (error) throw error;
+      }
+      if (deleted.length > 0) {
+        const idsToDelete = [];
+        for (const id of deleted) idsToDelete.push(await toUUID(id));
+        const { error } = await supabaseClient.from('personal_records').delete().in('id', idsToDelete);
         if (error) throw error;
       }
     }

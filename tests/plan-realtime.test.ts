@@ -81,6 +81,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('../apps/mobile/services/screenDataCache', () => ({
   invalidateScreenData: vi.fn(),
   getScreenData: vi.fn(),
+  setScreenData: vi.fn(),
   persistScreenData: vi.fn(),
 }));
 

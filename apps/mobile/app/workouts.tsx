@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,29 +24,9 @@ import AppShell from '../components/AppShell';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 import { Ionicons } from '@expo/vector-icons';
 import { P, sharedStyles } from '../constants/premiumTheme';
+import { getWorkoutLocalDate, formatWorkoutDisplayDate } from '../utils/workoutDate';
+import { completedPlanDayIds as deriveCompletedPlanDayIds, nextUncompletedPlanDay } from '../services/workoutLifecycle';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Build a 7-day week strip around today. */
-function buildWeekDays() {
-  const days: { date: Date; label: string; num: number }[] = [];
-  const today = new Date();
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(startOfWeek);
-    d.setDate(startOfWeek.getDate() + i);
-    days.push({
-      date:  d,
-      label: d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 1).toUpperCase(),
-      num:   d.getDate(),
-    });
-  }
-  return days;
-}
-
-const WEEK_DAYS = buildWeekDays();
-const todayDateStr = new Date().toDateString();
 const { width } = Dimensions.get('window');
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -60,12 +40,17 @@ export default function WorkoutScreen() {
   // workout history here.
   const startSession = useSessionStore((s) => s.startSession);
   const activeSession = useSessionStore((s) => s.activeSession);
+  const pendingCompletion = useSessionStore((s) => s.pendingCompletion);
+  const completionError = useSessionStore((s) => s.completionError);
+  const retryPendingCompletion = useSessionStore((s) => s.retryPendingCompletion);
   const { logsHistory, fetchLogsHistory } = useLogStore();
   const { unreadCount, fetchNotifications } = useNotificationHistoryStore();
   const { exerciseRepository } = useRepositories();
-  const [expandedLogId, setExpandedLogId] = React.useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = React.useState('All');
-  const [favoriteIds, setFavoriteIds] = React.useState<Set<string>>(new Set());
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [weekOffset, setWeekOffset] = useState<number>(0);
 
   useEffect(() => {
     if (session?.user?.id) {
@@ -202,32 +187,72 @@ export default function WorkoutScreen() {
       .slice(0, 6);
   }, [exercises, selectedCategory]);
 
-  // Compute completed day date strings from history
-  const completedDateStrs = React.useMemo(() => {
-    const s = new Set<string>();
-    (logsHistory ?? []).forEach((l: any) => {
-      if (l.completed_at) s.add(new Date(l.completed_at).toDateString());
-    });
-    return s;
-  }, [logsHistory]);
+  const todayKey = useMemo(() => getWorkoutLocalDate(new Date()), []);
+  const selectedDateKey = useMemo(() => getWorkoutLocalDate(selectedDate), [selectedDate]);
 
-  // Track completed plan day IDs today
-  const completedPlanDayIdsToday = React.useMemo(() => {
-    const ids = new Set<string>();
-    const todayStr = new Date().toDateString();
-    
-    // Check history
-    (logsHistory ?? []).forEach((log: any) => {
-      if (log.completed_at && log.workout_plan_id) {
-        const completedDate = new Date(log.completed_at).toDateString();
-        if (completedDate === todayStr) {
-          ids.add(log.workout_plan_id);
-        }
+  // Derive visible 7-day week strip based on weekOffset
+  const visibleWeekDays = useMemo(() => {
+    const days: { date: Date; label: string; num: number; key: string }[] = [];
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+    const startOfWeek = new Date(base);
+    startOfWeek.setDate(base.getDate() - base.getDay()); // Sunday
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + i);
+      days.push({
+        date: d,
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 1).toUpperCase(),
+        num: d.getDate(),
+        key: getWorkoutLocalDate(d),
+      });
+    }
+    return days;
+  }, [weekOffset]);
+
+  const calendarMonthLabel = useMemo(() => {
+    if (visibleWeekDays.length === 0) return '';
+    const mid = visibleWeekDays[3]?.date || new Date();
+    return mid.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
+  }, [visibleWeekDays]);
+
+  // When week navigation changes, fetch the corresponding history range so older weeks load
+  useEffect(() => {
+    if (!userId || visibleWeekDays.length === 0) return;
+    const startIso = new Date(visibleWeekDays[0].date).toISOString();
+    const endIso = new Date(visibleWeekDays[6].date).toISOString();
+    fetchLogsHistory(userId, startIso, endIso);
+  }, [userId, weekOffset]);
+
+  // Compute marked dates from completed sessions
+  const markedDateCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    (logsHistory ?? []).forEach((l: any) => {
+      if (l.completed_at) {
+        const key = getWorkoutLocalDate(l.completed_at);
+        map.set(key, (map.get(key) || 0) + 1);
       }
     });
-
-    return ids;
+    return map;
   }, [logsHistory]);
+
+  // Assignment lifecycle is derived from durable normalized history, not date.
+  const completedPlanDayIds = useMemo(() => {
+    return deriveCompletedPlanDayIds(logsHistory ?? []);
+  }, [logsHistory]);
+
+  const currentAssignedDayId = useMemo(
+    () => nextUncompletedPlanDay(uniquePlans, completedPlanDayIds)?.plan_day_id || null,
+    [uniquePlans, completedPlanDayIds],
+  );
+
+  // Filter workouts for the selected calendar date
+  const workoutsForSelectedDate = useMemo(() => {
+    return (logsHistory ?? []).filter((log: any) => {
+      if (!log.completed_at) return false;
+      return getWorkoutLocalDate(log.completed_at) === selectedDateKey;
+    });
+  }, [logsHistory, selectedDateKey]);
 
   // Featured plan = first in list (assigned today) — used for the week-strip's
   // "Week X of Y · Plan Name" subtitle; the Featured Workouts cards below
@@ -352,10 +377,26 @@ export default function WorkoutScreen() {
               })}
             </ScrollView>
 
-            {/* ── Featured Workouts — real assigned/created plans, in the
-                reference's 2-visible-card layout, horizontally scrollable
-                so every plan stays reachable (not just the first 2) ─────── */}
-            <Text style={[sharedStyles.labelCaps, { marginTop: 20, marginBottom: 12 }]}>FEATURED WORKOUTS</Text>
+            {pendingCompletion && (
+              <View style={[sharedStyles.card, { marginTop: 16, padding: 14 }]}>
+                <Text style={styles.emptyStateText}>Workout saved on this device</Text>
+                <Text style={styles.emptyStateSub}>
+                  {completionError || 'Waiting to sync your completed workout.'}
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry saving completed workout"
+                  onPress={() => void retryPendingCompletion()}
+                  style={[styles.todayPill, { alignSelf: 'flex-start', marginTop: 10 }]}
+                >
+                  <Text style={styles.todayPillText}>Retry sync</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Coach assignments have their own lifecycle. Featured remains
+                reserved for a future real recommendation source. */}
+            <Text style={[sharedStyles.labelCaps, { marginTop: 20, marginBottom: 12 }]}>YOUR PLAN · ASSIGNED BY COACH</Text>
             {loading && uniquePlans.length === 0 ? (
               <SkeletonLoader rows={1} height={150} />
             ) : uniquePlans.length === 0 ? (
@@ -371,14 +412,16 @@ export default function WorkoutScreen() {
                 contentContainerStyle={{ gap: 12, paddingBottom: 4 }}
               >
                 {uniquePlans.map((plan, idx) => {
-                  const isDone = completedPlanDayIdsToday.has(plan.plan_day_id || '');
+                  const isDone = completedPlanDayIds.has(plan.plan_day_id || '');
+                  const isCurrent = plan.plan_day_id === currentAssignedDayId;
                   const muscleSummary = planMuscleSummary(plan);
                   return (
                     <Animated.View key={plan.id} entering={FadeInDown.delay(120 + idx * 60).duration(400)}>
                       <TouchableOpacity
                         accessible={true}
                         accessibilityRole="button"
-                        accessibilityLabel={isDone ? `${plan.name}, completed today` : `Start workout: ${plan.name}`}
+                        accessibilityLabel={isDone ? `${plan.name}, completed` : isCurrent ? `Start workout: ${plan.name}` : `${plan.name}, upcoming`}
+                        disabled={isDone || !isCurrent}
                         onPress={() => handleStartWorkout(plan)}
                         style={styles.featuredCard}
                         activeOpacity={0.85}
@@ -403,6 +446,7 @@ export default function WorkoutScreen() {
                             {plan.workout_plan_exercises?.length || 0} exercises
                           </Text>
                         </View>
+                        <Text style={styles.featuredMeta}>{isDone ? 'Completed' : isCurrent ? 'Current' : 'Upcoming'}</Text>
                       </TouchableOpacity>
                     </Animated.View>
                   );
@@ -533,52 +577,112 @@ export default function WorkoutScreen() {
               </View>
             )}
 
-            {/* ── Week strip ─────────────────────────────────────────────── */}
-            <Animated.View entering={FadeInDown.delay(80).duration(400)} style={styles.weekStrip}>
-              {WEEK_DAYS.map((day, i) => {
-                const isToday     = day.date.toDateString() === todayDateStr;
-                const isCompleted = completedDateStrs.has(day.date.toDateString());
-                const isPast      = day.date < new Date() && !isToday;
+            {/* ── Week strip / Calendar Section ──────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(80).duration(400)} style={{ marginBottom: 14 }}>
+              {/* Month Navigation Header */}
+              <View style={[sharedStyles.rowBetween, { marginBottom: 10, paddingHorizontal: 4 }]}>
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous week"
+                  onPress={() => setWeekOffset((prev) => prev - 1)}
+                  style={styles.calNavBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-back" size={16} color={P.TEXT_PRI} />
+                </TouchableOpacity>
 
-                return (
-                  <View
-                    key={i}
-                    style={[
-                      styles.dayTile,
-                      isToday     && styles.dayTileToday,
-                      isCompleted && styles.dayTileCompleted,
-                    ]}
-                  >
-                    <Text
+                <View style={[sharedStyles.row, { gap: 8 }]}>
+                  <Text style={styles.calendarMonthText}>{calendarMonthLabel}</Text>
+                  {weekOffset !== 0 && (
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Jump to today"
+                      onPress={() => {
+                        setWeekOffset(0);
+                        setSelectedDate(new Date());
+                      }}
+                      style={styles.todayPill}
+                    >
+                      <Text style={styles.todayPillText}>Today</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel="Next week"
+                  onPress={() => setWeekOffset((prev) => prev + 1)}
+                  style={styles.calNavBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-forward" size={16} color={P.TEXT_PRI} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Day Tiles */}
+              <View style={styles.weekStrip}>
+                {visibleWeekDays.map((day, i) => {
+                  const isToday = day.key === todayKey;
+                  const isSelected = day.key === selectedDateKey;
+                  const isCompleted = (markedDateCounts.get(day.key) || 0) > 0;
+                  const isPast = day.date < new Date() && !isToday;
+
+                  return (
+                    <TouchableOpacity
+                      key={day.key || i}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${day.label}, ${day.num}${isCompleted ? ', completed workout' : ''}${isSelected ? ', selected' : ''}`}
+                      onPress={() => setSelectedDate(day.date)}
+                      activeOpacity={0.75}
                       style={[
-                        styles.dayLabel,
-                        isToday && { color: P.ACCENT },
-                        isCompleted && { color: P.ACCENT },
-                        !isToday && !isCompleted && isPast && { color: P.TEXT_MUT },
+                        styles.dayTile,
+                        isSelected && styles.dayTileSelected,
+                        isToday && !isSelected && styles.dayTileToday,
+                        isCompleted && !isSelected && styles.dayTileCompleted,
                       ]}
                     >
-                      {day.label}
-                    </Text>
-                    {isCompleted ? (
-                      <Ionicons name="checkmark-circle" size={18} color={P.ACCENT} style={{ marginTop: 2 }} />
-                    ) : (
                       <Text
                         style={[
-                          styles.dayNum,
-                          isToday && { color: P.ACCENT, fontWeight: '900' },
-                          !isToday && isPast && { color: P.TEXT_MUT },
+                          styles.dayLabel,
+                          isSelected && { color: '#000', fontWeight: '800' },
+                          isToday && !isSelected && { color: P.ACCENT },
+                          isCompleted && !isSelected && { color: P.ACCENT },
+                          !isToday && !isCompleted && !isSelected && isPast && { color: P.TEXT_MUT },
                         ]}
                       >
-                        {day.num}
+                        {day.label}
                       </Text>
-                    )}
-                    {/* Small glowing dot under today's number */}
-                    {isToday && !isCompleted && (
-                      <View style={styles.todayDot} />
-                    )}
-                  </View>
-                );
-              })}
+                      {isCompleted ? (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={18}
+                          color={isSelected ? '#000' : P.ACCENT}
+                          style={{ marginTop: 2 }}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.dayNum,
+                            isSelected && { color: '#000', fontWeight: '900' },
+                            isToday && !isSelected && { color: P.ACCENT, fontWeight: '900' },
+                            !isToday && !isSelected && isPast && { color: P.TEXT_MUT },
+                          ]}
+                        >
+                          {day.num}
+                        </Text>
+                      )}
+                      {/* Small glowing dot under today's number */}
+                      {isToday && !isCompleted && !isSelected && (
+                        <View style={styles.todayDot} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </Animated.View>
 
             {/* ── Quick workout ──────────────────────────────────────────── */}
@@ -612,12 +716,6 @@ export default function WorkoutScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Create a new workout template"
                   onPress={() => {
-                    // Explicit reset at the true "start fresh" gesture, not
-                    // inferred from create.tsx's mount timing — see
-                    // useWorkoutBuilderStore.ts's reset() usage there for why:
-                    // this guarantees a clean draft regardless of whatever
-                    // was left in the store (an abandoned prior draft, or a
-                    // just-saved template's data lingering after router.back()).
                     useWorkoutBuilderStore.getState().reset();
                     router.push('/workouts/create');
                   }}
@@ -665,28 +763,40 @@ export default function WorkoutScreen() {
               )}
             </Animated.View>
 
-            {/* ── Workout History ─────────────────────────────────────────── */}
-            {logsHistory && logsHistory.length > 0 && (
-              <Animated.View entering={FadeInDown.delay(420).duration(400)}>
-                <Text style={[sharedStyles.labelCaps, { marginTop: 24, marginBottom: 10 }]}>
-                  WORKOUT HISTORY
+            {/* ── Workout History for Selected Date ───────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(420).duration(400)}>
+              <View style={[sharedStyles.rowBetween, { marginTop: 24, marginBottom: 10 }]}>
+                <Text style={sharedStyles.labelCaps}>
+                  WORKOUT HISTORY · {formatWorkoutDisplayDate(selectedDate)}
                 </Text>
-                {logsHistory.slice(0, 5).map((log: any, idx: number) => {
+              </View>
+
+              {workoutsForSelectedDate.length === 0 ? (
+                <View style={styles.emptyHistoryCard}>
+                  <Ionicons name="barbell-outline" size={26} color={P.TEXT_MUT} style={{ marginBottom: 6 }} />
+                  <Text style={styles.emptyHistoryTitle}>No workouts on this date</Text>
+                  <Text style={styles.emptyHistorySub}>Completed workouts for this day will appear here.</Text>
+                </View>
+              ) : (
+                workoutsForSelectedDate.map((log: any, idx: number) => {
                   const isExpanded = expandedLogId === log.id;
                   const dateStr = log.completed_at
-                    ? new Date(log.completed_at).toLocaleDateString(undefined, {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
+                    ? new Date(log.completed_at).toLocaleTimeString(undefined, {
+                        hour: '2-digit',
+                        minute: '2-digit',
                       })
-                    : 'Unknown Date';
+                    : '';
+                  const durationStr = log.duration_seconds
+                    ? `${Math.round(log.duration_seconds / 60)} min`
+                    : null;
+                  const exercisesList = log.exercises || log.logged_exercises || [];
+
                   return (
                     <TouchableOpacity
                       key={log.id || idx}
                       accessible={true}
                       accessibilityRole="button"
-                      accessibilityLabel={`${log.workout_plans?.name || 'Workout Session'}, ${dateStr}${isExpanded ? ', expanded' : ''}`}
+                      accessibilityLabel={`${log.name || 'Workout Session'}, ${dateStr}${isExpanded ? ', expanded' : ''}`}
                       activeOpacity={0.85}
                       onPress={() => setExpandedLogId(isExpanded ? null : log.id)}
                       style={[styles.historyCard, { flexDirection: 'column', alignItems: 'stretch' }]}
@@ -694,10 +804,12 @@ export default function WorkoutScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1, marginRight: 8 }}>
                           <Text style={styles.historyName} numberOfLines={1}>
-                            {log.workout_plans?.name || 'Workout Session'}
+                            {log.name || log.workout_plans?.name || 'Workout Session'}
                           </Text>
                           <Text style={styles.historyMeta}>
-                            {dateStr} · {log.total_volume ? `${log.total_volume} kg logged` : 'Completed'}
+                            {[dateStr, durationStr, log.total_volume ? `${log.total_volume} kg volume` : 'Completed']
+                              .filter(Boolean)
+                              .join(' · ')}
                           </Text>
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -710,23 +822,27 @@ export default function WorkoutScreen() {
                         </View>
                       </View>
                       
-                      {isExpanded && log.logged_exercises && log.logged_exercises.length > 0 && (
-                        <View style={{ marginTop: 6 }}>
-                          {log.logged_exercises.map((ex: any, exIdx: number) => (
-                            <View key={ex.exercise_id || exIdx} style={styles.historyExerciseRow}>
-                              <Text style={styles.historyExerciseName}>{ex.name}</Text>
-                              <Text style={styles.historyExerciseSets}>
-                                {ex.sets.map((s: any) => `${s.reps}x${s.weight}kg`).join(' · ')}
-                              </Text>
-                            </View>
-                          ))}
+                      {isExpanded && exercisesList.length > 0 && (
+                        <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)', paddingTop: 8 }}>
+                          {exercisesList.map((ex: any, exIdx: number) => {
+                            const exName = ex.exercise_name || ex.name || 'Exercise';
+                            const sets = ex.sets || [];
+                            return (
+                              <View key={ex.exercise_id || ex.id || exIdx} style={styles.historyExerciseRow}>
+                                <Text style={styles.historyExerciseName}>{exName}</Text>
+                                <Text style={styles.historyExerciseSets}>
+                                  {sets.map((s: any) => `${s.reps || 0}x${s.weight || s.weight_kg || 0}kg`).join(' · ') || 'Completed'}
+                                </Text>
+                              </View>
+                            );
+                          })}
                         </View>
                       )}
                     </TouchableOpacity>
                   );
-                })}
-              </Animated.View>
-            )}
+                })
+              )}
+            </Animated.View>
 
             <View style={{ height: 40 }} />
           </ScrollView>
@@ -758,7 +874,34 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // Week strip
+  // Calendar & Week strip
+  calNavBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarMonthText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: P.TEXT_PRI,
+    letterSpacing: 0.5,
+  },
+  todayPill: {
+    backgroundColor: P.ACCENT,
+    borderRadius: P.RADIUS_FULL,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  todayPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#000',
+  },
   weekStrip: {
     flexDirection:   'row',
     justifyContent:  'space-between',
@@ -766,9 +909,9 @@ const styles = StyleSheet.create({
     borderWidth:     1,
     borderColor:     P.CARD_BORDER,
     borderRadius:    P.RADIUS_CARD,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
-    marginBottom:    14,
+    marginBottom:    4,
   },
   dayTile: {
     flex:           1,
@@ -776,6 +919,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius:   10,
     gap:            2,
+  },
+  dayTileSelected: {
+    backgroundColor: P.ACCENT,
   },
   dayTileToday: {
     backgroundColor: P.ACCENT_DIM,
@@ -819,6 +965,27 @@ const styles = StyleSheet.create({
         shadowRadius:  4,
       },
     }),
+  },
+  emptyHistoryCard: {
+    backgroundColor: P.CARD_BG,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    borderRadius: P.RADIUS_CARD,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  emptyHistoryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: P.TEXT_PRI,
+    marginBottom: 2,
+  },
+  emptyHistorySub: {
+    fontSize: 12,
+    color: P.TEXT_MUT,
+    textAlign: 'center',
   },
 
   // Header

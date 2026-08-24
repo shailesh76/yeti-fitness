@@ -67,12 +67,12 @@ export async function hydrateHomeSnapshot(userId: string): Promise<HomeSnapshot 
 export function patchHomeSnapshot(userId: string, patch: Partial<HomeSnapshot>): HomeSnapshot {
   const current = getHomeSnapshot(userId) || { ...EMPTY_HOME_SNAPSHOT };
   const next: HomeSnapshot = { ...current, ...patch, updatedAt: Date.now() };
-  void persistScreenData(homeCacheKey(userId), next).catch(() => {});
+  void Promise.resolve(persistScreenData(homeCacheKey(userId), next)).catch(() => {});
   return next;
 }
 
 export async function persistHomeSnapshot(userId: string, snapshot: HomeSnapshot): Promise<HomeSnapshot> {
-  await persistScreenData(homeCacheKey(userId), snapshot).catch(() => {});
+  await Promise.resolve(persistScreenData(homeCacheKey(userId), snapshot)).catch(() => {});
   return snapshot;
 }
 
@@ -166,8 +166,11 @@ export interface PlanExerciseLike {
 
 export interface PlanLike {
   id?: string;
+  plan_day_id?: string;
+  assignment_id?: string;
   name?: string | null;
-  days?: { exercises?: PlanExerciseLike[] | null }[] | null;
+  days?: { id?: string; exercises?: PlanExerciseLike[] | null }[] | null;
+  workout_plan_exercises?: PlanExerciseLike[] | null;
 }
 
 export interface TodaysPlanSummary {
@@ -202,12 +205,17 @@ export function planMuscleSummary(plan: PlanLike | null | undefined): string {
       if (g) groups.add(g);
     }
   }
+  for (const ex of plan?.workout_plan_exercises || []) {
+    const g = ex?.exercise?.muscle_group || ex?.exercise?.primary_muscle || ex?.exercise?.target_muscle;
+    if (g) groups.add(g);
+  }
   return Array.from(groups).slice(0, 3).join(' · ');
 }
 
 export function planExerciseCount(plan: PlanLike | null | undefined): number {
   let count = 0;
   for (const day of plan?.days || []) count += (day?.exercises || []).length;
+  if (plan?.workout_plan_exercises) count += plan.workout_plan_exercises.length;
   return count;
 }
 
@@ -215,6 +223,9 @@ export function planSetCount(plan: PlanLike | null | undefined): number {
   let count = 0;
   for (const day of plan?.days || []) {
     for (const ex of day?.exercises || []) count += parseSets(ex?.sets);
+  }
+  for (const ex of plan?.workout_plan_exercises || []) {
+    count += parseSets(ex?.sets);
   }
   return count;
 }
@@ -238,8 +249,9 @@ export interface ActiveSessionLike {
 export function buildTodaysPlan(input: {
   activeSession?: ActiveSessionLike | null;
   plans?: PlanLike[] | null;
+  completedPlanDayIds?: Set<string> | null;
 }): TodaysPlanSummary | null {
-  const { activeSession, plans } = input;
+  const { activeSession, plans, completedPlanDayIds } = input;
 
   if (activeSession?.id) {
     // An active session carries no exercise rows here (it's a live log, not a
@@ -256,7 +268,16 @@ export function buildTodaysPlan(input: {
     };
   }
 
-  const plan = (plans || []).find((p) => p && (planExerciseCount(p) > 0 || p.name));
+  // Filter out plans whose plan_day_id is already completed today
+  const candidatePlans = (plans || []).filter((p) => {
+    if (!p) return false;
+    if (completedPlanDayIds && p.plan_day_id && completedPlanDayIds.has(p.plan_day_id)) {
+      return false;
+    }
+    return planExerciseCount(p) > 0 || !!p.name;
+  });
+
+  const plan = candidatePlans[0] || null;
   if (!plan) return null;
 
   return {

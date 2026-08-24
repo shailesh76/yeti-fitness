@@ -29,6 +29,10 @@ export interface WorkoutLog {
   name: string;
   completed_at: string;
   total_volume: number;
+  duration_seconds?: number;
+  plan_day_id?: string;
+  assignment_id?: string;
+  workout_plan_id?: string;
   exercises: LoggedExercise[];
 }
 
@@ -61,7 +65,7 @@ interface LogState {
   startSession: (planId: string, planName: string, exercises: any[]) => void;
   updateSetLog: (exerciseIdx: number, setIdx: number, fields: Partial<LoggedSet>) => void;
   finishSession: (userId: string) => Promise<boolean>;
-  fetchLogsHistory: (userId: string) => Promise<void>;
+  fetchLogsHistory: (userId: string, startDate?: string, endDate?: string, limit?: number) => Promise<void>;
   fetchPRs: (userId: string) => Promise<void>;
   createPR: (athleteId: string, exerciseId: string, type: string, value: number) => Promise<void>;
   prependWorkoutLog: (log: WorkoutLog) => void;
@@ -74,7 +78,9 @@ export const useLogStore = create<LogState>((set, get) => ({
   loading: false,
 
   prependWorkoutLog: (log) => set((state) => ({
-    logsHistory: state.logsHistory.some((item) => item.id === log.id) ? state.logsHistory : [log, ...state.logsHistory],
+    logsHistory: state.logsHistory.some((item) => item.id === log.id)
+      ? state.logsHistory.map((item) => item.id === log.id ? { ...item, ...log } : item)
+      : [log, ...state.logsHistory],
   })),
 
   startSession: (planId, planName, exercises) => {
@@ -189,10 +195,12 @@ export const useLogStore = create<LogState>((set, get) => ({
     }
   },
 
-  fetchLogsHistory: async (userId) => {
+  fetchLogsHistory: async (userId, startDate, endDate, limit = 50) => {
     set({ loading: true });
     try {
-      const sessions = await workoutRepository.getWorkoutHistory(userId);
+      const sessions = startDate && endDate
+        ? await workoutRepository.getWorkoutHistoryForRange(userId, startDate, endDate)
+        : await workoutRepository.getWorkoutHistory(userId, limit);
       
       const mappedLogs: WorkoutLog[] = await Promise.all(
         sessions.map(async (session: any) => {
@@ -242,6 +250,9 @@ export const useLogStore = create<LogState>((set, get) => ({
 
           return {
             id: session.id,
+            plan_day_id: session.plan_day_id,
+            assignment_id: session.assignment_id,
+            duration_seconds: session.duration_seconds,
             name: session.name || 'Workout Session',
             completed_at: new Date(session.finished_at || session.completed_at || session.started_at).toISOString(),
             total_volume,
@@ -250,7 +261,15 @@ export const useLogStore = create<LogState>((set, get) => ({
         })
       );
 
-      set({ logsHistory: mappedLogs, loading: false });
+      // Merge into logsHistory deduplicating by id
+      set((state) => {
+        const existingIds = new Set(mappedLogs.map((l) => l.id));
+        const keptPrevious = state.logsHistory.filter((l) => !existingIds.has(l.id));
+        const merged = [...mappedLogs, ...keptPrevious].sort(
+          (a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
+        );
+        return { logsHistory: merged, loading: false };
+      });
     } catch (e) {
       console.warn("fetchLogsHistory failed:", e);
       set({ loading: false });
@@ -263,8 +282,9 @@ export const useLogStore = create<LogState>((set, get) => ({
       // Map PRs to legacy shape
       const mapped = await Promise.all(
         data.map(async (pr) => {
-          let exerciseData = { name: 'Exercise', muscle_group: 'Strength' };
+          let exerciseData = (pr as any).exercises || { name: 'Exercise', muscle_group: 'Strength' };
           try {
+            if (!database) throw new Error('No native database');
             const ex = await database.get('exercises').find(pr.exercise_id);
             if (ex) {
               exerciseData = { name: (ex as any).name, muscle_group: (ex as any).muscle_group || 'Strength' };

@@ -150,6 +150,22 @@ export class WorkoutRepository {
     });
   }
 
+  async abandonWorkoutSession(sessionId: string): Promise<void> {
+    if (!this.db) return;
+    try {
+      await this.db.write(async () => {
+        const session = await this.db.get<WorkoutSession>('workout_sessions').find(sessionId);
+        await session.update(s => {
+          s.status = 'abandoned';
+          s.finished_at = Date.now();
+          s.is_synced = false;
+        });
+      });
+    } catch (err) {
+      console.warn('[WorkoutRepository] Failed to mark session abandoned:', err);
+    }
+  }
+
   async getWorkoutHistory(userId: string, limit = 50): Promise<any[]> {
     if (this.db) {
       return await this.db.get<WorkoutSession>('workout_sessions')
@@ -234,11 +250,109 @@ export class WorkoutRepository {
     }
   }
 
+  async getWorkoutHistoryForRange(userId: string, startDate: string, endDate: string): Promise<any[]> {
+    const startMs = new Date(startDate).getTime();
+    const endMs = new Date(endDate).getTime();
+
+    if (this.db) {
+      return await this.db.get<WorkoutSession>('workout_sessions')
+        .query(
+          Q.where('user_id', userId),
+          Q.where('status', 'completed'),
+          Q.where('finished_at', Q.gte(startMs)),
+          Q.where('finished_at', Q.lte(endMs)),
+          Q.sortBy('finished_at', Q.desc)
+        )
+        .fetch();
+    }
+
+    if (!this.supabase) return [];
+    try {
+      const { data, error } = await this.supabase
+        .from('workout_sessions')
+        .select(`
+          id,
+          athlete_id,
+          plan_day_id,
+          started_at,
+          completed_at,
+          duration_seconds,
+          plan_day:plan_days(name, workout_plan:workout_plans(name)),
+          session_sets (
+            id,
+            session_id,
+            exercise_id,
+            plan_exercise_id,
+            weight,
+            reps,
+            completed_at,
+            exercise:exercises(name)
+          )
+        `)
+        .eq('athlete_id', userId)
+        .not('completed_at', 'is', null)
+        .gte('completed_at', startDate)
+        .lte('completed_at', endDate)
+        .order('completed_at', { ascending: false });
+
+      if (error) {
+        console.warn('Failed to fetch remote workout history for range:', error);
+        return [];
+      }
+
+      return (data || []).map((s: any) => ({
+        id: s.id,
+        user_id: s.athlete_id,
+        athlete_id: s.athlete_id,
+        plan_day_id: s.plan_day_id,
+        name: s.plan_day?.workout_plan?.name || s.plan_day?.name || 'Workout Session',
+        status: 'completed',
+        started_at: new Date(s.started_at).getTime(),
+        finished_at: new Date(s.completed_at).getTime(),
+        completed_at: s.completed_at,
+        duration_seconds: s.duration_seconds,
+        total_volume_kg: (s.session_sets || []).reduce((sum: number, st: any) =>
+          sum + (Number(st.weight ?? 0) * Number(st.reps ?? 0)), 0),
+        notes: null,
+        sets: [...(s.session_sets || [])].sort((a: any, b: any) => {
+          const time = String(a.completed_at || '').localeCompare(String(b.completed_at || ''));
+          return time || String(a.id).localeCompare(String(b.id));
+        }).map((st: any, index: number) => ({
+          id: st.id,
+          session_id: st.session_id,
+          exercise_id: st.exercise_id,
+          exercise_name: st.exercise?.name || st.exercise_name || 'Exercise',
+          set_number: index + 1,
+          weight_kg: Number(st.weight ?? 0),
+          reps: Number(st.reps ?? 0),
+          rpe: undefined,
+          tempo: undefined,
+          rest_seconds: undefined,
+          is_warmup: false,
+          is_dropset: false,
+          completed_at: st.completed_at ? new Date(st.completed_at).getTime() : undefined,
+        })).sort((a: any, b: any) => a.set_number - b.set_number),
+      }));
+    } catch (err) {
+      console.warn('Error fetching remote workout history for range:', err);
+      return [];
+    }
+  }
+
   async getPersonalRecords(userId: string): Promise<PersonalRecord[]> {
-    if (!this.db) return [];
-    return await this.db.get<PersonalRecord>('personal_records')
-      .query(Q.where('athlete_id', userId))
-      .fetch();
+    if (this.db) {
+      return await this.db.get<PersonalRecord>('personal_records')
+        .query(Q.where('athlete_id', userId))
+        .fetch();
+    }
+    if (!this.supabase || typeof this.supabase.from !== 'function') return [];
+    const { data, error } = await this.supabase
+      .from('personal_records')
+      .select('id, athlete_id, exercise_id, record_type, value, achieved_at, exercises(name, muscle_group)')
+      .eq('athlete_id', userId)
+      .order('achieved_at', { ascending: false });
+    if (error) throw error;
+    return (data || []) as unknown as PersonalRecord[];
   }
 
   async savePersonalRecord(
@@ -247,16 +361,66 @@ export class WorkoutRepository {
     recordType: string,
     value: number
   ): Promise<PersonalRecord> {
-    this.requireDb();
-    return this.db.write(async () => {
-      return this.db.get<PersonalRecord>('personal_records').create(pr => {
-        pr.athlete_id = athleteId;
-        pr.exercise_id = exerciseId;
-        pr.record_type = recordType;
-        pr.value = value;
-        pr.achieved_at = Date.now();
+    if (this.db) {
+      return this.db.write(async () => {
+        return this.db.get<PersonalRecord>('personal_records').create(pr => {
+          pr.athlete_id = athleteId;
+          pr.exercise_id = exerciseId;
+          pr.record_type = recordType;
+          pr.value = value;
+          pr.achieved_at = Date.now();
+        });
       });
-    });
+    }
+    if (!this.supabase || typeof this.supabase.from !== 'function') this.requireDb();
+    const { data, error } = await this.supabase
+      .from('personal_records')
+      .insert({
+        athlete_id: athleteId,
+        exercise_id: exerciseId,
+        record_type: recordType,
+        value,
+        achieved_at: new Date().toISOString(),
+      })
+      .select('id, athlete_id, exercise_id, record_type, value, achieved_at')
+      .single();
+    if (error) throw error;
+    return data as unknown as PersonalRecord;
+  }
+
+  async recordPersonalBests(
+    athleteId: string,
+    sets: Array<{ exerciseId: string; weight: number; reps: number }>,
+  ): Promise<void> {
+    const existing = await this.getPersonalRecords(athleteId);
+    const best = new Map<string, number>();
+    for (const record of existing) {
+      best.set(`${record.exercise_id}:${record.record_type}`, Math.max(
+        best.get(`${record.exercise_id}:${record.record_type}`) || 0,
+        Number(record.value),
+      ));
+    }
+
+    const candidates = new Map<string, { exerciseId: string; recordType: string; value: number }>();
+    for (const set of sets) {
+      if (set.reps <= 0) continue;
+      const values = [
+        { recordType: 'max_reps', value: set.reps },
+        ...(set.weight > 0 ? [{ recordType: 'max_weight', value: set.weight }] : []),
+      ];
+      for (const value of values) {
+        const key = `${set.exerciseId}:${value.recordType}`;
+        if (value.value > (candidates.get(key)?.value || 0)) {
+          candidates.set(key, { exerciseId: set.exerciseId, ...value });
+        }
+      }
+    }
+
+    for (const [key, candidate] of candidates) {
+      if (candidate.value > (best.get(key) || 0)) {
+        await this.savePersonalRecord(athleteId, candidate.exerciseId, candidate.recordType, candidate.value);
+      }
+    }
   }
 
   async getVolumeHistory(userId: string): Promise<Array<{ date: number; volume: number }>> {

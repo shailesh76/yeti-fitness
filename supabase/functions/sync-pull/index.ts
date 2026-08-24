@@ -30,14 +30,15 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')!
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || ''
+    const token = authHeader.replace(/^Bearer\s+/i, '')
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    const { data: { user } } = await supabaseClient.auth.getUser()
+    const { data: { user } } = await supabaseClient.auth.getUser(token || undefined)
     if (!user) throw new Error("Unauthorized")
 
     const { lastPulledAt, schemaVersion } = await req.json()
@@ -52,6 +53,7 @@ serve(async (req) => {
       assigned_plans: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       workout_sessions: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       session_sets: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
+      personal_records: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       meal_logs: { created: [] as any[], updated: [] as any[], deleted: [] as any[] },
       measurements: { created: [] as any[], updated: [] as any[], deleted: [] as any[] }
     }
@@ -67,18 +69,18 @@ serve(async (req) => {
 
     if (sessions) {
       for (const row of sessions) {
-        const mapped = {
+        const mapped: Record<string, unknown> = {
           id: row.id,
           user_id: row.athlete_id,
           plan_day_id: row.plan_day_id || null,
-          name: row.name || 'Workout',
+          name: 'Workout',
           status: row.completed_at ? 'completed' : 'active',
           started_at: new Date(row.started_at).getTime(),
           finished_at: row.completed_at ? new Date(row.completed_at).getTime() : null,
           duration_seconds: row.duration_seconds || null,
-          total_volume_kg: row.total_volume_kg || null,
-          notes: row.notes || null,
-          progression_suggestion: row.progression_suggestion || null,
+          total_volume_kg: null,
+          notes: null,
+          progression_suggestion: null,
           is_synced: true,
           created_at: new Date(row.started_at).getTime(),
           updated_at: new Date(row.updated_at || row.completed_at || row.started_at).getTime()
@@ -145,6 +147,28 @@ serve(async (req) => {
           }
         }
       }
+    }
+
+    // personal_records has no updated_at column in the live schema. achieved_at
+    // is immutable and therefore provides the incremental cursor for new PRs.
+    const { data: records, error: recordsErr } = await supabaseClient
+      .from('personal_records')
+      .select('id, athlete_id, exercise_id, record_type, value, achieved_at')
+      .eq('athlete_id', user.id)
+      .gte('achieved_at', pullDate)
+    if (recordsErr) throw recordsErr
+    for (const row of records || []) {
+      const achievedAt = new Date(row.achieved_at).getTime()
+      changes.personal_records.created.push({
+        id: row.id,
+        athlete_id: row.athlete_id,
+        exercise_id: row.exercise_id,
+        record_type: row.record_type,
+        value: Number(row.value),
+        achieved_at: achievedAt,
+        created_at: achievedAt,
+        updated_at: achievedAt,
+      })
     }
 
     // 3. Fetch Meal Logs

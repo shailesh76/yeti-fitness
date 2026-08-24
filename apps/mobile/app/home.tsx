@@ -30,6 +30,8 @@ import { fetchDailyTelemetry } from '../services/wearableService';
 import { fetchNutritionTargets, getCachedNutritionTargets } from '../services/nutritionTargets';
 import { useFoodStore } from '../store/useFoodStore';
 import { useUserStore } from '../store/useUserStore';
+import { useSessionStore } from '../store/useSessionStore';
+import { useWorkoutStore } from '../store/useWorkoutStore';
 import {
   Macros, ZERO_MACROS, TodaysPlanSummary, ReadinessState,
   resolveConsumedMacros, sumMealLogsForDay, pickRicherMacros,
@@ -894,30 +896,48 @@ export default function HomeScreen() {
             const startOfWeek = new Date();
             startOfWeek.setHours(0, 0, 0, 0);
             startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-            const [history, ownPlans, activeSession] = await Promise.all([
+            const [history, ownPlans] = await Promise.all([
               workoutRepository.getWorkoutHistory(userId).catch(() => []),
               workoutRepository.fetchOwnWorkoutPlans(userId).catch(() => []),
-              (async () => {
-                if (isNativeDbAvailable && database) {
-                  try {
-                    const activeSessions = (await database
-                      .get('workout_sessions')
-                      .query(Q.where('status', 'active'))
-                      .fetch()) as WorkoutSession[];
-                    if (activeSessions.length > 0) {
-                      return { id: activeSessions[0].id, name: activeSessions[0].name };
-                    }
-                  } catch {}
-                }
-                return null;
-              })(),
             ]);
 
-            const thisWeekSessions = (history || []).filter((s) => (s.finished_at || 0) >= startOfWeek.getTime());
+            const assignedPlans = useWorkoutStore.getState().workoutPlans || [];
+            const allCandidatePlans = [...assignedPlans, ...(ownPlans || [])];
+
+            const currentActive = useSessionStore.getState().activeSession;
+            let activeSession: { id: string; name?: string | null } | null = currentActive
+              ? { id: currentActive.localId, name: currentActive.name }
+              : null;
+
+            if (!activeSession && isNativeDbAvailable && database) {
+              try {
+                const activeSessions = (await database
+                  .get('workout_sessions')
+                  .query(Q.where('status', 'active'))
+                  .fetch()) as WorkoutSession[];
+                if (activeSessions.length > 0) {
+                  activeSession = { id: activeSessions[0].id, name: activeSessions[0].name };
+                }
+              } catch {}
+            }
+
+            const thisWeekSessions = (history || []).filter((s) => {
+              const ts = s.finished_at || (s.completed_at ? new Date(s.completed_at).getTime() : 0);
+              return ts >= startOfWeek.getTime();
+            });
             const count = thisWeekSessions.length;
             setWeeklyWorkoutCount(count);
 
-            const builtPlan = buildTodaysPlan({ activeSession, plans: ownPlans });
+            const completedPlanDayIds = new Set<string>();
+            (history || []).forEach((h: any) => {
+              if (h.plan_day_id) completedPlanDayIds.add(h.plan_day_id);
+            });
+
+            const builtPlan = buildTodaysPlan({
+              activeSession,
+              plans: allCandidatePlans,
+              completedPlanDayIds,
+            });
             setTodayPlan(builtPlan);
             patchHomeSnapshot(userId, { todayPlan: builtPlan, weeklyWorkoutCount: count });
           } catch {}
