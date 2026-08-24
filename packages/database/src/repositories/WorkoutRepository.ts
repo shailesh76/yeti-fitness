@@ -150,18 +150,88 @@ export class WorkoutRepository {
     });
   }
 
-  async getWorkoutHistory(userId: string): Promise<WorkoutSession[]> {
-    // Local DB unavailable on web — an empty list is a reasonable, safe fallback
-    // (identical UI state to "no workouts logged yet"), rather than throwing and
-    // aborting whatever multi-step load called this (e.g. home.tsx's loadData).
-    if (!this.db) return [];
-    return await this.db.get<WorkoutSession>('workout_sessions')
-      .query(
-        Q.where('user_id', userId),
-        Q.where('status', 'completed'),
-        Q.sortBy('finished_at', Q.desc)
-      )
-      .fetch();
+  async getWorkoutHistory(userId: string, limit = 50): Promise<any[]> {
+    if (this.db) {
+      return await this.db.get<WorkoutSession>('workout_sessions')
+        .query(
+          Q.where('user_id', userId),
+          Q.where('status', 'completed'),
+          Q.sortBy('finished_at', Q.desc),
+          Q.take(limit)
+        )
+        .fetch();
+    }
+    // Web / PWA PostgREST fallback:
+    if (!this.supabase) return [];
+    try {
+      const { data, error } = await this.supabase
+        .from('workout_sessions')
+        .select(`
+          id,
+          athlete_id,
+          plan_day_id,
+          started_at,
+          completed_at,
+          duration_seconds,
+          plan_day:plan_days(name, workout_plan:workout_plans(name)),
+          session_sets (
+            id,
+            session_id,
+            exercise_id,
+            plan_exercise_id,
+            weight,
+            reps,
+            completed_at,
+            exercise:exercises(name)
+          )
+        `)
+        .eq('athlete_id', userId)
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.warn('Failed to fetch remote workout history:', error);
+        return [];
+      }
+
+      return (data || []).map((s: any) => ({
+        id: s.id,
+        user_id: s.athlete_id,
+        athlete_id: s.athlete_id,
+        plan_day_id: s.plan_day_id,
+        name: s.plan_day?.workout_plan?.name || s.plan_day?.name || 'Workout Session',
+        status: 'completed',
+        started_at: new Date(s.started_at).getTime(),
+        finished_at: new Date(s.completed_at).getTime(),
+        completed_at: s.completed_at,
+        duration_seconds: s.duration_seconds,
+        total_volume_kg: (s.session_sets || []).reduce((sum: number, st: any) =>
+          sum + (Number(st.weight ?? 0) * Number(st.reps ?? 0)), 0),
+        notes: null,
+        sets: [...(s.session_sets || [])].sort((a: any, b: any) => {
+          const time = String(a.completed_at || '').localeCompare(String(b.completed_at || ''));
+          return time || String(a.id).localeCompare(String(b.id));
+        }).map((st: any, index: number) => ({
+          id: st.id,
+          session_id: st.session_id,
+          exercise_id: st.exercise_id,
+          exercise_name: st.exercise?.name || st.exercise_name || 'Exercise',
+          set_number: index + 1,
+          weight_kg: Number(st.weight ?? 0),
+          reps: Number(st.reps ?? 0),
+          rpe: undefined,
+          tempo: undefined,
+          rest_seconds: undefined,
+          is_warmup: false,
+          is_dropset: false,
+          completed_at: st.completed_at ? new Date(st.completed_at).getTime() : undefined,
+        })).sort((a: any, b: any) => a.set_number - b.set_number),
+      }));
+    } catch (err) {
+      console.warn('Error fetching remote workout history:', err);
+      return [];
+    }
   }
 
   async getPersonalRecords(userId: string): Promise<PersonalRecord[]> {

@@ -45,8 +45,6 @@ serve(async (req) => {
 
     // Verify authorized user context
     if (user.id !== clientId) {
-      // User is not the athlete themselves. Check if they are a coach
-      // Verification is true if there's a profiles row or relationship context.
       const { data: clientProfile } = await supabase
         .from('profiles')
         .select('id')
@@ -61,12 +59,12 @@ serve(async (req) => {
       }
     }
 
-    // Prepare query for exercise sets
+    // Prepare query for session sets from normalized tables
     let query = supabase
-      .from('exercise_sets')
-      .select('*, workout_logs(id, started_at, completed_at, workout_plans(name)), exercises(name, muscle_group, gif_url)')
-      .eq('workout_logs.user_id', clientId)
-      .not('workout_logs.completed_at', 'is', null)
+      .from('session_sets')
+      .select('*, workout_sessions!inner(id, started_at, completed_at, plan_day:plan_days(name, workout_plans(name))), exercises(name, muscle_group, gif_url)')
+      .eq('workout_sessions.athlete_id', clientId)
+      .not('workout_sessions.completed_at', 'is', null)
 
     if (exerciseId) {
       query = query.eq('exercise_id', exerciseId)
@@ -78,38 +76,40 @@ serve(async (req) => {
     if (fetchError) throw fetchError
 
     // Filter out null joins from in-progress/uncompleted workouts
-    const completedSets = (rawSets || []).filter(s => s.workout_logs)
+    const completedSets = (rawSets || []).filter(s => s.workout_sessions)
 
     // Group completed sets by workout session
     const sessionsMap = new Map()
     for (const s of completedSets) {
-      const logId = s.workout_log_id
-      const date = new Date(s.workout_logs.completed_at).toLocaleDateString()
-      const exId = s.exercise_id
+      const sessionId = s.session_id || s.workout_sessions.id
+      const date = new Date(s.workout_sessions.completed_at).toLocaleDateString()
+      const exId = s.exercise_id || 'unknown'
 
-      if (!sessionsMap.has(logId)) {
-        sessionsMap.set(logId, {
-          workout_log_id: logId,
+      if (!sessionsMap.has(sessionId)) {
+        const planName = s.workout_sessions.plan_day?.workout_plans?.name || s.workout_sessions.plan_day?.name || "Workout Session"
+        sessionsMap.set(sessionId, {
+          workout_log_id: sessionId,
+          session_id: sessionId,
           date,
-          completed_at: s.workout_logs.completed_at,
-          workout_name: s.workout_logs.workout_plans?.name || "Workout Session",
+          completed_at: s.workout_sessions.completed_at,
+          workout_name: planName,
           exercises: {}
         })
       }
 
-      const session = sessionsMap.get(logId)
+      const session = sessionsMap.get(sessionId)
       if (!session.exercises[exId]) {
         session.exercises[exId] = {
           id: exId,
-          name: s.exercises?.name || "Exercise",
+          name: s.exercises?.name || s.exercise_name || "Exercise",
           muscle_group: s.exercises?.muscle_group || "",
           gif_url: s.exercises?.gif_url || "",
           sets: []
         }
       }
 
-      const reps = Number(s.reps)
-      const weight = Number(s.weight_kg)
+      const reps = Number(s.reps) || 0
+      const weight = Number(s.weight_kg ?? s.weight ?? 0)
       const estimatedOneRepMax = Math.round(weight * (1 + reps / 30))
 
       session.exercises[exId].sets.push({
@@ -117,7 +117,7 @@ serve(async (req) => {
         reps,
         weight_kg: weight,
         estimated_1rm: estimatedOneRepMax,
-        completed_at: s.completed_at
+        completed_at: s.completed_at || s.workout_sessions.completed_at
       })
     }
 
@@ -139,84 +139,49 @@ serve(async (req) => {
         return {
           date: s.date,
           completed_at: s.completed_at,
-          max_1rm: sessionMax1RM,
+          estimated_1rm: sessionMax1RM,
           max_weight: sessionMaxWeight,
-          workout_name: s.workout_name,
           sets: exData.sets
         }
-      }).filter(Boolean) as any[]
+      }).filter(Boolean)
 
-      // Calculate personal record (all-time best 1RM & set details)
-      let prEntry = null
-      if (historyPoints.length > 0) {
-        let best1RM = 0
-        let bestSet = null
-        let prDate = ""
-        let prWorkout = ""
+      // Calculate historical metrics
+      const all1RMs = historyPoints.map(p => p!.estimated_1rm)
+      const allWeights = historyPoints.map(p => p!.max_weight)
+      const current1RM = all1RMs.length > 0 ? all1RMs[0] : 0
+      const allTimeBest1RM = all1RMs.length > 0 ? Math.max(...all1RMs) : 0
+      const allTimeMaxWeight = allWeights.length > 0 ? Math.max(...allWeights) : 0
 
-        historyPoints.forEach(h => {
-          h.sets.forEach((set: any) => {
-            if (set.estimated_1rm > best1RM) {
-              best1RM = set.estimated_1rm
-              bestSet = set
-              prDate = h.date
-              prWorkout = h.workout_name
-            }
-          })
-        })
+      // Progress over last 30 days
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-        if (bestSet) {
-          prEntry = {
-            weight_kg: (bestSet as any).weight_kg,
-            reps: (bestSet as any).reps,
-            estimated_1rm: best1RM,
-            date: prDate,
-            workout_name: prWorkout
-          }
+      const thirtyDayPoints = historyPoints.filter(p => new Date(p!.completed_at) >= thirtyDaysAgo)
+      let thirtyDayDeltaPercent = 0
+      if (thirtyDayPoints.length >= 2) {
+        const oldestRecent1RM = thirtyDayPoints[thirtyDayPoints.length - 1]!.estimated_1rm
+        const newest1RM = thirtyDayPoints[0]!.estimated_1rm
+        if (oldestRecent1RM > 0) {
+          thirtyDayDeltaPercent = Math.round(((newest1RM - oldestRecent1RM) / oldestRecent1RM) * 100)
         }
-      }
-
-      // Determine progression trend based on last 3 sessions
-      let trend = "Plateaued"
-      if (historyPoints.length >= 3) {
-        const last3 = historyPoints.slice(0, 3).map(h => h.max_1rm).reverse()
-        // If 1RMs are ascending
-        if (last3[2] > last3[1] && last3[1] >= last3[0]) {
-          trend = "Improving"
-        } else if (last3[2] < last3[1] && last3[1] <= last3[0]) {
-          trend = "Declining"
-        }
-      } else if (historyPoints.length === 2) {
-        const last2 = historyPoints.slice(0, 2).map(h => h.max_1rm)
-        if (last2[0] > last2[1]) trend = "Improving"
-        else if (last2[0] < last2[1]) trend = "Declining"
       }
 
       exerciseProgress = {
-        history: historyPoints.slice(0, limit),
-        pr: prEntry,
-        trend
+        exercise_id: exerciseId,
+        exercise_name: sessionsList[0]?.exercises[exerciseId]?.name || "Exercise",
+        current_estimated_1rm: current1RM,
+        all_time_best_1rm: allTimeBest1RM,
+        all_time_max_weight: allTimeMaxWeight,
+        thirty_day_delta_percent: thirtyDayDeltaPercent,
+        history: historyPoints.slice(0, Number(limit))
       }
     }
 
-    // Format all exercises ever performed (unique checklist for search filters)
-    const uniqueExercises = new Map()
-    completedSets.forEach(s => {
-      if (s.exercises) {
-        uniqueExercises.set(s.exercise_id, {
-          id: s.exercise_id,
-          name: s.exercises.name,
-          muscle_group: s.exercises.muscle_group,
-          gif_url: s.exercises.gif_url
-        })
-      }
-    })
-
     return new Response(JSON.stringify({
       success: true,
-      sessions: sessionsList.slice(0, limit),
+      clientId,
       exercise_progress: exerciseProgress,
-      available_exercises: Array.from(uniqueExercises.values())
+      sessions: sessionsList.slice(0, Number(limit))
     }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }

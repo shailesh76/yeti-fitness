@@ -195,28 +195,45 @@ export const useLogStore = create<LogState>((set, get) => ({
       const sessions = await workoutRepository.getWorkoutHistory(userId);
       
       const mappedLogs: WorkoutLog[] = await Promise.all(
-        sessions.map(async (session) => {
-          const sets = await database.get<SessionSet>('session_sets')
-            .query(Q.where('session_id', session.id))
-            .fetch();
+        sessions.map(async (session: any) => {
+          let sets: any[] = [];
+          if (Array.isArray(session.sets)) {
+            // Already attached (e.g. from Web PostgREST fallback)
+            sets = session.sets;
+          } else if (database) {
+            // Native WatermelonDB fetch
+            try {
+              sets = await database.get<SessionSet>('session_sets')
+                .query(Q.where('session_id', session.id))
+                .fetch();
+            } catch (dbErr) {
+              console.warn('[LogStore] Failed to fetch session_sets locally:', dbErr);
+              sets = [];
+            }
+          }
 
-          const total_volume = sets.reduce((acc, s) => acc + (s.weight_kg * s.reps), 0);
+          const total_volume = session.total_volume_kg ?? sets.reduce((acc: number, s: any) => {
+            const w = Number(s.weight_kg ?? s.weight ?? 0);
+            const r = Number(s.reps ?? 0);
+            return acc + (w * r);
+          }, 0);
           
           const exercisesMap: { [key: string]: LoggedExercise } = {};
           
-          sets.forEach((setObj) => {
+          sets.forEach((setObj: any) => {
+            const exId = setObj.exercise_id || 'unknown';
             const exName = setObj.exercise_name || 'Exercise';
-            if (!exercisesMap[setObj.exercise_id]) {
-              exercisesMap[setObj.exercise_id] = {
+            if (!exercisesMap[exId]) {
+              exercisesMap[exId] = {
                 id: setObj.id,
-                exercise_id: setObj.exercise_id,
+                exercise_id: exId,
                 exercise_name: exName,
                 sets: [],
               };
             }
-            exercisesMap[setObj.exercise_id].sets.push({
-              reps: setObj.reps,
-              weight: setObj.weight_kg.toString(),
+            exercisesMap[exId].sets.push({
+              reps: Number(setObj.reps || 0),
+              weight: String(setObj.weight_kg ?? setObj.weight ?? ''),
               completed: true,
               tempo: setObj.tempo || undefined,
               rpe: setObj.rpe || undefined,
@@ -225,8 +242,8 @@ export const useLogStore = create<LogState>((set, get) => ({
 
           return {
             id: session.id,
-            name: session.name,
-            completed_at: new Date(session.finished_at || session.started_at).toISOString(),
+            name: session.name || 'Workout Session',
+            completed_at: new Date(session.finished_at || session.completed_at || session.started_at).toISOString(),
             total_volume,
             exercises: Object.values(exercisesMap),
           };

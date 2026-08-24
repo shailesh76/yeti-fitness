@@ -34,9 +34,10 @@ serve(async (req) => {
 
       // Fetch completed workouts count
       const { count: workoutCount, error: wError } = await supabaseClient
-        .from('workout_logs')
+        .from('workout_sessions')
         .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
+        .eq('athlete_id', userId)
+        .not('completed_at', 'is', null)
         .gte('completed_at', oneWeekAgo.toISOString());
 
       if (wError) continue;
