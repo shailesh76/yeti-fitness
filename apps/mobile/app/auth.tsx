@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  StyleSheet,
+  Platform,
+  ScrollView,
+  KeyboardAvoidingView,
+} from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRepositories } from '../hooks/useRepositories';
 import { useRouter } from 'expo-router';
@@ -279,161 +290,173 @@ export default function AuthScreen() {
   const isFormValid = email.trim().length > 0 && password.trim().length > 0;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <Animated.View 
-        entering={FadeInDown.duration(800).springify()}
-        style={[sharedStyles.cardGlow, styles.card]}
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
-          <Text style={styles.logoText}>Yeti.</Text>
-          <Text style={styles.subtitleText}>Level Up Your Tonnage</Text>
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Text style={[sharedStyles.labelCaps, styles.inputLabel]}>Email</Text>
-          <TextInput
-            style={[
-              styles.textInput,
-              focusedField === 'email' && styles.textInputFocused
-            ]}
-            onChangeText={(text) => { setEmail(text); if (error) setError(null); }}
-            value={email}
-            placeholder="email@address.com"
-            placeholderTextColor="#444"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            onFocus={() => setFocusedField('email')}
-            onBlur={() => setFocusedField(null)}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Text style={[sharedStyles.labelCaps, styles.inputLabel]}>Password</Text>
-          <TextInput
-            style={[
-              styles.textInput,
-              focusedField === 'password' && styles.textInputFocused
-            ]}
-            onChangeText={(text) => { setPassword(text); if (error) setError(null); }}
-            value={password}
-            secureTextEntry={true}
-            placeholder="••••••••"
-            placeholderTextColor="#444"
-            autoCapitalize="none"
-            onFocus={() => setFocusedField('password')}
-            onBlur={() => setFocusedField(null)}
-            onSubmitEditing={signInWithEmail}
-          />
-        </View>
-
-        <TouchableOpacity
-          style={styles.forgotPasswordBtn}
-          onPress={() => router.push('/forgot-password')}
-          disabled={loading}
-          accessibilityRole="button"
-          accessibilityLabel="Forgot password?"
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-        </TouchableOpacity>
-
-        {error && (
-          <View style={styles.errorRow}>
-            <Ionicons name="alert-circle" size={16} color={P.RED} />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
-        {unconfirmedEmail && (
-          <TouchableOpacity
-            style={styles.resendBtn}
-            onPress={handleResendVerification}
-            disabled={resending}
-            accessibilityRole="button"
-            accessibilityLabel="Resend verification email"
-            accessibilityState={{ disabled: resending, busy: resending }}
+          <Animated.View
+            entering={FadeInDown.duration(800).springify()}
+            style={[sharedStyles.cardGlow, styles.card]}
           >
-            {resending ? (
-              <ActivityIndicator size="small" color={P.ACCENT} />
-            ) : (
-              <Text style={styles.resendBtnText}>Resend Verification Email</Text>
-            )}
-          </TouchableOpacity>
-        )}
+            <View style={styles.header}>
+              <Text style={styles.logoText}>Yeti.</Text>
+              <Text style={styles.subtitleText}>Level Up Your Tonnage</Text>
+            </View>
 
-        {loading ? (
-          <View style={styles.loaderContainer}>
-            <ActivityIndicator size="large" color={P.ACCENT} />
-          </View>
-        ) : profileCheckUserId ? (
-          <View style={styles.actionContainer}>
-            <TouchableOpacity
-              style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
-              onPress={handleRetryProfileCheck}
-              disabled={profileCheckRetrying}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Retry"
-              accessibilityState={{ disabled: profileCheckRetrying, busy: profileCheckRetrying }}
-            >
-              {profileCheckRetrying ? (
-                <ActivityIndicator size="small" color="#000000" />
-              ) : (
-                <Text style={styles.loginBtnText}>Retry</Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.inputContainer}>
+              <Text style={[sharedStyles.labelCaps, styles.inputLabel]}>Email</Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  focusedField === 'email' && styles.textInputFocused
+                ]}
+                onChangeText={(text) => { setEmail(text); if (error) setError(null); }}
+                value={email}
+                placeholder="email@address.com"
+                placeholderTextColor="#444"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField(null)}
+              />
+            </View>
 
-            <TouchableOpacity
-              style={styles.signUpBtn}
-              onPress={handleSignOutFromProfileCheck}
-              disabled={profileCheckRetrying}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Sign out"
-            >
-              <Text style={styles.signUpBtnText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.actionContainer}>
-            <TouchableOpacity
-              style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
-              onPress={signInWithEmail}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Log in"
-            >
-              <Text style={styles.loginBtnText}>Log In</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.signUpBtn}
-              onPress={signUpWithEmail}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Sign up"
-            >
-              <Text style={styles.signUpBtnText}>Sign Up</Text>
-            </TouchableOpacity>
-
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>OR</Text>
-              <View style={styles.dividerLine} />
+            <View style={styles.inputContainer}>
+              <Text style={[sharedStyles.labelCaps, styles.inputLabel]}>Password</Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  focusedField === 'password' && styles.textInputFocused
+                ]}
+                onChangeText={(text) => { setPassword(text); if (error) setError(null); }}
+                value={password}
+                secureTextEntry={true}
+                placeholder="••••••••"
+                placeholderTextColor="#444"
+                autoCapitalize="none"
+                onFocus={() => setFocusedField('password')}
+                onBlur={() => setFocusedField(null)}
+                onSubmitEditing={signInWithEmail}
+              />
             </View>
 
             <TouchableOpacity
-              style={styles.googleBtn}
-              onPress={signInWithGoogle}
-              activeOpacity={0.85}
+              style={styles.forgotPasswordBtn}
+              onPress={() => router.push('/forgot-password')}
+              disabled={loading}
               accessibilityRole="button"
-              accessibilityLabel="Continue with Google"
+              accessibilityLabel="Forgot password?"
             >
-              <Ionicons name="logo-google" size={18} color={P.TEXT_PRI} />
-              <Text style={styles.googleBtnText}>Continue with Google</Text>
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
-          </View>
-        )}
-      </Animated.View>
+
+            {error && (
+              <View style={styles.errorRow}>
+                <Ionicons name="alert-circle" size={16} color={P.RED} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
+            {unconfirmedEmail && (
+              <TouchableOpacity
+                style={styles.resendBtn}
+                onPress={handleResendVerification}
+                disabled={resending}
+                accessibilityRole="button"
+                accessibilityLabel="Resend verification email"
+                accessibilityState={{ disabled: resending, busy: resending }}
+              >
+                {resending ? (
+                  <ActivityIndicator size="small" color={P.ACCENT} />
+                ) : (
+                  <Text style={styles.resendBtnText}>Resend Verification Email</Text>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {loading ? (
+              <View style={styles.loaderContainer}>
+                <ActivityIndicator size="large" color={P.ACCENT} />
+              </View>
+            ) : profileCheckUserId ? (
+              <View style={styles.actionContainer}>
+                <TouchableOpacity
+                  style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
+                  onPress={handleRetryProfileCheck}
+                  disabled={profileCheckRetrying}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry"
+                  accessibilityState={{ disabled: profileCheckRetrying, busy: profileCheckRetrying }}
+                >
+                  {profileCheckRetrying ? (
+                    <ActivityIndicator size="small" color="#000000" />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Retry</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.signUpBtn}
+                  onPress={handleSignOutFromProfileCheck}
+                  disabled={profileCheckRetrying}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign out"
+                >
+                  <Text style={styles.signUpBtnText}>Sign Out</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.actionContainer}>
+                <TouchableOpacity
+                  style={[styles.loginBtn, glowStyle(P.ACCENT, 12, 0.45)]}
+                  onPress={signInWithEmail}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Log in"
+                >
+                  <Text style={styles.loginBtnText}>Log In</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.signUpBtn}
+                  onPress={signUpWithEmail}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign up"
+                >
+                  <Text style={styles.signUpBtnText}>Sign Up</Text>
+                </TouchableOpacity>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>OR</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <TouchableOpacity
+                  style={styles.googleBtn}
+                  onPress={signInWithGoogle}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Continue with Google"
+                >
+                  <Ionicons name="logo-google" size={18} color={P.TEXT_PRI} />
+                  <Text style={styles.googleBtnText}>Continue with Google</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -442,26 +465,34 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: P.BG,
+  },
+  keyboardAvoid: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
   },
   card: {
     width: '100%',
     maxWidth: 400,
-    padding: 32,
-    borderRadius: 30,
+    padding: 24,
+    borderRadius: 24,
     backgroundColor: P.CARD_BG,
+    marginBottom: 0,
   },
   header: {
-    marginBottom: 32,
+    marginBottom: 20,
     alignItems: 'center',
   },
   logoText: {
-    fontSize: 54,
+    fontSize: 46,
     fontWeight: '900',
     color: P.ACCENT,
-    letterSpacing: -2,
+    letterSpacing: -1.5,
   },
   subtitleText: {
     color: P.TEXT_SEC,
@@ -469,19 +500,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 1.5,
-    marginTop: 6,
+    marginTop: 4,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: 14,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 6,
     marginLeft: 4,
     color: P.TEXT_SEC,
   },
   forgotPasswordBtn: {
     alignSelf: 'flex-end',
-    marginBottom: 8,
+    marginBottom: 6,
+    paddingVertical: 2,
+    minHeight: 28,
   },
   forgotPasswordText: {
     color: P.ACCENT,
@@ -492,7 +525,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 10,
     paddingHorizontal: 4,
   },
   errorText: {
@@ -502,8 +535,9 @@ const styles = StyleSheet.create({
   },
   resendBtn: {
     alignItems: 'center',
-    marginBottom: 12,
-    paddingVertical: 4,
+    marginBottom: 10,
+    paddingVertical: 6,
+    minHeight: 36,
   },
   resendBtnText: {
     color: P.ACCENT,
@@ -514,7 +548,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     color: P.TEXT_PRI,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
+    minHeight: 48,
     borderRadius: 14,
     fontSize: 15,
     fontWeight: '600',
@@ -526,17 +561,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   loaderContainer: {
-    marginTop: 24,
+    marginTop: 20,
     alignItems: 'center',
   },
   actionContainer: {
-    marginTop: 8,
-    gap: 12,
+    marginTop: 4,
+    gap: 10,
   },
   loginBtn: {
     backgroundColor: P.ACCENT,
     borderRadius: 14,
-    paddingVertical: 15,
+    paddingVertical: 13,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -552,7 +588,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
     borderRadius: 14,
-    paddingVertical: 15,
+    paddingVertical: 13,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -566,7 +603,7 @@ const styles = StyleSheet.create({
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 18,
+    marginVertical: 12,
     gap: 12,
   },
   dividerLine: {
@@ -589,7 +626,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
     borderRadius: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
+    minHeight: 48,
   },
   googleBtnText: {
     fontSize: 14,
