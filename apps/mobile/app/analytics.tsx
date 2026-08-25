@@ -49,6 +49,7 @@ import { dedupeScreenRefresh, getScreenData, hydrateScreenData, invalidateScreen
 import { createScreenPerfTrace } from '../services/screenPerf';
 import { currentPersonalRecords } from '../services/personalRecordPresentation';
 import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
+import { buildTrendLinePath, calculateTrendPoints } from '../services/progressChart';
 
 const MASCOT = require('../assets/yeti_2d_mascot_exact.png');
 
@@ -62,20 +63,6 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 const RANGE_DAYS: Record<string, number> = { '7D': 7, '30D': 30, '90D': 90, '6M': 180 };
-
-// ─── SVG helpers ──────────────────────────────────────────────────────────────
-function buildLinePath(values: number[], w: number, h: number, padX = 8, padY = 10): string {
-  if (values.length === 0) return '';
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const pts = values.map((v, i) => {
-    const x = padX + (values.length === 1 ? 0.5 : i / (values.length - 1)) * (w - padX * 2);
-    const y = padY + (1 - (v - min) / range) * (h - padY * 2);
-    return `${x},${y}`;
-  });
-  return 'M ' + pts.join(' L ');
-}
 
 function RingArc({
   size,
@@ -153,6 +140,7 @@ export default function AnalyticsScreen() {
   const { progressRepository, userRepository } = useRepositories();
 
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const tabsRef = useRef<ScrollView>(null);
   const [dateRange, setDateRange] = useState<'7D' | '30D' | '90D' | '6M'>('30D');
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -229,13 +217,14 @@ export default function AnalyticsScreen() {
       }));
   }, [measurements, dateRange]);
 
-  const weightPath = useMemo(
-    () => buildLinePath(weightSeries.map((d) => d.kg), chartW, 120, 8, 10),
+  const weightPoints = useMemo(
+    () => calculateTrendPoints(weightSeries.map((d) => d.kg), chartW, 120, 8, 10),
     [weightSeries, chartW]
   );
+  const weightPath = useMemo(() => buildTrendLinePath(weightPoints), [weightPoints]);
   const weightArea = useMemo(
-    () => (weightPath ? weightPath + ` L ${chartW - 8},120 L 8,120 Z` : ''),
-    [weightPath, chartW]
+    () => (weightPoints.length >= 2 ? weightPath + ` L ${chartW - 8},120 L 8,120 Z` : ''),
+    [weightPath, weightPoints.length, chartW]
   );
 
   // Most recent weight value
@@ -464,7 +453,13 @@ export default function AnalyticsScreen() {
   };
 
   const showOverviewCards = activeTab === 'overview' || activeTab === 'body';
-  const showStrengthCards = activeTab === 'overview' || activeTab === 'workout' || activeTab === 'strength';
+  const showWorkoutCards = activeTab === 'overview' || activeTab === 'workout';
+  const showStrengthCards = activeTab === 'overview' || activeTab === 'strength';
+
+  const selectTab = useCallback((key: TabKey, index: number) => {
+    setActiveTab(key);
+    tabsRef.current?.scrollTo({ x: Math.max(0, index * 100 - 16), animated: true });
+  }, []);
 
   return (
     <AppShell activeTab="progress">
@@ -489,8 +484,8 @@ export default function AnalyticsScreen() {
           </View>
 
           {/* Tabs */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tabsScrollView} contentContainerStyle={s.tabsRow}>
-            {TABS.map((tab) => {
+          <ScrollView ref={tabsRef} horizontal showsHorizontalScrollIndicator={false} style={s.tabsScrollView} contentContainerStyle={s.tabsRow}>
+            {TABS.map((tab, index) => {
               const isActive = activeTab === tab.key;
               return (
                 <TouchableOpacity
@@ -498,7 +493,7 @@ export default function AnalyticsScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected: isActive }}
                   accessibilityLabel={`${tab.label} tab`}
-                  onPress={() => setActiveTab(tab.key)}
+                  onPress={() => selectTab(tab.key, index)}
                   style={[s.tabBtn, isActive && s.tabBtnActive]}
                   activeOpacity={0.75}
                 >
@@ -622,7 +617,7 @@ export default function AnalyticsScreen() {
                     </View>
                   </View>
 
-                  {weightSeries.length >= 2 ? (
+                  {weightSeries.length >= 1 ? (
                     <>
                       <View style={{ marginBottom: 12 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
@@ -668,6 +663,9 @@ export default function AnalyticsScreen() {
                           ))}
                           <Path d={weightArea} fill="url(#weightGrad)" />
                           <Path d={weightPath} stroke="#3B82F6" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                          {weightPoints.map((point, index) => (
+                            <Circle key={index} cx={point.x} cy={point.y} r={3.5} fill="#3B82F6" stroke="#141822" strokeWidth={2} />
+                          ))}
                         </Svg>
                         <View style={[s.chartXAxisRow, { width: chartW }]}>
                           {weightSeries.filter((_, i) => i % Math.ceil(weightSeries.length / 5) === 0).map((d, i) => (
@@ -678,25 +676,6 @@ export default function AnalyticsScreen() {
                         </View>
                       </View>
                     </>
-                  ) : currentWeight != null ? (
-                    <View style={s.singleWeightBox}>
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-                        <Text style={s.weightCurrentVal}>{currentWeight.toFixed(1)} kg</Text>
-                        <Text style={{ fontSize: 14, color: '#64748B' }}>
-                          ({(currentWeight * 2.20462).toFixed(1)} lbs)
-                        </Text>
-                      </View>
-                      <Text style={{ fontSize: 12, color: '#94A3B8', marginTop: 4 }}>
-                        Latest recorded weight. Log at least 2 measurements across different days to visualize your trend chart.
-                      </Text>
-                      <TouchableOpacity
-                        style={[s.primaryBtn, { marginTop: 14, alignSelf: 'flex-start', paddingHorizontal: 18 }]}
-                        onPress={handleOpenLogModal}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 13 }}>+ Log New Measurement</Text>
-                      </TouchableOpacity>
-                    </View>
                   ) : (
                     <View style={s.emptyBox}>
                       <Ionicons name="trending-down-outline" size={28} color="#64748B" />
@@ -802,6 +781,11 @@ export default function AnalyticsScreen() {
                   )}
                 </Animated.View>
 
+              </>
+            )}
+
+            {showWorkoutCards && (
+              <>
                 {/* Consistency */}
                 <Animated.View entering={FadeInDown.delay(320).duration(400)} style={s.card}>
                   <View style={s.cardHeaderRow}>
@@ -1055,7 +1039,7 @@ const s = StyleSheet.create({
   },
 
   tabsScrollView: { height: 42, maxHeight: 42, flexGrow: 0, flexShrink: 0, marginBottom: 12 },
-  tabsRow: { height: 42, paddingHorizontal: 16, gap: 8, alignItems: 'center' },
+  tabsRow: { height: 42, paddingLeft: 20, paddingRight: 28, gap: 8, alignItems: 'center' },
   tabBtn: {
     minWidth: 84,
     height: 36,

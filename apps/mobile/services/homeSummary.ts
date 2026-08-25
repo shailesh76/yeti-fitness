@@ -21,6 +21,13 @@ export interface Macros {
 
 export const ZERO_MACROS: Macros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
+export type NutritionCardState = 'loading' | 'ready' | 'empty';
+
+export function resolveNutritionCardState(loading: boolean, hasTargets: boolean): NutritionCardState {
+  if (hasTargets) return 'ready';
+  return loading ? 'loading' : 'empty';
+}
+
 export interface HomeSnapshot {
   athleteName: string;
   currentWeight: number | null;

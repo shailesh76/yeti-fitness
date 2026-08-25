@@ -9,6 +9,7 @@ import {
   planSetCount,
   buildTodaysPlan,
   describeReadiness,
+  resolveNutritionCardState,
 } from '../apps/mobile/services/homeSummary';
 
 // Regression suite for the Home screen shipping seeded demo data as if it were
@@ -17,6 +18,12 @@ import {
 // all visible on a brand-new account with nothing logged.
 
 describe('Nutrition — a real zero day must read zero', () => {
+  it('renders an empty setup state, not a skeleton, after target loading finishes empty', () => {
+    expect(resolveNutritionCardState(false, false)).toBe('empty');
+    expect(resolveNutritionCardState(true, false)).toBe('loading');
+    expect(resolveNutritionCardState(true, true)).toBe('ready');
+  });
+
   it('returns zeros for a genuinely empty day instead of leaving demo macros', () => {
     expect(resolveConsumedMacros({ calories: 0, protein: 0, carbs: 0, fat: 0 })).toEqual(ZERO_MACROS);
   });
@@ -44,6 +51,18 @@ describe('Nutrition — a real zero day must read zero', () => {
     expect(resolveConsumedMacros({ calories: NaN, protein: -5, carbs: undefined, fat: 12 })).toEqual({
       calories: 0, protein: 0, carbs: 0, fat: 12,
     });
+  });
+});
+
+describe('Home assigned-plan parity', () => {
+  it('selects the same first incomplete assigned day used by Workouts', () => {
+    const plans = [
+      { id: 'day-1', plan_day_id: 'day-1', name: 'PUSH- BABY 1 - Day 1' },
+      { id: 'day-2', plan_day_id: 'day-2', name: 'PUSH- BABY 1 - Day 2' },
+    ];
+
+    expect(buildTodaysPlan({ plans, completedPlanDayIds: new Set(['day-1']) })?.name)
+      .toBe('PUSH- BABY 1 - Day 2');
   });
 });
 

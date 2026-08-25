@@ -106,7 +106,7 @@ describe('physical phone workout boundaries', () => {
     const source = fs.readFileSync('apps/mobile/app/analytics.tsx', 'utf8');
     expect(source).toMatch(/tabsScrollView:\s*\{[^}]*height:\s*42[^}]*maxHeight:\s*42[^}]*flexGrow:\s*0/s);
     expect(source).toMatch(/tabBtn:\s*\{[^}]*height:\s*36[^}]*minHeight:\s*36[^}]*maxHeight:\s*36[^}]*flexGrow:\s*0/s);
-    expect(source).toMatch(/<ScrollView horizontal/);
+    expect(source).toMatch(/<ScrollView[^>]*horizontal/);
     expect(source).toMatch(/numberOfLines=\{1\}>\{tab\.label\}/);
   });
 

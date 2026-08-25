@@ -1,5 +1,7 @@
 import { useFoodStore } from '../store/useFoodStore';
 import { useUserStore } from '../store/useUserStore';
+import { useWorkoutStore } from '../store/useWorkoutStore';
+import { useLogStore } from '../store/useLogStore';
 import { hydrateHomeSnapshot, patchHomeSnapshot } from './homeSummary';
 import { getCachedNutritionTargets } from './nutritionTargets';
 import { hydrateScreenData } from './screenDataCache';
@@ -35,6 +37,14 @@ export function beginAuthenticatedHydration(userId: string, authUser?: any): Pro
     logBootStage('FOOD_CACHE_START', userId);
     logBootStage('NUTRITION_CACHE_START', userId);
 
+    // Assigned plans and normalized completion history hydrate independently
+    // of screen navigation. Home and Workouts therefore read the same stores
+    // even when Home is the first authenticated route.
+    const workoutHydration = Promise.allSettled([
+      useWorkoutStore.getState().syncWorkoutPlans(userId),
+      useLogStore.getState().fetchLogsHistory(userId),
+    ]);
+
     const [profile, home, , targets] = await Promise.all([
       hydrateScreenData<Record<string, any>>(`profile:${userId}`)
         .then((value) => { logBootStage('USER_CACHE_READY', userId); return value; }),
@@ -66,6 +76,8 @@ export function beginAuthenticatedHydration(userId: string, authUser?: any): Pro
     } else if (home) {
       // The snapshot was already published by hydrateHomeSnapshot.
     }
+
+    await workoutHydration;
 
     completed.add(userId);
   })().finally(() => inFlight.delete(userId));

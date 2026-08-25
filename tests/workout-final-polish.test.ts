@@ -126,7 +126,7 @@ describe('workout final polish contracts', () => {
 
   it('keeps progress tabs horizontally scrollable with fixed selection-independent dimensions', () => {
     const source = readFileSync('apps/mobile/app/analytics.tsx', 'utf8');
-    expect(source).toContain('<ScrollView horizontal showsHorizontalScrollIndicator={false}');
+    expect(source).toMatch(/<ScrollView[^>]*horizontal[^>]*showsHorizontalScrollIndicator=\{false\}/);
     expect(source).toMatch(/tabBtn:\s*\{[\s\S]*?height:\s*36,[\s\S]*?minHeight:\s*36,[\s\S]*?maxHeight:\s*36,/);
     expect(source).toMatch(/tabBtn:\s*\{[\s\S]*?flexShrink:\s*0,/);
     expect(source).toContain("tabBtnTextActive: { color: '#FFFFFF' }");

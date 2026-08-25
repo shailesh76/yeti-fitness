@@ -36,8 +36,10 @@ import {
   Macros, ZERO_MACROS, TodaysPlanSummary, ReadinessState,
   resolveConsumedMacros, sumMealLogsForDay, pickRicherMacros,
   buildTodaysPlan, describeReadiness,
+  resolveNutritionCardState,
   HomeSnapshot, getHomeSnapshot, hydrateHomeSnapshot, patchHomeSnapshot, homeCacheKey,
 } from '../services/homeSummary';
+import { completedPlanDayIds as deriveCompletedPlanDayIds } from '../services/workoutLifecycle';
 import { SkeletonLoader } from '../components/TelemetryComponents';
 import { dedupeScreenRefresh, getScreenData, isScreenDataStale, setScreenData, subscribeScreenData } from '../services/screenDataCache';
 import type { NutritionTargets } from '../services/nutritionUtils';
@@ -391,6 +393,26 @@ const DailyProgressWidget = memo(({
 DailyProgressWidget.displayName = 'DailyProgressWidget';
 
 // ─── 5. Nutrition Summary Bar Card (Reference UI Screen 1) ──────────────────
+const NutritionTargetsEmptyCard = memo(({ onPress, compact = false }: { onPress: () => void; compact?: boolean }) => (
+  <View style={sharedStyles.card}>
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <View style={styles.nutritionEmptyIcon}>
+        <Ionicons name="nutrition-outline" size={20} color={P.ACCENT_BRIGHT} />
+      </View>
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={styles.nutritionEmptyTitle}>Set Nutrition Targets</Text>
+        {!compact && (
+          <Text style={styles.nutritionEmptyText}>Add your calorie and macro goals to track daily progress.</Text>
+        )}
+      </View>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Set nutrition targets" onPress={onPress} style={styles.nutritionEmptyButton}>
+        <Text style={styles.nutritionEmptyButtonText}>Set Up</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+));
+NutritionTargetsEmptyCard.displayName = 'NutritionTargetsEmptyCard';
+
 const NutritionSummaryCard = memo(({
   calories,
   targetCalories,
@@ -743,6 +765,7 @@ export default function HomeScreen() {
   const [targetMacros, setTargetMacros] = useState<NutritionTargets | null>(
     memorySnapshot?.targetMacros ?? initialTargets ?? null
   );
+  const [nutritionLoading, setNutritionLoading] = useState(targetMacros == null);
   const [todayPlan, setTodayPlan] = useState<TodaysPlanSummary | null>(
     memorySnapshot?.todayPlan ?? null
   );
@@ -775,7 +798,10 @@ export default function HomeScreen() {
       if (snapshot) {
         if (snapshot.athleteName) setAthleteName(resolveProfileDisplayName(null, user, snapshot.athleteName));
         if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
-        if (snapshot.targetMacros) setTargetMacros(snapshot.targetMacros);
+        if (snapshot.targetMacros) {
+          setTargetMacros(snapshot.targetMacros);
+          setNutritionLoading(false);
+        }
         if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
         if (snapshot.waterMl !== undefined) setWaterMl(snapshot.waterMl);
         if (snapshot.steps !== undefined) setSteps(snapshot.steps);
@@ -793,7 +819,10 @@ export default function HomeScreen() {
       if (!snapshot) return;
       if (snapshot.athleteName) setAthleteName(resolveProfileDisplayName(null, user, snapshot.athleteName));
       if (snapshot.consumedMacros) setConsumedMacros(snapshot.consumedMacros);
-      if (snapshot.targetMacros !== undefined) setTargetMacros(snapshot.targetMacros);
+      if (snapshot.targetMacros !== undefined) {
+        setTargetMacros(snapshot.targetMacros);
+        setNutritionLoading(false);
+      }
       if (snapshot.todayPlan !== undefined) setTodayPlan(snapshot.todayPlan);
       if (snapshot.waterMl !== undefined) setWaterMl(snapshot.waterMl);
       if (snapshot.steps !== undefined) setSteps(snapshot.steps);
@@ -806,7 +835,10 @@ export default function HomeScreen() {
   // Subscribe to direct nutrition target changes
   const nutritionCacheKey = userId ? `nutrition-targets:${userId}` : 'nutrition-targets:anonymous';
   useEffect(() => subscribeScreenData<NutritionTargets>(nutritionCacheKey, (targets) => {
-    if (targets) setTargetMacros(targets);
+    if (targets) {
+      setTargetMacros(targets);
+      setNutritionLoading(false);
+    }
   }), [nutritionCacheKey]);
 
   const loadData = useCallback(async () => {
@@ -859,6 +891,7 @@ export default function HomeScreen() {
             setTargetMacros(resolved);
             patchHomeSnapshot(userId, { targetMacros: resolved });
           } catch {}
+          finally { setNutritionLoading(false); }
         })(),
 
         // Branch 3: Consumed Nutrition & Meal Logs
@@ -896,7 +929,8 @@ export default function HomeScreen() {
             const startOfWeek = new Date();
             startOfWeek.setHours(0, 0, 0, 0);
             startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-            const [history, ownPlans] = await Promise.all([
+            const [, history, ownPlans] = await Promise.all([
+              useWorkoutStore.getState().syncWorkoutPlans(userId),
               workoutRepository.getWorkoutHistory(userId).catch(() => []),
               workoutRepository.fetchOwnWorkoutPlans(userId).catch(() => []),
             ]);
@@ -928,10 +962,7 @@ export default function HomeScreen() {
             const count = thisWeekSessions.length;
             setWeeklyWorkoutCount(count);
 
-            const completedPlanDayIds = new Set<string>();
-            (history || []).forEach((h: any) => {
-              if (h.plan_day_id) completedPlanDayIds.add(h.plan_day_id);
-            });
+            const completedPlanDayIds = deriveCompletedPlanDayIds(history || []);
 
             const builtPlan = buildTodaysPlan({
               activeSession,
@@ -986,6 +1017,7 @@ export default function HomeScreen() {
     weeklyCalories > 0 ||
     useFoodStore.getState().mealLogs.length > 0
   );
+  const nutritionCardState = resolveNutritionCardState(nutritionLoading, targetMacros?.calories != null);
 
   useEffect(() => {
     if (userId && hasRenderableContent) logBootStage('HOME_FIRST_MEANINGFUL_RENDER', userId);
@@ -1030,7 +1062,7 @@ export default function HomeScreen() {
 
           {/* 4. Nutrition Summary Bar */}
           <Animated.View entering={FadeInDown.duration(400).delay(160)}>
-            {targetMacros?.calories != null ? (
+            {nutritionCardState === 'ready' && targetMacros?.calories != null ? (
               <NutritionSummaryCard
                 calories={consumedMacros.calories}
                 targetCalories={targetMacros.calories}
@@ -1041,8 +1073,10 @@ export default function HomeScreen() {
                 fat={consumedMacros.fat}
                 targetFat={targetMacros.fat ?? 0}
               />
-            ) : (
+            ) : nutritionCardState === 'loading' ? (
               <SkeletonLoader rows={1} height={120} />
+            ) : (
+              <NutritionTargetsEmptyCard onPress={() => router.push('/profile')} />
             )}
           </Animated.View>
 
@@ -1064,7 +1098,7 @@ export default function HomeScreen() {
 
           {/* 7. Daily Progress 4-Ring Widget */}
           <Animated.View entering={FadeInDown.duration(400).delay(240)}>
-            {targetMacros?.calories != null ? (
+            {nutritionCardState === 'ready' && targetMacros?.calories != null ? (
               <DailyProgressWidget
                 calories={consumedMacros.calories}
                 targetCalories={targetMacros.calories}
@@ -1075,8 +1109,10 @@ export default function HomeScreen() {
                 steps={steps}
                 targetSteps={10000}
               />
-            ) : (
+            ) : nutritionCardState === 'loading' ? (
               <SkeletonLoader rows={1} height={120} />
+            ) : (
+              <NutritionTargetsEmptyCard onPress={() => router.push('/profile')} compact />
             )}
           </Animated.View>
 
@@ -1093,6 +1129,18 @@ export default function HomeScreen() {
 // ─── Component Styles ─────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: P.BG },
+  nutritionEmptyIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(59,130,246,0.14)',
+  },
+  nutritionEmptyTitle: { color: P.TEXT_PRI, fontSize: 15, fontWeight: '700' },
+  nutritionEmptyText: { color: P.TEXT_MUT, fontSize: 12, marginTop: 3, lineHeight: 17 },
+  nutritionEmptyButton: { minHeight: 44, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  nutritionEmptyButtonText: { color: P.ACCENT_BRIGHT, fontSize: 13, fontWeight: '700' },
 
   // Header & Greeting
   avatarCircle: {
