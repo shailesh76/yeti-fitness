@@ -7,6 +7,7 @@ import { WorkoutPlan } from '../models/WorkoutPlan';
 import { PlanDay } from '../models/PlanDay';
 import { PlanExercise } from '../models/PlanExercise';
 import { AssignedPlan } from '../models/AssignedPlan';
+import { PR_CORRUPTION_LIMITS, isPlausiblePersonalRecord, PersonalRecordLike } from '../services/personalRecordPolicy';
 
 export class WorkoutRepository {
   private db: Database;
@@ -432,11 +433,15 @@ export class WorkoutRepository {
 
     const candidates = new Map<string, { exerciseId: string; recordType: string; value: number }>();
     for (const set of sets) {
-      if (set.reps <= 0) continue;
-      const values = [
-        { recordType: 'max_reps', value: set.reps },
-        ...(set.weight > 0 ? [{ recordType: 'max_weight', value: set.weight }] : []),
-      ];
+      const reps = Number(set.reps);
+      const weight = Number(set.weight);
+      const values: Array<{ recordType: string; value: number }> = [];
+      if (Number.isFinite(reps) && reps > 0 && reps <= PR_CORRUPTION_LIMITS.MAX_REPS) {
+        values.push({ recordType: 'max_reps', value: reps });
+      }
+      if (Number.isFinite(weight) && weight > 0 && weight <= PR_CORRUPTION_LIMITS.MAX_WEIGHT_KG) {
+        values.push({ recordType: 'max_weight', value: weight });
+      }
       for (const value of values) {
         const key = `${set.exerciseId}:${value.recordType}`;
         if (value.value > (candidates.get(key)?.value || 0)) {
@@ -856,3 +861,5 @@ export function dedupePersonalRecords<T extends { exercise_id?: string; record_t
   }
   return result;
 }
+
+export { PR_CORRUPTION_LIMITS, isPlausiblePersonalRecord, PersonalRecordLike } from '../services/personalRecordPolicy';

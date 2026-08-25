@@ -28,12 +28,16 @@ describe('personal records web parity', () => {
     expect(save).toHaveBeenCalledWith('athlete', 'ex-1', 'max_reps', 12);
   });
 
-  it('deduplicates identical history while retaining separate metrics', () => {
-    const records = currentPersonalRecords([
-      { id: 'a', exercise_id: 'ex-1', record_type: 'max_weight', value: 10, achieved_at: '2026-08-24T01:00:00Z' },
-      { id: 'b', exercise_id: 'ex-1', record_type: 'max_weight', value: 10, achieved_at: '2026-08-24T02:00:00Z' },
-      { id: 'c', exercise_id: 'ex-1', record_type: 'max_reps', value: 12, achieved_at: '2026-08-24T03:00:00Z' },
+  it('ignores corrupt sets (>1000 reps, >2000 kg, non-positive) during recordPersonalBests and accepts heavy/high-rep lifts', async () => {
+    const repo = new WorkoutRepository(null as any, {} as any);
+    vi.spyOn(repo, 'getPersonalRecords').mockResolvedValue([]);
+    const save = vi.spyOn(repo, 'savePersonalRecord').mockResolvedValue({} as any);
+    await repo.recordPersonalBests('athlete', [
+      { exerciseId: 'ex-1', weight: 3000, reps: 1100 }, // corrupt values
+      { exerciseId: 'ex-2', weight: 700, reps: 500 },   // valid heavy/high-rep
     ]);
-    expect(records.map((record) => record.id).sort()).toEqual(['a', 'c']);
+    expect(save).not.toHaveBeenCalledWith('athlete', 'ex-1', expect.anything(), expect.anything());
+    expect(save).toHaveBeenCalledWith('athlete', 'ex-2', 'max_weight', 700);
+    expect(save).toHaveBeenCalledWith('athlete', 'ex-2', 'max_reps', 500);
   });
 });

@@ -1,17 +1,22 @@
 /**
  * analytics.tsx — Progress screen
- * Matches the Progress reference layout (Yeti Score, Weight Trend, Body
- * Composition, Strength, Consistency) but driven by REAL data:
- *   - Weight trend + body fat come from logged measurements (ProgressRepository)
- *   - Body weight logging modal with immediate local UI update and persistence
- *   - BMI is computed from real weight + profile height
- *   - Strength = the athlete's real personal records
- *   - Consistency + streak + the activity-based Yeti Score come from real
- *     completed-workout history
- *   - Nutrition averages come from real meal logs
  *
- * Data honesty: measurements/workouts/PRs are stored in the local (native)
- * database and synced with Supabase.
+ * Five tabs, each with a DISTINCT section tree (see PROGRESS_TAB_SECTIONS in
+ * services/progressAnalytics.ts — the single source of truth the render is
+ * driven by, so a tab can never silently borrow another tab's cards):
+ *   - Overview  → concise cross-section snapshot (Yeti Score, weekly workouts,
+ *                 weight preview, strength summary, nutrition summary)
+ *   - Workout   → volume / sets / duration / training days + recent sessions
+ *   - Nutrition → intake averages, vs-target, logging consistency + trends
+ *   - Body      → weight / weight change / BMI / body fat / circumferences
+ *                 (measurement data ONLY — no Yeti Score, no workout cards)
+ *   - Strength  → current PRs, recent PRs, PR history by exercise
+ *
+ * Data honesty: every number is derived from real already-loaded rows
+ * (useLogStore history + PRs, useFoodStore meal logs, ProgressRepository
+ * measurements, cached nutrition targets) via the pure helpers in
+ * progressAnalytics.ts. Nothing is fabricated; empty inputs render clean empty
+ * states, not placeholders.
  */
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
@@ -30,7 +35,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import Svg, { Path, Circle, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 
@@ -44,12 +49,19 @@ import { calculateNutritionTargets } from '../services/nutritionUtils';
 import { useUserStore } from '../store/useUserStore';
 import { markLocalProfileWrite } from '../services/profileRealtime';
 import { patchHomeSnapshot } from '../services/homeSummary';
-import { P, glowStyle } from '../constants/premiumTheme';
 import { dedupeScreenRefresh, getScreenData, hydrateScreenData, invalidateScreenData, isScreenDataStale, persistScreenData, subscribeScreenData } from '../services/screenDataCache';
 import { createScreenPerfTrace } from '../services/screenPerf';
-import { currentPersonalRecords } from '../services/personalRecordPresentation';
 import { canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
-import { buildTrendLinePath, calculateTrendPoints } from '../services/progressChart';
+import { buildTrendLinePath, calculateTrendPoints, type DailyPoint } from '../services/progressChart';
+import {
+  deriveWorkoutAnalytics,
+  deriveNutritionAnalytics,
+  deriveBodyAnalytics,
+  deriveStrengthAnalytics,
+  sectionsForTab,
+  type ProgressSection,
+  type StrengthPrSummary,
+} from '../services/progressAnalytics';
 
 const MASCOT = require('../assets/yeti_2d_mascot_exact.png');
 
@@ -64,60 +76,71 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const RANGE_DAYS: Record<string, number> = { '7D': 7, '30D': 30, '90D': 90, '6M': 180 };
 
-function RingArc({
-  size,
-  strokeWidth,
-  percent,
+function rangeLabel(range: string): string {
+  switch (range) {
+    case '7D': return '7 days';
+    case '30D': return '30 days';
+    case '90D': return '90 days';
+    case '6M': return '6 months';
+    default: return range;
+  }
+}
+
+function formatVolumeKg(kg: number): string {
+  if (!Number.isFinite(kg) || kg <= 0) return '0 kg';
+  return kg >= 1000 ? `${(kg / 1000).toFixed(1)}k kg` : `${Math.round(kg)} kg`;
+}
+
+function prUnitSuffix(unit: 'kg' | 'reps'): string {
+  return unit === 'reps' ? ' reps' : ' kg';
+}
+
+// ─── Reusable daily-trend chart (volume / calories / protein / weight) ───────
+// Renders exactly the points buildDailySeries produced — one per logged day, no
+// zero-fill. Handles empty ([] → nothing), one-point (single marker) and flat
+// (mid-line) series without inventing variation.
+function TrendChart({
+  points,
   color,
-  label,
-  value,
-  change,
-  changeUp,
-  tracked = true,
+  width,
+  height = 120,
 }: {
-  size: number;
-  strokeWidth: number;
-  percent: number;
+  points: DailyPoint[];
   color: string;
-  label: string;
-  value: string;
-  change?: string;
-  changeUp?: boolean;
-  tracked?: boolean;
+  width: number;
+  height?: number;
 }) {
-  const r = (size - strokeWidth) / 2;
-  const circ = 2 * Math.PI * r;
-  const dash = (Math.min(Math.max(percent, 0), 100) / 100) * circ;
+  const values = points.map((p) => p.value);
+  const chartPoints = calculateTrendPoints(values, width, height, 8, 10);
+  const path = buildTrendLinePath(chartPoints);
+  const area = chartPoints.length >= 2 ? path + ` L ${width - 8},${height} L 8,${height} Z` : '';
+  const gradId = `trendGrad_${color.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const gridGap = (height - 24) / 3;
+  const step = Math.max(1, Math.ceil(points.length / 5));
+
   return (
-    <View style={{ alignItems: 'center', width: size + 6 }}>
-      <Svg width={size} height={size}>
-        <Circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,0.07)" strokeWidth={strokeWidth} fill="none" />
-        {tracked && (
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            stroke={color}
-            strokeWidth={strokeWidth}
-            fill="none"
-            strokeDasharray={`${dash} ${circ - dash}`}
-            strokeDashoffset={circ * 0.25}
-            strokeLinecap="round"
-          />
-        )}
-        <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="800" fill={tracked ? '#FFFFFF' : '#475569'}>
-          {value}
-        </SvgText>
+    <View style={{ overflow: 'hidden' }}>
+      <Svg width={width} height={height + 10}>
+        <Defs>
+          <LinearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0%" stopColor={color} stopOpacity="0.35" />
+            <Stop offset="100%" stopColor={color} stopOpacity="0" />
+          </LinearGradient>
+        </Defs>
+        {[0, 1, 2, 3].map((i) => (
+          <Path key={i} d={`M 8 ${12 + i * gridGap} L ${width - 8} ${12 + i * gridGap}`} stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
+        ))}
+        {area ? <Path d={area} fill={`url(#${gradId})`} /> : null}
+        {path ? <Path d={path} stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" /> : null}
+        {chartPoints.map((pt, index) => (
+          <Circle key={index} cx={pt.x} cy={pt.y} r={3.5} fill={color} stroke="#141822" strokeWidth={2} />
+        ))}
       </Svg>
-      <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 6 }}>{label}</Text>
-      {change ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
-          <Ionicons name={changeUp ? 'arrow-up' : 'arrow-down'} size={10} color={changeUp ? '#22C55E' : '#EF4444'} />
-          <Text style={{ fontSize: 10, fontWeight: '700', color: changeUp ? '#22C55E' : '#EF4444', marginLeft: 1 }}>{change}</Text>
-        </View>
-      ) : (
-        <Text style={{ fontSize: 10, color: '#64748B', marginTop: 3 }}>{tracked ? '—' : 'Not tracked'}</Text>
-      )}
+      <View style={[s.chartXAxisRow, { width }]}>
+        {points.filter((_, i) => i % step === 0).map((p, i) => (
+          <Text key={i} style={s.chartXLabel}>{p.label}</Text>
+        ))}
+      </View>
     </View>
   );
 }
@@ -148,6 +171,12 @@ export default function AnalyticsScreen() {
   const cachedProgress = getScreenData<{ measurements: any[]; profile: any }>(progressKey);
   const [measurements, setMeasurements] = useState<any[]>(cachedProgress?.measurements ?? []);
   const [profile, setProfile] = useState<any>(cachedProgress?.profile ?? null);
+
+  // Nutrition targets are written to the shared screen-data cache by the
+  // nutrition-targets service; read them here (never invent defaults) so the
+  // Nutrition tab can show an honest vs-target comparison or a no-target state.
+  const targetsKey = userId ? `nutrition-targets:${userId}` : 'nutrition-targets:anonymous';
+  const [nutritionTargets, setNutritionTargets] = useState<any>(getScreenData<any>(targetsKey) ?? null);
 
   // ── Weight Logging Modal State ───────────────────────────────────────────
   const [showLogModal, setShowLogModal] = useState(false);
@@ -203,56 +232,40 @@ export default function AnalyticsScreen() {
     setProfile(next.profile);
   }), [progressKey]);
 
-  // ── Weight trend (real measurements within the selected range) ──────────────
-  const nowMs = typeof window !== 'undefined' ? Date.now() : 0;
-  const weightSeries = useMemo(() => {
-    const days = RANGE_DAYS[dateRange];
-    const cutoff = (nowMs || Date.now()) - days * 864e5;
-    return (measurements || [])
-      .filter((m) => m.weight_kg != null && !isNaN(m.weight_kg) && m.logged_at >= cutoff)
-      .sort((a, b) => a.logged_at - b.logged_at)
-      .map((m) => ({
-        kg: Number(m.weight_kg),
-        label: new Date(m.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      }));
-  }, [measurements, dateRange]);
+  useEffect(() => {
+    let alive = true;
+    void hydrateScreenData<any>(targetsKey).then((t) => { if (alive && t) setNutritionTargets(t); });
+    const unsub = subscribeScreenData<any>(targetsKey, (next) => setNutritionTargets(next ?? null));
+    return () => { alive = false; unsub(); };
+  }, [targetsKey]);
 
-  const weightPoints = useMemo(
-    () => calculateTrendPoints(weightSeries.map((d) => d.kg), chartW, 120, 8, 10),
-    [weightSeries, chartW]
+  const now = (typeof window !== 'undefined' ? Date.now() : 0) || Date.now();
+  const rangeDays = RANGE_DAYS[dateRange];
+
+  // ── Pure derivations over already-loaded state (one dataset → many cards) ──
+  const workoutAnalytics = useMemo(
+    () => deriveWorkoutAnalytics(history || [], { nowMs: now, rangeDays }),
+    // now is intentionally excluded (matches existing memo convention); recompute on data/range change
+    [history, dateRange] // eslint-disable-line react-hooks/exhaustive-deps
   );
-  const weightPath = useMemo(() => buildTrendLinePath(weightPoints), [weightPoints]);
-  const weightArea = useMemo(
-    () => (weightPoints.length >= 2 ? weightPath + ` L ${chartW - 8},120 L 8,120 Z` : ''),
-    [weightPath, weightPoints.length, chartW]
+  const nutritionAnalytics = useMemo(
+    () => deriveNutritionAnalytics(mealLogs || [], nutritionTargets, { nowMs: now, rangeDays, athleteId: userId }),
+    [mealLogs, nutritionTargets, dateRange, userId] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const bodyAnalytics = useMemo(
+    () => deriveBodyAnalytics(measurements || [], profile, { nowMs: now, rangeDays }),
+    [measurements, profile, dateRange] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const strengthAnalytics = useMemo(
+    () => deriveStrengthAnalytics(prs || [], { nowMs: now }),
+    [prs] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Most recent weight value
-  const currentWeight = useMemo(() => {
-    if (measurements && measurements.length > 0) {
-      const latestValid = measurements.find((m) => m.weight_kg != null && !isNaN(m.weight_kg));
-      if (latestValid) return Number(latestValid.weight_kg);
-    }
-    if (weightSeries.length > 0) {
-      return weightSeries[weightSeries.length - 1].kg;
-    }
-    return profile?.weight_kg ? Number(profile.weight_kg) : null;
-  }, [measurements, weightSeries, profile]);
+  // Simple derived values reused by the Log Weight modal + Overview preview.
+  const currentWeight = bodyAnalytics.currentWeightKg;
+  const bodyFat = bodyAnalytics.bodyFatPct;
 
-  const weightDelta = weightSeries.length >= 2 ? currentWeight! - weightSeries[0].kg : null;
-
-  // ── Body composition (real: body fat + BMI; muscle/water not tracked) ───────
-  const latest = measurements[0]; // getMeasurements returns newest-first
-  const bodyFat = latest?.body_fat_pct ? Number(latest.body_fat_pct) : null;
-  const bmi = useMemo(() => {
-    const w = currentWeight ?? (latest?.weight_kg ? Number(latest.weight_kg) : null) ?? (profile?.weight_kg ? Number(profile.weight_kg) : null);
-    const h = profile?.height_cm ? Number(profile.height_cm) : null;
-    if (!w || !h) return null;
-    const m = h / 100;
-    return w / (m * m);
-  }, [currentWeight, latest, profile]);
-
-  // ── Consistency + streak + Yeti Score (real completed workouts) ─────────────
+  // ── Consistency + streak + activity-based Yeti Score (real workouts) ────────
   const workoutDays = useMemo(() => {
     const set = new Set<string>();
     (history || []).forEach((h) => {
@@ -274,7 +287,7 @@ export default function AnalyticsScreen() {
     });
   }, [workoutDays]);
 
-  const workoutsThisWeek = weekDays.filter((d) => d.done).length;
+  const trainingDaysThisWeek = weekDays.filter((d) => d.done).length;
 
   const streak = useMemo(() => {
     let n = 0;
@@ -315,34 +328,6 @@ export default function AnalyticsScreen() {
   const scoreR = 52;
   const scoreCirc = 2 * Math.PI * scoreR;
   const scoreDash = ((yetiScore ?? 0) / 100) * scoreCirc;
-
-  // ── Strength (real PRs, newest per exercise) ────────────────────────────────
-  const currentPrs = useMemo(() => currentPersonalRecords(prs || []), [prs]);
-  const strengthList = useMemo(() => currentPrs.slice(0, 6), [currentPrs]);
-
-  // ── Nutrition averages (real meal logs, last 30 days) ───────────────────────
-  const nutritionAvg = useMemo(() => {
-    const cutoff = (nowMs || Date.now()) - 30 * 864e5;
-    const recent = (mealLogs || []).filter((l) => l.logged_at >= cutoff && l.food);
-    if (recent.length === 0) return null;
-    const days = new Set(recent.map((l) => new Date(l.logged_at).toDateString())).size || 1;
-    const sum = recent.reduce(
-      (acc, l) => ({
-        cal: acc.cal + (l.food!.calories || 0) * l.servings,
-        p: acc.p + (l.food!.protein || 0) * l.servings,
-        c: acc.c + (l.food!.carbs || 0) * l.servings,
-        f: acc.f + (l.food!.fat || 0) * l.servings,
-      }),
-      { cal: 0, p: 0, c: 0, f: 0 }
-    );
-    return {
-      cal: Math.round(sum.cal / days),
-      p: Math.round(sum.p / days),
-      c: Math.round(sum.c / days),
-      f: Math.round(sum.f / days),
-      days,
-    };
-  }, [mealLogs]);
 
   // ── Log Weight Handlers ───────────────────────────────────────────────────
   const handleOpenLogModal = () => {
@@ -452,14 +437,53 @@ export default function AnalyticsScreen() {
     }
   };
 
-  const showOverviewCards = activeTab === 'overview' || activeTab === 'body';
-  const showWorkoutCards = activeTab === 'overview' || activeTab === 'workout';
-  const showStrengthCards = activeTab === 'overview' || activeTab === 'strength';
+  // ── Which sections this tab shows (single source of truth) ──────────────────
+  const sections = sectionsForTab(activeTab);
+  const has = (section: ProgressSection) => sections.includes(section);
 
   const selectTab = useCallback((key: TabKey, index: number) => {
     setActiveTab(key);
     tabsRef.current?.scrollTo({ x: Math.max(0, index * 100 - 16), animated: true });
   }, []);
+
+  // ── Small render helpers ────────────────────────────────────────────────────
+  const renderPrRow = (pr: StrengthPrSummary, idx: number, withDivider: boolean) => (
+    <React.Fragment key={pr.id || `${pr.exerciseId}:${pr.recordType}:${idx}`}>
+      {withDivider && idx > 0 && <View style={s.divider} />}
+      <View style={s.strengthRow}>
+        <View style={[s.strengthIconBox, { backgroundColor: 'rgba(59,130,246,0.15)', borderColor: 'rgba(59,130,246,0.35)' }]}>
+          <Ionicons name="barbell-outline" size={18} color="#3B82F6" />
+        </View>
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={s.strengthExName} numberOfLines={1}>{canonicalExerciseName(pr.exerciseName, pr.exerciseId)}</Text>
+          <Text style={s.strengthExType}>{pr.recordType.replace(/_/g, ' ')}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
+          <Text style={s.strengthWeight}>{pr.value}{prUnitSuffix(pr.unit)}</Text>
+          <Text style={s.strengthExType}>{pr.dateLabel}</Text>
+        </View>
+      </View>
+    </React.Fragment>
+  );
+
+  const renderTargetBar = (label: string, vs: { avg: number; target: number; pct: number }, unit: string, color: string) => {
+    const fillPct = Math.min(100, Math.max(0, vs.pct));
+    const over = vs.pct > 105;
+    return (
+      <View style={{ marginTop: 14 }}>
+        <View style={s.targetLabelRow}>
+          <Text style={s.targetLabel}>{label}</Text>
+          <Text style={s.targetValue}>
+            {vs.avg.toLocaleString()} <Text style={s.targetValueDim}>/ {vs.target.toLocaleString()} {unit}</Text>
+          </Text>
+        </View>
+        <View style={s.targetBarTrack}>
+          <View style={[s.targetBarFill, { width: `${fillPct}%`, backgroundColor: over ? '#F97316' : color }]} />
+        </View>
+        <Text style={[s.targetPct, { color: over ? '#F97316' : '#64748B' }]}>{vs.pct}% of target</Text>
+      </View>
+    );
+  };
 
   return (
     <AppShell activeTab="progress">
@@ -504,365 +528,548 @@ export default function AnalyticsScreen() {
           </ScrollView>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
-            {showOverviewCards && (
-              <>
-                {/* Yeti Score */}
-                <Animated.View entering={FadeInDown.duration(400)} style={[s.card, s.yetiScoreCard]}>
-                  <View style={s.cardHeaderRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={s.cardTitle}>Yeti Score</Text>
-                      <Ionicons name="information-circle-outline" size={16} color="#64748B" style={{ marginLeft: 6 }} />
+            {/* ═══ OVERVIEW: Yeti Score ═══ */}
+            {has('score') && (
+              <Animated.View entering={FadeInDown.duration(400)} style={[s.card, s.yetiScoreCard]}>
+                <View style={s.cardHeaderRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={s.cardTitle}>Yeti Score</Text>
+                    <Ionicons name="information-circle-outline" size={16} color="#64748B" style={{ marginLeft: 6 }} />
+                  </View>
+                </View>
+
+                <View style={s.yetiScoreRow}>
+                  <View style={s.scoreRingWrapper}>
+                    <Svg width={124} height={124}>
+                      <Defs>
+                        <LinearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
+                          <Stop offset="0%" stopColor="#38BDF8" stopOpacity="1" />
+                          <Stop offset="100%" stopColor="#2563EB" stopOpacity="1" />
+                        </LinearGradient>
+                      </Defs>
+                      <Circle cx={62} cy={62} r={scoreR} stroke="rgba(255,255,255,0.07)" strokeWidth={10} fill="none" />
+                      {yetiScore != null && (
+                        <Circle
+                          cx={62}
+                          cy={62}
+                          r={scoreR}
+                          stroke="url(#scoreGrad)"
+                          strokeWidth={10}
+                          fill="none"
+                          strokeDasharray={`${scoreDash} ${scoreCirc - scoreDash}`}
+                          strokeDashoffset={scoreCirc * 0.25}
+                          strokeLinecap="round"
+                        />
+                      )}
+                    </Svg>
+                    <View style={s.scoreRingCenter} pointerEvents="none">
+                      <Text style={s.scoreNumber}>{yetiScore ?? '—'}</Text>
+                      <Text style={s.scoreOutOf}>/100</Text>
+                      {!!scoreBand && <Text style={[s.scoreLabel, { color: scoreColor }]}>{scoreBand}</Text>}
                     </View>
                   </View>
 
-                  <View style={s.yetiScoreRow}>
-                    <View style={s.scoreRingWrapper}>
-                      <Svg width={124} height={124}>
-                        <Defs>
-                          <LinearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
-                            <Stop offset="0%" stopColor="#38BDF8" stopOpacity="1" />
-                            <Stop offset="100%" stopColor="#2563EB" stopOpacity="1" />
-                          </LinearGradient>
-                        </Defs>
-                        <Circle cx={62} cy={62} r={scoreR} stroke="rgba(255,255,255,0.07)" strokeWidth={10} fill="none" />
-                        {yetiScore != null && (
-                          <Circle
-                            cx={62}
-                            cy={62}
-                            r={scoreR}
-                            stroke="url(#scoreGrad)"
-                            strokeWidth={10}
-                            fill="none"
-                            strokeDasharray={`${scoreDash} ${scoreCirc - scoreDash}`}
-                            strokeDashoffset={scoreCirc * 0.25}
-                            strokeLinecap="round"
+                  <View style={s.yetiMascotContainer}>
+                    <View style={{ flex: 1, paddingRight: 4 }}>
+                      <Text style={s.yetiMotivText}>
+                        {yetiScore == null ? 'Log a workout to start' : yetiScore >= 60 ? "You're crushing it! 💪" : 'Every session counts'}
+                      </Text>
+                      <Text style={s.yetiMotivSub}>
+                        {yetiScore == null ? 'Your score builds from real training.' : 'Based on your last 2 weeks of training.'}
+                      </Text>
+                    </View>
+                    <Image source={MASCOT} style={s.yetiMascotImage} resizeMode="contain" />
+                  </View>
+                </View>
+
+                {/* Real stats: training days this week + streak + current PRs */}
+                <View style={s.scoreStatsRow}>
+                  <View style={s.scoreStat}>
+                    <View style={s.scoreStatIconRow}>
+                      <Ionicons name="barbell" size={13} color="#3B82F6" />
+                      <Text style={s.scoreStatValue}>{trainingDaysThisWeek}</Text>
+                    </View>
+                    <Text style={s.scoreStatLabel}>this week</Text>
+                  </View>
+                  <View style={s.scoreStatDivider} />
+                  <View style={s.scoreStat}>
+                    <View style={s.scoreStatIconRow}>
+                      <Ionicons name="flame" size={13} color="#F97316" />
+                      <Text style={s.scoreStatValue}>{streak}</Text>
+                    </View>
+                    <Text style={s.scoreStatLabel}>day streak</Text>
+                  </View>
+                  <View style={s.scoreStatDivider} />
+                  <View style={s.scoreStat}>
+                    <View style={s.scoreStatIconRow}>
+                      <Ionicons name="trophy" size={13} color="#EAB308" />
+                      <Text style={s.scoreStatValue}>{strengthAnalytics.currentPrCount}</Text>
+                    </View>
+                    <Text style={s.scoreStatLabel}>Current PRs</Text>
+                  </View>
+                </View>
+              </Animated.View>
+            )}
+
+            {/* ═══ OVERVIEW: Weekly workout snapshot ═══ */}
+            {has('weeklySnapshot') && (
+              <Animated.View entering={FadeInDown.delay(60).duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>This Week's Training</Text>
+                  <TouchableOpacity onPress={() => selectTab('workout', 1)} accessibilityRole="button" accessibilityLabel="View workout details">
+                    <Text style={s.linkText}>Details</Text>
+                  </TouchableOpacity>
+                </View>
+                {workoutAnalytics.hasData ? (
+                  <View style={s.tripleStatRow}>
+                    <View style={s.tripleStat}>
+                      <Text style={s.tripleStatValue}>{workoutAnalytics.workoutsThisWeek}</Text>
+                      <Text style={s.tripleStatLabel}>workouts this week</Text>
+                    </View>
+                    <View style={s.tripleStat}>
+                      <Text style={s.tripleStatValue}>{workoutAnalytics.workoutsThisMonth}</Text>
+                      <Text style={s.tripleStatLabel}>this month</Text>
+                    </View>
+                    <View style={s.tripleStat}>
+                      <Text style={s.tripleStatValue}>{formatVolumeKg(workoutAnalytics.totalVolumeKg)}</Text>
+                      <Text style={s.tripleStatLabel}>volume · {rangeLabel(dateRange)}</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={s.inlineEmpty}>No workouts logged yet. Complete a session to see your weekly training here.</Text>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ═══ OVERVIEW: Weight trend preview ═══ */}
+            {has('weightTrendPreview') && (
+              <Animated.View entering={FadeInDown.delay(120).duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>Weight Trend</Text>
+                  <TouchableOpacity onPress={() => selectTab('body', 3)} accessibilityRole="button" accessibilityLabel="View body details">
+                    <Text style={s.linkText}>Details</Text>
+                  </TouchableOpacity>
+                </View>
+                {currentWeight != null ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+                      <Text style={s.weightCurrentVal}>{currentWeight.toFixed(1)} kg</Text>
+                      {bodyAnalytics.weightChangeKg != null && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons
+                            name={bodyAnalytics.weightChangeKg <= 0 ? 'arrow-down' : 'arrow-up'}
+                            size={13}
+                            color={bodyAnalytics.weightChangeKg <= 0 ? '#22C55E' : '#F97316'}
                           />
-                        )}
-                      </Svg>
-                      <View style={s.scoreRingCenter} pointerEvents="none">
-                        <Text style={s.scoreNumber}>{yetiScore ?? '—'}</Text>
-                        <Text style={s.scoreOutOf}>/100</Text>
-                        {!!scoreBand && <Text style={[s.scoreLabel, { color: scoreColor }]}>{scoreBand}</Text>}
-                      </View>
-                    </View>
-
-                    <View style={s.yetiMascotContainer}>
-                      <View style={{ flex: 1, paddingRight: 4 }}>
-                        <Text style={s.yetiMotivText}>
-                          {yetiScore == null ? 'Log a workout to start' : yetiScore >= 60 ? "You're crushing it! 💪" : 'Every session counts'}
-                        </Text>
-                        <Text style={s.yetiMotivSub}>
-                          {yetiScore == null ? 'Your score builds from real training.' : 'Based on your last 2 weeks of training.'}
-                        </Text>
-                      </View>
-                      <Image source={MASCOT} style={s.yetiMascotImage} resizeMode="contain" />
-                    </View>
-                  </View>
-
-                  {/* Real stats: workouts this week + streak */}
-                  <View style={s.scoreStatsRow}>
-                    <View style={s.scoreStat}>
-                      <View style={s.scoreStatIconRow}>
-                        <Ionicons name="barbell" size={13} color="#3B82F6" />
-                        <Text style={s.scoreStatValue}>{workoutsThisWeek}</Text>
-                      </View>
-                      <Text style={s.scoreStatLabel}>this week</Text>
-                    </View>
-                    <View style={s.scoreStatDivider} />
-                    <View style={s.scoreStat}>
-                      <View style={s.scoreStatIconRow}>
-                        <Ionicons name="flame" size={13} color="#F97316" />
-                        <Text style={s.scoreStatValue}>{streak}</Text>
-                      </View>
-                      <Text style={s.scoreStatLabel}>day streak</Text>
-                    </View>
-                    <View style={s.scoreStatDivider} />
-                    <View style={s.scoreStat}>
-                      <View style={s.scoreStatIconRow}>
-                        <Ionicons name="trophy" size={13} color="#EAB308" />
-                        <Text style={s.scoreStatValue}>{currentPrs.length}</Text>
-                      </View>
-                      <Text style={s.scoreStatLabel}>PRs set</Text>
-                    </View>
-                  </View>
-                </Animated.View>
-
-                {/* Weight Trend */}
-                <Animated.View entering={FadeInDown.delay(80).duration(400)} style={s.card}>
-                  <View style={s.cardHeaderRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={s.cardTitle}>Weight Trend</Text>
-                      <Ionicons name="information-circle-outline" size={16} color="#64748B" style={{ marginLeft: 6 }} />
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <TouchableOpacity
-                        style={s.logWeightHeaderBtn}
-                        onPress={handleOpenLogModal}
-                        activeOpacity={0.8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Log weight"
-                      >
-                        <Ionicons name="add" size={14} color="#FFFFFF" />
-                        <Text style={s.logWeightHeaderBtnText}>Log Weight</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={s.dateRangeBtn}
-                        onPress={() => setShowDatePicker(true)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Change date range"
-                      >
-                        <Text style={s.dateRangeBtnText}>{dateRange === '30D' ? '30 Days' : dateRange}</Text>
-                        <Ionicons name="chevron-down" size={13} color="#94A3B8" style={{ marginLeft: 2 }} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {weightSeries.length >= 1 ? (
-                    <>
-                      <View style={{ marginBottom: 12 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-                          <Text style={s.weightCurrentVal}>{currentWeight!.toFixed(1)} kg</Text>
-                          <Text style={{ fontSize: 13, color: '#64748B' }}>
-                            ({(currentWeight! * 2.20462).toFixed(1)} lbs)
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: bodyAnalytics.weightChangeKg <= 0 ? '#22C55E' : '#F97316', marginLeft: 2 }}>
+                            {Math.abs(bodyAnalytics.weightChangeKg).toFixed(1)} kg
                           </Text>
                         </View>
-                        {weightDelta != null && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
-                            <Ionicons
-                              name={weightDelta <= 0 ? 'arrow-down' : 'arrow-up'}
-                              size={13}
-                              color={weightDelta <= 0 ? '#22C55E' : '#F97316'}
-                            />
-                            <Text
-                              style={{
-                                fontSize: 13,
-                                fontWeight: '700',
-                                color: weightDelta <= 0 ? '#22C55E' : '#F97316',
-                                marginLeft: 2,
-                              }}
-                            >
-                              {Math.abs(weightDelta).toFixed(1)} kg
-                            </Text>
-                            <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 5 }}>
-                              vs {dateRange === '30D' ? '30 days' : 'range'} ago
-                            </Text>
-                          </View>
+                      )}
+                    </View>
+                    {bodyAnalytics.weightTrend.length >= 1 ? (
+                      <View style={{ marginTop: 8 }}>
+                        <TrendChart points={bodyAnalytics.weightTrend} color="#3B82F6" width={chartW} height={90} />
+                      </View>
+                    ) : (
+                      <Text style={s.inlineEmpty}>Log weight over time to see your trend.</Text>
+                    )}
+                  </>
+                ) : (
+                  <Text style={s.inlineEmpty}>No weight logged yet. Add your weight in the Body tab.</Text>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ═══ OVERVIEW: Strength summary ═══ */}
+            {has('strengthSummary') && (
+              <Animated.View entering={FadeInDown.delay(180).duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>{strengthAnalytics.currentPrCount} Current PRs</Text>
+                  <TouchableOpacity onPress={() => selectTab('strength', 4)} accessibilityRole="button" accessibilityLabel="View strength details">
+                    <Text style={s.linkText}>Details</Text>
+                  </TouchableOpacity>
+                </View>
+                {strengthAnalytics.currentPrs.length > 0 ? (
+                  strengthAnalytics.currentPrs.slice(0, 3).map((pr, idx) => renderPrRow(pr, idx, true))
+                ) : (
+                  <Text style={s.inlineEmpty}>No personal records yet. Log your sets to build strength records.</Text>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ═══ OVERVIEW: Nutrition summary ═══ */}
+            {has('nutritionSummary') && (
+              <Animated.View entering={FadeInDown.delay(240).duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>Nutrition</Text>
+                  <TouchableOpacity onPress={() => selectTab('nutrition', 2)} accessibilityRole="button" accessibilityLabel="View nutrition details">
+                    <Text style={s.linkText}>Details</Text>
+                  </TouchableOpacity>
+                </View>
+                {nutritionAnalytics.hasData ? (
+                  <View style={s.tripleStatRow}>
+                    <View style={s.tripleStat}>
+                      <Text style={s.tripleStatValue}>{nutritionAnalytics.avgCalories.toLocaleString()}</Text>
+                      <Text style={s.tripleStatLabel}>avg kcal / day</Text>
+                    </View>
+                    <View style={s.tripleStat}>
+                      <Text style={[s.tripleStatValue, { color: '#8B5CF6' }]}>{nutritionAnalytics.avgProtein}g</Text>
+                      <Text style={s.tripleStatLabel}>avg protein</Text>
+                    </View>
+                    <View style={s.tripleStat}>
+                      <Text style={s.tripleStatValue}>{nutritionAnalytics.loggedDays}</Text>
+                      <Text style={s.tripleStatLabel}>days logged</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={s.inlineEmpty}>No meals logged yet. Track meals to see your intake averages.</Text>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ═══ WORKOUT: stats + volume trend + recent sessions ═══ */}
+            {has('workoutStats') && (
+              <Animated.View entering={FadeInDown.duration(400)} style={s.card}>
+                <Text style={s.cardTitle}>Workout Summary</Text>
+                <Text style={s.cardSubtitle}>Last {rangeLabel(dateRange)}</Text>
+                {workoutAnalytics.hasData ? (
+                  <>
+                    {workoutAnalytics.inRangeSessionsCount === 0 && (
+                      <View style={{ marginBottom: 12, padding: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                        <Text style={{ fontSize: 13, color: '#94A3B8' }}>
+                          No workouts recorded in the last {rangeLabel(dateRange)}. Showing your recent session history below.
+                        </Text>
+                      </View>
+                    )}
+                    <View style={s.statGrid}>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{workoutAnalytics.workoutsThisWeek}</Text>
+                        <Text style={s.statTileLabel}>workouts this week</Text>
+                      </View>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{workoutAnalytics.workoutsThisMonth}</Text>
+                        <Text style={s.statTileLabel}>workouts this month</Text>
+                      </View>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{workoutAnalytics.distinctTrainingDays}</Text>
+                        <Text style={s.statTileLabel}>training days</Text>
+                      </View>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{workoutAnalytics.totalCompletedSets}</Text>
+                        <Text style={s.statTileLabel}>completed sets</Text>
+                      </View>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{formatVolumeKg(workoutAnalytics.totalVolumeKg)}</Text>
+                        <Text style={s.statTileLabel}>total volume</Text>
+                      </View>
+                      <View style={s.statTile}>
+                        <Text style={s.statTileValue}>{workoutAnalytics.avgDurationMin != null ? `${workoutAnalytics.avgDurationMin} min` : '—'}</Text>
+                        <Text style={s.statTileLabel}>avg duration</Text>
+                      </View>
+                    </View>
+
+                    {workoutAnalytics.volumeTrend.length >= 1 && (
+                      <>
+                        <Text style={s.sectionSubhead}>Training volume</Text>
+                        <TrendChart points={workoutAnalytics.volumeTrend} color="#3B82F6" width={chartW} height={110} />
+                      </>
+                    )}
+
+                    {workoutAnalytics.recentSessions.length > 0 && (
+                      <>
+                        <Text style={s.sectionSubhead}>Recent sessions</Text>
+                        {workoutAnalytics.recentSessions.map((session, idx) => (
+                          <React.Fragment key={session.id}>
+                            {idx > 0 && <View style={s.divider} />}
+                            <View style={s.sessionRow}>
+                              <View style={{ flex: 1, paddingRight: 10 }}>
+                                <Text style={s.sessionName} numberOfLines={1}>{session.name}</Text>
+                                <Text style={s.sessionMeta}>
+                                  {session.dateLabel}
+                                  {session.setCount > 0 ? ` · ${session.setCount} set${session.setCount === 1 ? '' : 's'}` : ''}
+                                  {session.durationMin != null ? ` · ${session.durationMin} min` : ''}
+                                </Text>
+                              </View>
+                              <Text style={s.sessionVolume}>{formatVolumeKg(session.volumeKg)}</Text>
+                            </View>
+                          </React.Fragment>
+                        ))}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="barbell-outline" size={28} color="#64748B" />
+                    <Text style={s.emptyTitle}>No workouts logged yet</Text>
+                    <Text style={s.emptySub}>Complete a workout to see volume, sets and training days here.</Text>
+                  </View>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ═══ WORKOUT: weekly consistency ═══ */}
+            {has('consistency') && (
+              <Animated.View entering={FadeInDown.delay(80).duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={s.cardTitle}>Consistency</Text>
+                    <Ionicons name="information-circle-outline" size={16} color="#64748B" style={{ marginLeft: 6 }} />
+                  </View>
+                  <Text style={s.dateRangeBtnText}>This Week</Text>
+                </View>
+
+                <View style={s.weekRow}>
+                  {weekDays.map((day, idx) => (
+                    <View key={idx} style={s.weekDayCell}>
+                      <Text style={s.weekDayLabel}>{day.label}</Text>
+                      <View style={[s.weekDayCircle, day.done && s.weekDayDone]}>
+                        {day.done ? (
+                          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        ) : (
+                          <Text style={{ fontSize: 11, color: day.future ? '#334155' : '#475569' }}>·</Text>
                         )}
                       </View>
-
-                      <View style={{ overflow: 'hidden' }}>
-                        <Svg width={chartW} height={130}>
-                          <Defs>
-                            <LinearGradient id="weightGrad" x1="0" y1="0" x2="0" y2="1">
-                              <Stop offset="0%" stopColor="#3B82F6" stopOpacity="0.35" />
-                              <Stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
-                            </LinearGradient>
-                          </Defs>
-                          {[0, 1, 2, 3].map((i) => (
-                            <Path key={i} d={`M 8 ${12 + i * 26} L ${chartW - 8} ${12 + i * 26}`} stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
-                          ))}
-                          <Path d={weightArea} fill="url(#weightGrad)" />
-                          <Path d={weightPath} stroke="#3B82F6" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                          {weightPoints.map((point, index) => (
-                            <Circle key={index} cx={point.x} cy={point.y} r={3.5} fill="#3B82F6" stroke="#141822" strokeWidth={2} />
-                          ))}
-                        </Svg>
-                        <View style={[s.chartXAxisRow, { width: chartW }]}>
-                          {weightSeries.filter((_, i) => i % Math.ceil(weightSeries.length / 5) === 0).map((d, i) => (
-                            <Text key={i} style={s.chartXLabel}>
-                              {d.label}
-                            </Text>
-                          ))}
-                        </View>
-                      </View>
-                    </>
-                  ) : (
-                    <View style={s.emptyBox}>
-                      <Ionicons name="trending-down-outline" size={28} color="#64748B" />
-                      <Text style={s.emptyTitle}>No weight logged yet</Text>
-                      <Text style={s.emptySub}>Log your weight regularly to monitor body composition and trend lines.</Text>
-                      <TouchableOpacity
-                        style={[s.primaryBtn, { marginTop: 12, paddingHorizontal: 20 }]}
-                        onPress={handleOpenLogModal}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 13 }}>Log First Weight</Text>
-                      </TouchableOpacity>
                     </View>
-                  )}
-                </Animated.View>
+                  ))}
+                </View>
 
-                {/* Body Composition */}
-                <Animated.View entering={FadeInDown.delay(160).duration(400)} style={s.card}>
-                  <View style={s.cardHeaderRow}>
-                    <Text style={s.cardTitle}>Body Composition</Text>
-                    {latest && (
-                      <Text style={{ fontSize: 12, color: '#64748B' }}>
-                        {new Date(latest.logged_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </Text>
-                    )}
+                <View style={s.consistencyLegendRow}>
+                  <View style={s.legendItem}>
+                    <View style={[s.legendDot, { backgroundColor: '#22C55E' }]} />
+                    <Text style={s.legendText}>Workout Completed</Text>
                   </View>
-
-                  {latest || bmi != null ? (
-                    <View style={s.compositionRingsRow}>
-                      <RingArc
-                        size={80}
-                        strokeWidth={8}
-                        percent={bodyFat ?? 0}
-                        color="#EF4444"
-                        label="Body Fat"
-                        value={bodyFat != null ? `${bodyFat}%` : '—'}
-                        tracked={bodyFat != null}
-                      />
-                      <RingArc size={80} strokeWidth={8} percent={0} color="#22C55E" label="Muscle Mass" value="—" tracked={false} />
-                      <RingArc size={80} strokeWidth={8} percent={0} color="#3B82F6" label="Water" value="—" tracked={false} />
-                      <RingArc
-                        size={80}
-                        strokeWidth={8}
-                        percent={bmi != null ? Math.min((bmi / 40) * 100, 100) : 0}
-                        color="#8B5CF6"
-                        label="BMI"
-                        value={bmi != null ? bmi.toFixed(1) : '—'}
-                        tracked={bmi != null}
-                      />
-                    </View>
-                  ) : (
-                    <View style={s.emptyBox}>
-                      <Ionicons name="body-outline" size={28} color="#64748B" />
-                      <Text style={s.emptyTitle}>No measurements yet</Text>
-                      <Text style={s.emptySub}>Log body fat or weight to see composition metrics.</Text>
-                    </View>
-                  )}
-                </Animated.View>
-              </>
+                  <Text style={s.consistencyCount}>{trainingDaysThisWeek} / 7 days</Text>
+                </View>
+              </Animated.View>
             )}
 
-            {showStrengthCards && (
-              <>
-                {/* Strength Progress */}
-                <Animated.View entering={FadeInDown.delay(240).duration(400)} style={s.card}>
-                  <View style={s.cardHeaderRow}>
-                    <Text style={s.cardTitle}>Strength Progress</Text>
-                    <TouchableOpacity onPress={() => router.push('/workouts')} accessibilityRole="button" accessibilityLabel="View all workouts">
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#3B82F6' }}>View All</Text>
+            {/* ═══ NUTRITION: averages, vs-target, consistency, trends ═══ */}
+            {has('nutritionStats') && (
+              <Animated.View entering={FadeInDown.duration(400)} style={s.card}>
+                <Text style={s.cardTitle}>Calorie & Macro Averages</Text>
+                {nutritionAnalytics.hasData ? (
+                  <>
+                    <Text style={s.cardSubtitle}>
+                      Daily average over {nutritionAnalytics.loggedDays} logged day{nutritionAnalytics.loggedDays === 1 ? '' : 's'}: {nutritionAnalytics.avgCalories.toLocaleString()} kcal
+                    </Text>
+                    <View style={[s.tripleStatRow, { marginTop: 12 }]}>
+                      <View style={s.nutriStat}>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: '#8B5CF6' }}>{nutritionAnalytics.avgProtein}g</Text>
+                        <Text style={s.nutriStatLabel}>Avg Protein</Text>
+                      </View>
+                      <View style={s.nutriStat}>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: '#EAB308' }}>{nutritionAnalytics.avgCarbs}g</Text>
+                        <Text style={s.nutriStatLabel}>Avg Carbs</Text>
+                      </View>
+                      <View style={s.nutriStat}>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: '#22C55E' }}>{nutritionAnalytics.avgFats}g</Text>
+                        <Text style={s.nutriStatLabel}>Avg Fats</Text>
+                      </View>
+                    </View>
+
+                    {nutritionAnalytics.hasTargets ? (
+                      <>
+                        {nutritionAnalytics.caloriesVsTarget && renderTargetBar('Calories vs target', nutritionAnalytics.caloriesVsTarget, 'kcal', '#3B82F6')}
+                        {nutritionAnalytics.proteinVsTarget && renderTargetBar('Protein vs target', nutritionAnalytics.proteinVsTarget, 'g', '#8B5CF6')}
+                      </>
+                    ) : (
+                      <View style={s.noTargetNote}>
+                        <Ionicons name="flag-outline" size={14} color="#64748B" />
+                        <Text style={s.noTargetText}>Set nutrition targets to compare them against your intake.</Text>
+                      </View>
+                    )}
+
+                    <View style={s.consistencyLegendRow}>
+                      <Text style={s.legendText}>Logging consistency</Text>
+                      <Text style={s.consistencyCount}>
+                        {nutritionAnalytics.loggingConsistencyPct}% · {nutritionAnalytics.loggedDays}/{nutritionAnalytics.calendarDays} days
+                      </Text>
+                    </View>
+
+                    {nutritionAnalytics.calorieTrend.length >= 1 && (
+                      <>
+                        <Text style={s.sectionSubhead}>Calorie trend</Text>
+                        <TrendChart points={nutritionAnalytics.calorieTrend} color="#3B82F6" width={chartW} height={110} />
+                      </>
+                    )}
+                    {nutritionAnalytics.proteinTrend.length >= 1 && (
+                      <>
+                        <Text style={s.sectionSubhead}>Protein trend</Text>
+                        <TrendChart points={nutritionAnalytics.proteinTrend} color="#8B5CF6" width={chartW} height={110} />
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="nutrition-outline" size={28} color="#64748B" />
+                    <Text style={s.emptyTitle}>No meals logged yet</Text>
+                    <Text style={s.emptySub}>Log meals in the Nutrition tab to see your averages here.</Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={() => router.push('/food-diary')}
+                  style={[s.primaryBtn, { marginTop: 16 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open food diary"
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>Open Food Diary</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            )}
+
+            {/* ═══ BODY: weight / change / BMI / body fat / circumferences ═══ */}
+            {has('bodyStats') && (
+              <Animated.View entering={FadeInDown.duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>Body Measurements</Text>
+                  <TouchableOpacity
+                    style={s.logWeightHeaderBtn}
+                    onPress={handleOpenLogModal}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Log weight"
+                  >
+                    <Ionicons name="add" size={14} color="#FFFFFF" />
+                    <Text style={s.logWeightHeaderBtnText}>Log Weight</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {bodyAnalytics.currentWeightKg != null ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+                      <Text style={s.weightCurrentVal}>{bodyAnalytics.currentWeightKg.toFixed(1)} kg</Text>
+                      <Text style={{ fontSize: 13, color: '#64748B' }}>({(bodyAnalytics.currentWeightKg * 2.20462).toFixed(1)} lbs)</Text>
+                    </View>
+                    {bodyAnalytics.weightChangeKg != null && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <Ionicons
+                          name={bodyAnalytics.weightChangeKg <= 0 ? 'arrow-down' : 'arrow-up'}
+                          size={13}
+                          color={bodyAnalytics.weightChangeKg <= 0 ? '#22C55E' : '#F97316'}
+                        />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: bodyAnalytics.weightChangeKg <= 0 ? '#22C55E' : '#F97316', marginLeft: 2 }}>
+                          {Math.abs(bodyAnalytics.weightChangeKg).toFixed(1)} kg
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 5 }}>over {rangeLabel(dateRange)}</Text>
+                      </View>
+                    )}
+
+                    {bodyAnalytics.weightTrend.length >= 1 && (
+                      <View style={{ marginTop: 4, marginBottom: 4 }}>
+                        <TrendChart points={bodyAnalytics.weightTrend} color="#3B82F6" width={chartW} height={110} />
+                      </View>
+                    )}
+
+                    <View style={[s.statGrid, { marginTop: 12 }]}>
+                      {bodyAnalytics.bmi != null && (
+                        <View style={s.statTile}>
+                          <Text style={s.statTileValue}>{bodyAnalytics.bmi.toFixed(1)}</Text>
+                          <Text style={s.statTileLabel}>BMI</Text>
+                        </View>
+                      )}
+                      {bodyAnalytics.bodyFatPct != null && (
+                        <View style={s.statTile}>
+                          <Text style={s.statTileValue}>{bodyAnalytics.bodyFatPct}%</Text>
+                          <Text style={s.statTileLabel}>Body Fat</Text>
+                        </View>
+                      )}
+                      {bodyAnalytics.circumferences.map((c) => (
+                        <View key={c.key} style={s.statTile}>
+                          <Text style={s.statTileValue}>{c.valueCm} cm</Text>
+                          <Text style={s.statTileLabel}>{c.label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                ) : (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="body-outline" size={28} color="#64748B" />
+                    <Text style={s.emptyTitle}>No measurements yet</Text>
+                    <Text style={s.emptySub}>Log your weight regularly to monitor body composition and trend lines.</Text>
+                    <TouchableOpacity style={[s.primaryBtn, { marginTop: 12, paddingHorizontal: 20 }]} onPress={handleOpenLogModal} activeOpacity={0.85}>
+                      <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 13 }}>Log First Weight</Text>
                     </TouchableOpacity>
                   </View>
-
-                  {strengthList.length > 0 ? (
-                    strengthList.map((pr, idx) => (
-                      <React.Fragment key={pr.id || idx}>
-                        {idx > 0 && <View style={s.divider} />}
-                        <View style={s.strengthRow}>
-                          <View style={[s.strengthIconBox, { backgroundColor: 'rgba(59,130,246,0.15)', borderColor: 'rgba(59,130,246,0.35)' }]}>
-                            <Ionicons name="barbell-outline" size={18} color="#3B82F6" />
-                          </View>
-                          <View style={{ flex: 1, marginLeft: 12 }}>
-                            <Text style={s.strengthExName}>{canonicalExerciseName(pr.exercises?.name || 'Exercise', pr.exercise_id)}</Text>
-                            <Text style={s.strengthExType}>{(pr.record_type || 'PR').replace(/_/g, ' ')}</Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
-                            <Text style={s.strengthWeight}>
-                              {pr.value}
-                              {String(pr.record_type || '').toLowerCase().includes('rep') ? ' reps' : ' kg'}
-                            </Text>
-                            <Text style={s.strengthExType}>
-                              {new Date(pr.achieved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </Text>
-                          </View>
-                        </View>
-                      </React.Fragment>
-                    ))
-                  ) : (
-                    <View style={s.emptyBox}>
-                      <Ionicons name="barbell-outline" size={28} color="#64748B" />
-                      <Text style={s.emptyTitle}>No personal records yet</Text>
-                      <Text style={s.emptySub}>Complete workouts and log your sets to build strength records.</Text>
-                    </View>
-                  )}
-                </Animated.View>
-
-              </>
+                )}
+              </Animated.View>
             )}
 
-            {showWorkoutCards && (
-              <>
-                {/* Consistency */}
-                <Animated.View entering={FadeInDown.delay(320).duration(400)} style={s.card}>
-                  <View style={s.cardHeaderRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={s.cardTitle}>Consistency</Text>
-                      <Ionicons name="information-circle-outline" size={16} color="#64748B" style={{ marginLeft: 6 }} />
-                    </View>
-                    <Text style={s.dateRangeBtnText}>This Week</Text>
-                  </View>
-
-                  <View style={s.weekRow}>
-                    {weekDays.map((day, idx) => (
-                      <View key={idx} style={s.weekDayCell}>
-                        <Text style={s.weekDayLabel}>{day.label}</Text>
-                        <View style={[s.weekDayCircle, day.done && s.weekDayDone]}>
-                          {day.done ? (
-                            <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                          ) : (
-                            <Text style={{ fontSize: 11, color: day.future ? '#334155' : '#475569' }}>·</Text>
+            {/* ═══ BODY: recent measurements ═══ */}
+            {has('bodyMeasurements') && bodyAnalytics.recentMeasurements.length > 0 && (
+              <Animated.View entering={FadeInDown.delay(80).duration(400)} style={s.card}>
+                <Text style={s.cardTitle}>Recent Measurements</Text>
+                <View style={{ marginTop: 8 }}>
+                  {bodyAnalytics.recentMeasurements.map((m, idx) => (
+                    <React.Fragment key={m.loggedAtMs}>
+                      {idx > 0 && <View style={s.divider} />}
+                      <View style={s.sessionRow}>
+                        <Text style={s.measurementDate}>{m.dateLabel}</Text>
+                        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                          <Text style={s.measurementPrimary}>
+                            {m.weightKg != null ? `${m.weightKg} kg` : '—'}
+                            {m.bodyFatPct != null ? ` · ${m.bodyFatPct}% BF` : ''}
+                          </Text>
+                          {m.circumferences.length > 0 && (
+                            <Text style={s.measurementMeta} numberOfLines={1}>
+                              {m.circumferences.map((c) => `${c.label} ${c.valueCm}`).join(' · ')}
+                            </Text>
                           )}
                         </View>
                       </View>
-                    ))}
-                  </View>
-
-                  <View style={s.consistencyLegendRow}>
-                    <View style={s.legendItem}>
-                      <View style={[s.legendDot, { backgroundColor: '#22C55E' }]} />
-                      <Text style={s.legendText}>Workout Completed</Text>
-                    </View>
-                    <Text style={s.consistencyCount}>{workoutsThisWeek} / 7 days</Text>
-                  </View>
-                </Animated.View>
-              </>
+                    </React.Fragment>
+                  ))}
+                </View>
+              </Animated.View>
             )}
 
-            {activeTab === 'nutrition' && (
-              <Animated.View entering={FadeInDown.duration(400)}>
-                <View style={s.card}>
-                  <Text style={s.cardTitle}>Calorie & Macro Averages</Text>
-                  {nutritionAvg ? (
-                    <>
-                      <Text style={{ fontSize: 13, color: '#94A3B8', marginTop: 4, marginBottom: 14 }}>
-                        Daily average over the last {nutritionAvg.days} logged day{nutritionAvg.days === 1 ? '' : 's'}:{' '}
-                        {nutritionAvg.cal.toLocaleString()} kcal
-                      </Text>
-                      <View style={{ flexDirection: 'row', gap: 12 }}>
-                        <View style={s.nutriStat}>
-                          <Text style={{ fontSize: 18, fontWeight: '800', color: '#8B5CF6' }}>{nutritionAvg.p}g</Text>
-                          <Text style={s.nutriStatLabel}>Avg Protein</Text>
-                        </View>
-                        <View style={s.nutriStat}>
-                          <Text style={{ fontSize: 18, fontWeight: '800', color: '#EAB308' }}>{nutritionAvg.c}g</Text>
-                          <Text style={s.nutriStatLabel}>Avg Carbs</Text>
-                        </View>
-                        <View style={s.nutriStat}>
-                          <Text style={{ fontSize: 18, fontWeight: '800', color: '#22C55E' }}>{nutritionAvg.f}g</Text>
-                          <Text style={s.nutriStatLabel}>Avg Fats</Text>
-                        </View>
-                      </View>
-                    </>
-                  ) : (
-                    <View style={s.emptyBox}>
-                      <Ionicons name="nutrition-outline" size={28} color="#64748B" />
-                      <Text style={s.emptyTitle}>No meals logged yet</Text>
-                      <Text style={s.emptySub}>Log meals in the Nutrition tab to see your averages here.</Text>
-                    </View>
-                  )}
-                  <TouchableOpacity
-                    onPress={() => router.push('/food-diary')}
-                    style={[s.primaryBtn, { marginTop: 16 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open food diary"
-                  >
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>Open Food Diary</Text>
+            {/* ═══ STRENGTH: current PRs, recent PRs, PR history ═══ */}
+            {has('strengthStats') && (
+              <Animated.View entering={FadeInDown.duration(400)} style={s.card}>
+                <View style={s.cardHeaderRow}>
+                  <Text style={s.cardTitle}>{strengthAnalytics.currentPrCount} Current PRs</Text>
+                  <TouchableOpacity onPress={() => router.push('/workouts')} accessibilityRole="button" accessibilityLabel="View all workouts">
+                    <Text style={s.linkText}>View All</Text>
                   </TouchableOpacity>
                 </View>
+
+                {strengthAnalytics.currentPrs.length > 0 ? (
+                  <>
+                    {strengthAnalytics.currentPrs.map((pr, idx) => renderPrRow(pr, idx, true))}
+
+                    {strengthAnalytics.recentPrs.length > 0 && (
+                      <>
+                        <Text style={s.sectionSubhead}>Set in the last 30 days</Text>
+                        {strengthAnalytics.recentPrs.map((pr, idx) => renderPrRow(pr, idx, true))}
+                      </>
+                    )}
+
+                    {strengthAnalytics.prHistoryByExercise.length > 0 && (
+                      <>
+                        <Text style={s.sectionSubhead}>PR history</Text>
+                        {strengthAnalytics.prHistoryByExercise.map((group) => (
+                          <View key={group.exerciseId} style={s.historyBlock}>
+                            <Text style={s.historyExName} numberOfLines={1}>{canonicalExerciseName(group.exerciseName, group.exerciseId)}</Text>
+                            <View style={s.historyRow}>
+                              {group.records.map((r, i) => (
+                                <View key={r.id || `${r.recordType}:${i}`} style={s.historyChip}>
+                                  <Text style={s.historyChipVal}>{r.value}{prUnitSuffix(r.unit)}</Text>
+                                  <Text style={s.historyChipDate}>{r.dateLabel}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        ))}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="barbell-outline" size={28} color="#64748B" />
+                    <Text style={s.emptyTitle}>No personal records yet</Text>
+                    <Text style={s.emptySub}>Complete workouts and log your sets to build strength records.</Text>
+                  </View>
+                )}
               </Animated.View>
             )}
           </ScrollView>
@@ -1070,13 +1277,15 @@ const s = StyleSheet.create({
   },
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  cardSubtitle: { fontSize: 13, color: '#94A3B8', marginTop: 4 },
+  linkText: { fontSize: 13, fontWeight: '700', color: '#3B82F6' },
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.05)', marginVertical: 2 },
+  sectionSubhead: { fontSize: 13, fontWeight: '700', color: '#94A3B8', marginTop: 18, marginBottom: 8 },
+  inlineEmpty: { fontSize: 13, color: '#64748B', lineHeight: 18 },
 
   emptyBox: { alignItems: 'center', paddingVertical: 24, gap: 6 },
   emptyTitle: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', marginTop: 4 },
   emptySub: { fontSize: 12, color: '#64748B', textAlign: 'center', paddingHorizontal: 12, lineHeight: 17 },
-
-  singleWeightBox: { paddingVertical: 8 },
 
   yetiScoreCard: { backgroundColor: '#090E17', borderColor: 'rgba(56, 189, 248, 0.22)' },
   yetiScoreRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
@@ -1108,27 +1317,62 @@ const s = StyleSheet.create({
   },
   logWeightHeaderBtnText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
 
-  dateRangeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 99,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
   dateRangeBtnText: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
   chartXAxisRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8, marginTop: 6 },
   chartXLabel: { fontSize: 10, color: '#475569', fontWeight: '500' },
 
-  compositionRingsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 4 },
+  // Stat grid (workout / body) — wraps to 2 columns, never overflows.
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  statTile: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    backgroundColor: '#0E131C',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  statTileValue: { fontSize: 20, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
+  statTileLabel: { fontSize: 11, color: '#64748B', marginTop: 3 },
+
+  // Compact 3-up snapshot row (overview / nutrition macros).
+  tripleStatRow: { flexDirection: 'row', gap: 10 },
+  tripleStat: { flex: 1, backgroundColor: '#0E131C', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  tripleStatValue: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
+  tripleStatLabel: { fontSize: 11, color: '#64748B', marginTop: 3 },
+
+  sessionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
+  sessionName: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+  sessionMeta: { fontSize: 11, color: '#64748B', marginTop: 2 },
+  sessionVolume: { fontSize: 14, fontWeight: '800', color: '#3B82F6' },
+
+  measurementDate: { fontSize: 13, fontWeight: '700', color: '#94A3B8', width: 70 },
+  measurementPrimary: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+  measurementMeta: { fontSize: 11, color: '#64748B', marginTop: 2 },
 
   strengthRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
   strengthIconBox: { width: 42, height: 42, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   strengthExName: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   strengthExType: { fontSize: 11, color: '#64748B', marginTop: 1, textTransform: 'capitalize' },
   strengthWeight: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+
+  historyBlock: { marginTop: 10 },
+  historyExName: { fontSize: 13, fontWeight: '700', color: '#FFFFFF', marginBottom: 6 },
+  historyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  historyChip: { backgroundColor: '#0E131C', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  historyChipVal: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
+  historyChipDate: { fontSize: 10, color: '#64748B', marginTop: 1 },
+
+  targetLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  targetLabel: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
+  targetValue: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
+  targetValueDim: { fontSize: 12, fontWeight: '600', color: '#64748B' },
+  targetBarTrack: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 6 },
+  targetBarFill: { height: 8, borderRadius: 4 },
+  targetPct: { fontSize: 11, marginTop: 4 },
+
+  noTargetNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, backgroundColor: '#0E131C', borderRadius: 12, padding: 12 },
+  noTargetText: { flex: 1, fontSize: 12, color: '#94A3B8', lineHeight: 17 },
 
   weekRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
   weekDayCell: { alignItems: 'center', gap: 6 },
@@ -1151,6 +1395,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
     paddingTop: 12,
+    marginTop: 12,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
