@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 8,
+  version: 9,
   tables: [
     // Profiles (Merged properties for SSR next.js, Edge Functions and Mobile client)
     tableSchema({
@@ -71,6 +71,9 @@ export const schema = appSchema({
         { name: 'thumbnail_url', type: 'string', isOptional: true },
         { name: 'source', type: 'string', isOptional: true },
         { name: 'source_id', type: 'string', isOptional: true },
+        // Curation provenance from the remote catalog: 'yeti_first_party' | 'legacy_catalog' | 'custom'.
+        // Indexed because the library prioritises first-party rows over legacy on read.
+        { name: 'source_type', type: 'string', isOptional: true, isIndexed: true },
         { name: 'is_public', type: 'boolean', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },

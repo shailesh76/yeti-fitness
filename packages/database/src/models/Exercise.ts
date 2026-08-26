@@ -36,6 +36,7 @@ export class Exercise extends Model {
   @field('thumbnail_url') thumbnail_url?: string;
   @field('source') source?: string;
   @field('source_id') source_id?: string;
+  @field('source_type') source_type?: string;
   @field('is_public') is_public?: boolean;
   @readonly @date('created_at') createdAt!: number;
   @readonly @date('updated_at') updatedAt!: number;

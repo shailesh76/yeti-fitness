@@ -87,22 +87,33 @@ export default function ExercisesScreen() {
       (ex.instructions && ex.instructions.toLowerCase().includes(q)) ||
       (ex.equipment && ex.equipment.toLowerCase().includes(q)) ||
       (ex.category && ex.category.toLowerCase().includes(q)) ||
-      (ex.body_part && ex.body_part.toLowerCase().includes(q));
+      (ex.body_part && ex.body_part.toLowerCase().includes(q)) ||
+      (ex.primary_muscle && ex.primary_muscle.toLowerCase().includes(q)) ||
+      (ex.target_muscle && ex.target_muscle.toLowerCase().includes(q)) ||
+      (ex.muscle_group && ex.muscle_group.toLowerCase().includes(q)) ||
+      (ex.movement_pattern && ex.movement_pattern.toLowerCase().includes(q)) ||
+      (typeof ex.secondary_muscles === 'string' && ex.secondary_muscles.toLowerCase().includes(q)) ||
+      (Array.isArray(ex.search_aliases) && ex.search_aliases.some((a: string) => a.toLowerCase().includes(q)));
 
+    // Muscle filter falls back across every muscle field the catalog uses
+    // (curated rows key on primary_muscle/target_muscle, legacy rows on
+    // muscle_group). A row is never dropped merely because muscle_group is null.
     let matchesMuscle = selectedMuscle === 'All';
-    if (!matchesMuscle && ex.muscle_group) {
-      const exMuscle = ex.muscle_group.toLowerCase();
+    if (!matchesMuscle) {
       const selMuscle = selectedMuscle.toLowerCase();
-      if (selMuscle.includes('/')) {
-        const parts = selMuscle.split('/');
-        matchesMuscle = parts.some(part => exMuscle.includes(part));
-      } else {
-        matchesMuscle = exMuscle.includes(selMuscle);
-      }
+      const parts = selMuscle.includes('/') ? selMuscle.split('/') : [selMuscle];
+      const muscleFields = [ex.muscle_group, ex.primary_muscle, ex.target_muscle, ex.body_part]
+        .filter(Boolean)
+        .map((m: string) => m.toLowerCase());
+      matchesMuscle = muscleFields.some(field => parts.some(part => field.includes(part)));
     }
 
-    const matchesEquipment = selectedEquipment === 'All' || ex.equipment === selectedEquipment;
-    const matchesCategory = selectedCategory === 'All' || ex.category === selectedCategory;
+    // Case-insensitive so curated equipment/category vocabulary matches the
+    // taxonomy-derived chips regardless of casing.
+    const matchesEquipment = selectedEquipment === 'All' ||
+      (!!ex.equipment && ex.equipment.toLowerCase() === selectedEquipment.toLowerCase());
+    const matchesCategory = selectedCategory === 'All' ||
+      (!!ex.category && ex.category.toLowerCase() === selectedCategory.toLowerCase());
     const matchesFavorites = !favoritesOnly || favoriteIds.has(ex.id);
 
     return matchesSearch && matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;

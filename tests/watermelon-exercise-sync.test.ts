@@ -46,8 +46,8 @@ describe('Mocked offline exercise cache behavior (not native WatermelonDB integr
     repository = new ExerciseRepository(db, null as any);
   });
 
-  it('1. registers the focused exercise schema v8', () => {
-    expect(schema.version).toBe(8);
+  it('1. registers the focused exercise schema v9', () => {
+    expect(schema.version).toBe(9);
     const tableNames = Object.keys(schema.tables);
     expect(tableNames).toContain('exercises');
     expect(tableNames).not.toEqual(expect.arrayContaining([

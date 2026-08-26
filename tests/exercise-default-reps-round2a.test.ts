@@ -59,12 +59,16 @@ describe('Round 2A structural schema and ownership checks (not a native Watermel
       'common_mistakes', 'safety_notes', 'default_sets', 'default_reps',
       'default_reps_prescription', 'tempo',
     ];
-    expect(schema).toContain('version: 8');
+    expect(schema).toContain('version: 9');
     expect(migrations).toContain('toVersion: 8');
+    expect(migrations).toContain('toVersion: 9');
     for (const column of addedColumns) {
       expect(schema).toContain(`{ name: '${column}'`);
       expect(migrations).toContain(`{ name: '${column}'`);
     }
+    // v9 adds source_type (curation provenance) to both the fresh schema and the migration.
+    expect(schema).toContain("{ name: 'source_type'");
+    expect(migrations).toContain("{ name: 'source_type'");
     expect(migrations).toContain("{ name: 'default_reps', type: 'number', isOptional: true }");
     expect(migrations).toContain("{ name: 'default_reps_prescription', type: 'string', isOptional: true }");
     expect(schema).not.toMatch(/name: 'exercise_(aliases|tags|muscles|media|alternatives|progressions|regressions)'/);

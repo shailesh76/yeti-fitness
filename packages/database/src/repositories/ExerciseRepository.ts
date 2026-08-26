@@ -110,6 +110,117 @@ export function canonicalExerciseName(name: string, exerciseId?: string | null):
   return canonical;
 }
 
+// ─── Library normalisation (source-prioritisation + dedupe) ──────────────────
+// The mobile library, the exercise detail screen, and the workout-builder picker
+// all read one array: useWorkoutStore.fetchExercises() → getExercises(). The live
+// catalog is ~396 curated `yeti_first_party` rows plus ~2,095 legacy rows. Without
+// prioritisation the legacy rows bury the curated ones (and duplicate them under
+// "(Legacy xxxx)" names). normalizeExerciseList canonicalises names, de-duplicates
+// by canonical name preferring first-party, and sorts first-party first — so the
+// curated catalog surfaces instead of being hidden.
+
+export const FIRST_PARTY_SOURCE_TYPE = 'yeti_first_party';
+
+// Seed placeholder CDNs that never resolve — treated as "no media" for tie-breaks.
+const PLACEHOLDER_MEDIA_HOST = /cdn\.yeti\.fit|cdn\.yetifitness\.app/i;
+
+/** True only for a real, resolvable http(s) media URL (not a seed placeholder). */
+export function exerciseHasResolvableMedia(row: any): boolean {
+  const url = row?.gif_url || row?.video_url || row?.thumbnail_url;
+  if (!url || typeof url !== 'string') return false;
+  if (PLACEHOLDER_MEDIA_HOST.test(url)) return false;
+  return /^https?:\/\//i.test(url);
+}
+
+function isFirstParty(row: any): boolean {
+  return row?.source_type === FIRST_PARTY_SOURCE_TYPE;
+}
+
+// Prefer first-party over legacy; within the same tier prefer a row that carries
+// resolvable (non-placeholder) media. Otherwise keep the incumbent.
+function isBetterExercise(candidate: any, incumbent: any): boolean {
+  const candFp = isFirstParty(candidate);
+  const incFp = isFirstParty(incumbent);
+  if (candFp !== incFp) return candFp;
+  const candMedia = exerciseHasResolvableMedia(candidate);
+  const incMedia = exerciseHasResolvableMedia(incumbent);
+  if (candMedia !== incMedia) return candMedia;
+  return false;
+}
+
+// Maps a WatermelonDB Exercise model OR a raw remote row to a plain, display-ready
+// object. Both expose the same snake_case field names, so one accessor path serves
+// either. The name is canonicalised so legacy import suffixes never reach the UI.
+export function toPlainExercise(row: any): any {
+  return {
+    id: row.id,
+    server_id: row.server_id ?? null,
+    slug: row.slug ?? null,
+    name: canonicalExerciseName(row.name, row.id),
+    primary_muscle: row.primary_muscle ?? null,
+    muscle_group: row.muscle_group ?? null,
+    category: row.category ?? null,
+    equipment: row.equipment ?? null,
+    movement_pattern: row.movement_pattern ?? null,
+    unilateral: row.unilateral ?? null,
+    setup_instructions: row.setup_instructions ?? null,
+    execution_instructions: row.execution_instructions ?? null,
+    breathing: row.breathing ?? null,
+    coaching_cues: row.coaching_cues ?? null,
+    common_mistakes: row.common_mistakes ?? null,
+    safety_notes: row.safety_notes ?? null,
+    default_sets: row.default_sets ?? null,
+    default_reps: row.default_reps ?? null,
+    default_reps_prescription: row.default_reps_prescription ?? null,
+    tempo: row.tempo ?? null,
+    instructions: row.instructions ?? null,
+    gif_url: row.gif_url ?? null,
+    video_url: row.video_url ?? null,
+    is_compound: row.is_compound ?? null,
+    body_part: row.body_part ?? null,
+    target_muscle: row.target_muscle ?? null,
+    secondary_muscles: row.secondary_muscles ?? null,
+    difficulty: row.difficulty ?? null,
+    media_type: row.media_type ?? null,
+    thumbnail_url: row.thumbnail_url ?? null,
+    source: row.source ?? null,
+    source_id: row.source_id ?? null,
+    source_type: row.source_type ?? null,
+    is_public: row.is_public ?? null,
+  };
+}
+
+/**
+ * Shapes the raw exercise catalog for the library UI:
+ *  1. Canonicalises every name (strips legacy import collision suffixes).
+ *  2. De-duplicates by canonical name (case-insensitive), preferring a
+ *     first-party row over legacy, then a row with resolvable media.
+ *  3. Stable-sorts first-party rows ahead of legacy so the curated catalog
+ *     surfaces first instead of being buried under the legacy rows.
+ * Nameless rows are dropped. Input may be WatermelonDB models or raw remote rows.
+ */
+export function normalizeExerciseList(rows: any[]): any[] {
+  const mapped = (rows || []).map(toPlainExercise).filter(ex => ex.name);
+
+  const byName = new Map<string, any>();
+  const order: string[] = [];
+  for (const ex of mapped) {
+    const key = ex.name.toLowerCase();
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, ex);
+      order.push(key);
+    } else if (isBetterExercise(ex, existing)) {
+      byName.set(key, ex);
+    }
+  }
+
+  const deduped = order.map(key => byName.get(key));
+  // Stable partition — first-party first, relative order preserved within each
+  // tier (Array.prototype.sort is stable in modern engines, incl. Hermes).
+  return deduped.sort((a, b) => (isFirstParty(b) ? 1 : 0) - (isFirstParty(a) ? 1 : 0));
+}
+
 // ─── AI Coach exercise-name resolution ───────────────────────────────────────
 // The AI Coach's deterministic program generator (supabase/functions/_shared/ai/
 // programGenerator.ts) works purely on exercise NAME strings pulled from the
@@ -217,17 +328,28 @@ export class ExerciseRepository {
     this.supabase = supabase;
   }
 
-  async getExercises(): Promise<Exercise[]> {
+  async getExercises(): Promise<any[]> {
+    let localRows: Exercise[] = [];
     try {
-      const local = await this.db.get<Exercise>('exercises').query().fetch();
-      if (local.length > 0) {
-        return local;
-      }
+      localRows = await this.db.get<Exercise>('exercises').query().fetch();
     } catch (e) {
       console.warn('Failed to query local exercises, trying remote:', e);
     }
 
-    if (this.supabase && typeof this.supabase.from === 'function') {
+    const supabaseAvailable = !!(this.supabase && typeof this.supabase.from === 'function');
+
+    if (localRows.length > 0) {
+      // A cache written before source_type existed (schema < v9) can't be
+      // prioritised. If remote is reachable, fall through to rebuild it once so
+      // first-party prioritisation actually takes effect; otherwise serve what
+      // we have (still canonicalised + de-duplicated).
+      const cacheHasSourceType = localRows.some(r => (r as any).source_type != null);
+      if (cacheHasSourceType || !supabaseAvailable) {
+        return normalizeExerciseList(localRows);
+      }
+    }
+
+    if (supabaseAvailable) {
       const BATCH_SIZE = 1000;
       let data: any[] = [];
       let from = 0;
@@ -256,7 +378,17 @@ export class ExerciseRepository {
 
       if (data.length > 0) {
         if (this.db) {
+          // Only reached with a non-empty local cache on the source_type-backfill
+          // path — rebuild it so the previously-cached rows gain source_type.
+          const rebuildStaleCache = localRows.length > 0;
           this.db.write(async () => {
+            if (rebuildStaleCache) {
+              // Exercises are a pure server-derived cache (no local-only edits),
+              // so clearing + refetching is lossless for the user's own data.
+              try {
+                await this.db.get<Exercise>('exercises').query().destroyAllPermanently();
+              } catch {}
+            }
             for (const ex of data) {
               try {
                 await this.db.get<Exercise>('exercises').create(r => {
@@ -290,13 +422,20 @@ export class ExerciseRepository {
                   r.thumbnail_url = ex.thumbnail_url;
                   r.source = ex.source;
                   r.source_id = ex.source_id;
+                  r.source_type = ex.source_type;
                   r.is_public = ex.is_public;
                 });
               } catch {}
             }
           }).catch(err => console.warn('Could not cache exercises locally:', err));
         }
-        return data;
+        return normalizeExerciseList(data);
+      }
+
+      // Remote yielded nothing (transient/offline). Fall back to a stale local
+      // cache rather than emptying the library.
+      if (localRows.length > 0) {
+        return normalizeExerciseList(localRows);
       }
     }
 

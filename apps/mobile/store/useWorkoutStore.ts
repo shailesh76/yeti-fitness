@@ -76,8 +76,18 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   fetchExercises: async () => {
     set({ loading: true });
     try {
-      const data = await exerciseRepository.getExercises();
-      set({ exercises: data as any[], loading: false });
+      // Aliases are fetched alongside the catalog (fails closed to an empty map)
+      // so the library search can match common gym vernacular. This lights up as
+      // soon as exercise_aliases is populated; until then it is a harmless no-op.
+      const [data, aliasMap] = await Promise.all([
+        exerciseRepository.getExercises(),
+        exerciseRepository.getAliasesByExerciseId().catch(() => new Map<string, string[]>()),
+      ]);
+      const withAliases = (data as any[]).map(ex => ({
+        ...ex,
+        search_aliases: aliasMap.get(ex.id) ?? [],
+      }));
+      set({ exercises: withAliases, loading: false });
     } catch (error) {
       set({ loading: false });
       console.error(error);

@@ -381,6 +381,19 @@ export default schemaMigrations({
           ]
         })
       ]
+    },
+    {
+      toVersion: 9,
+      steps: [
+        addColumns({
+          table: 'exercises',
+          columns: [
+            // Curation provenance so the library can prioritise first-party rows
+            // over legacy ones on the local-cache path (not just the remote path).
+            { name: 'source_type', type: 'string', isOptional: true, isIndexed: true },
+          ]
+        })
+      ]
     }
   ],
 });
