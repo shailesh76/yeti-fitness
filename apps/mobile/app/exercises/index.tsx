@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Platform, StyleSheet } from 'react-native';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, FlatList, Platform, StyleSheet } from 'react-native';
 import { useWorkoutStore } from '../../store/useWorkoutStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useRepositories } from '../../hooks/useRepositories';
@@ -9,7 +9,6 @@ import AppShell from '../../components/AppShell';
 import { P, sharedStyles } from '../../constants/premiumTheme';
 import { displayLabel } from '../../utils/exerciseDisplay';
 import {
-  buildExerciseSearchIndexEntry,
   scoreExerciseRelevance,
   normalizeSearchToken,
 } from '@yeti/database/src/repositories/ExerciseRepository';
@@ -28,8 +27,59 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 // Used only until exercise_taxonomy has loaded from the server.
 const FALLBACK_MUSCLES = ['Arms', 'Back', 'Cardio', 'Chest', 'Core', 'Full Body', 'Legs', 'Shoulders'];
 
+const ExerciseCard = memo(({
+  exercise,
+  isFavorite,
+  canFavorite,
+  onOpen,
+  onToggleFavorite,
+}: {
+  exercise: any;
+  isFavorite: boolean;
+  canFavorite: boolean;
+  onOpen: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
+}) => (
+  <View style={[sharedStyles.card, styles.exerciseCard]}>
+    <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
+    <View style={styles.cardTrigger}>
+      <TouchableOpacity
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`View ${exercise.name}, ${exercise.muscle_group || 'Full Body'}`}
+        onPress={() => onOpen(exercise.id)}
+        style={{ flex: 1, paddingRight: 8 }}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.exerciseName}>{exercise.name}</Text>
+        <Text style={styles.muscleText}>
+          {exercise.muscle_group || 'Full Body'}
+          {exercise.equipment ? `  ·  ${displayLabel(exercise.equipment)}` : ''}
+        </Text>
+      </TouchableOpacity>
+      {canFavorite && (
+        <TouchableOpacity
+          accessible
+          accessibilityRole="button"
+          accessibilityState={{ selected: isFavorite }}
+          accessibilityLabel={isFavorite ? `Remove ${exercise.name} from favorites` : `Add ${exercise.name} to favorites`}
+          onPress={() => onToggleFavorite(exercise.id)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.favoriteBtn}
+        >
+          <Text style={[styles.favoriteIcon, isFavorite ? styles.favoriteIconActive : null]}>
+            {isFavorite ? '♥' : '♡'}
+          </Text>
+        </TouchableOpacity>
+      )}
+      <Text style={styles.arrowIcon} pointerEvents="none">›</Text>
+    </View>
+  </View>
+));
+ExerciseCard.displayName = 'ExerciseCard';
+
 export default function ExercisesScreen() {
-  const { exercises, fetchExercises, loading, error } = useWorkoutStore();
+  const { exercises, exerciseSearchIndex, fetchExercises, loading, error } = useWorkoutStore();
   const session = useAuthStore((state) => state.session);
   const { exerciseRepository } = useRepositories();
   const router = useRouter();
@@ -68,7 +118,7 @@ export default function ExercisesScreen() {
   const equipmentOptions = ['All', ...(taxonomy.equipment || [])];
   const categoryOptions = ['All', ...(taxonomy.category || [])];
 
-  const toggleFavorite = async (exerciseId: string) => {
+  const toggleFavorite = useCallback(async (exerciseId: string) => {
     if (!userId) return;
     const wasFavorite = favoriteIds.has(exerciseId);
     setFavoriteIds(prev => {
@@ -90,18 +140,11 @@ export default function ExercisesScreen() {
         return next;
       });
     }
-  };
+  }, [userId, favoriteIds, exerciseRepository]);
 
   const recentExercises = useMemo(
     () => recentIds.map(id => exercises.find(e => e.id === id)).filter(Boolean) as typeof exercises,
     [recentIds, exercises]
-  );
-
-  // Precompute each exercise's normalized search surfaces ONCE per catalog change
-  // (not per keystroke). Rebuilds only when the `exercises` array itself changes.
-  const searchIndex = useMemo(
-    () => exercises.map(ex => ({ ex, entry: buildExerciseSearchIndexEntry(ex) })),
-    [exercises]
   );
 
   // The heavy filter/rank pass runs off a debounced query; the TextInput itself stays
@@ -119,7 +162,7 @@ export default function ExercisesScreen() {
     // Facet filtering (muscle/equipment/category/favorites) is independent of the query.
     // Muscle falls back across every muscle field the catalog uses (curated rows key on
     // primary/target_muscle, legacy rows on muscle_group) and never drops null-muscle rows.
-    const facetMatched = searchIndex.filter(({ ex, entry }) => {
+    const facetMatched = exerciseSearchIndex.filter(({ ex, entry }) => {
       const matchesMuscle = selMuscleParts.length === 0 || selMuscleParts.some(part => entry.muscles.includes(part));
       const matchesEquipment = !selEquipment || entry.equipment === selEquipment;
       const matchesCategory = !selCategory || entry.category === selCategory;
@@ -138,7 +181,21 @@ export default function ExercisesScreen() {
       .filter(s => s.score > 0)
       .sort((a, b) => (b.score - a.score) || (a.index - b.index))
       .map(s => s.ex);
-  }, [searchIndex, deferredQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
+  }, [exerciseSearchIndex, deferredQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
+
+  const openExercise = useCallback((id: string) => {
+    router.push(`/exercises/${id}${builderPickSuffix}`);
+  }, [router, builderPickSuffix]);
+
+  const renderExercise = useCallback(({ item }: { item: any }) => (
+    <ExerciseCard
+      exercise={item}
+      isFavorite={favoriteIds.has(item.id)}
+      canFavorite={Boolean(userId)}
+      onOpen={openExercise}
+      onToggleFavorite={toggleFavorite}
+    />
+  ), [favoriteIds, userId, openExercise, toggleFavorite]);
 
   const hasActiveFilters = searchQuery || selectedMuscle !== 'All' || selectedEquipment !== 'All' || selectedCategory !== 'All' || favoritesOnly;
 
@@ -335,12 +392,18 @@ export default function ExercisesScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <ScrollView
+            <FlatList
+              data={filteredExercises}
+              renderItem={renderExercise}
+              keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
               style={{ flex: 1, width: '100%' }}
-              contentContainerStyle={{ pb: 120 } as any}
-            >
-              {filteredExercises.length === 0 ? (
+              contentContainerStyle={styles.gridContainer}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
+              windowSize={7}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
                 <View style={styles.noMatchesContainer}>
                   <Text style={styles.emptyText}>No exercises match your search and filters.</Text>
                   {hasActiveFilters && (
@@ -356,52 +419,8 @@ export default function ExercisesScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-              ) : (
-                <View style={styles.gridContainer}>
-                  {filteredExercises.map(ex => {
-                    const isFavorite = favoriteIds.has(ex.id);
-                    return (
-                      <View key={ex.id} style={[sharedStyles.card, styles.exerciseCard]}>
-                        <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
-
-                        <View style={styles.cardTrigger}>
-                          <TouchableOpacity
-                            accessible={true}
-                            accessibilityRole="button"
-                            accessibilityLabel={`View ${ex.name}, ${ex.muscle_group || 'Full Body'}`}
-                            onPress={() => router.push(`/exercises/${ex.id}${builderPickSuffix}`)}
-                            style={{ flex: 1, paddingRight: 8 }}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={styles.exerciseName}>{ex.name}</Text>
-                            <Text style={styles.muscleText}>
-                              {ex.muscle_group || 'Full Body'}
-                              {ex.equipment ? `  ·  ${displayLabel(ex.equipment)}` : ''}
-                            </Text>
-                          </TouchableOpacity>
-                          {userId && (
-                            <TouchableOpacity
-                              accessible={true}
-                              accessibilityRole="button"
-                              accessibilityState={{ selected: isFavorite }}
-                              accessibilityLabel={isFavorite ? `Remove ${ex.name} from favorites` : `Add ${ex.name} to favorites`}
-                              onPress={() => toggleFavorite(ex.id)}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                              style={styles.favoriteBtn}
-                            >
-                              <Text style={[styles.favoriteIcon, isFavorite ? styles.favoriteIconActive : null]}>
-                                {isFavorite ? '♥' : '♡'}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                          <Text style={styles.arrowIcon} pointerEvents="none">›</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-            </ScrollView>
+              }
+            />
           )}
         </View>
       </SafeAreaView>

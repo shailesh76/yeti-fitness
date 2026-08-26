@@ -221,6 +221,11 @@ export function normalizeExerciseList(rows: any[]): any[] {
   return deduped.sort((a, b) => (isFirstParty(b) ? 1 : 0) - (isFirstParty(a) ? 1 : 0));
 }
 
+/** A searchable mobile cache is complete only after canonical first-party rows arrive. */
+export function isExerciseCacheSearchComplete(rows: any[]): boolean {
+  return rows.some(row => row?.source_type === FIRST_PARTY_SOURCE_TYPE);
+}
+
 /**
  * Normalizes a string for search matching: lowercases, converts hyphens/underscores/slashes/punctuation
  * to spaces, collapses multiple whitespace characters, and trims.
@@ -494,12 +499,11 @@ export class ExerciseRepository {
     const supabaseAvailable = !!(this.supabase && typeof this.supabase.from === 'function');
 
     if (localRows.length > 0) {
-      // A cache written before source_type existed (schema < v9) can't be
-      // prioritised. If remote is reachable, fall through to rebuild it once so
-      // first-party prioritisation actually takes effect; otherwise serve what
-      // we have (still canonicalised + de-duplicated).
-      const cacheHasSourceType = localRows.some(r => (r as any).source_type != null);
-      if (cacheHasSourceType || !supabaseAvailable) {
+      // A legacy-only cache may have source_type populated but still predate the
+      // canonical first-party catalog. Refresh it once when remote is available;
+      // offline always keeps the local fallback visible.
+      const cacheHasFirstPartyRows = isExerciseCacheSearchComplete(localRows);
+      if (cacheHasFirstPartyRows || !supabaseAvailable) {
         return normalizeExerciseList(localRows);
       }
     }

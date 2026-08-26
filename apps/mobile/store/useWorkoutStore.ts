@@ -2,7 +2,12 @@ import { create } from 'zustand';
 import { database } from '../database';
 import { supabase } from '../lib/supabase';
 import { WorkoutRepository } from '@yeti/database/src/repositories/WorkoutRepository';
-import { ExerciseRepository, canonicalExerciseName } from '@yeti/database/src/repositories/ExerciseRepository';
+import {
+  ExerciseRepository,
+  canonicalExerciseName,
+  buildExerciseSearchIndexEntry,
+  type ExerciseSearchIndexEntry,
+} from '@yeti/database/src/repositories/ExerciseRepository';
 import type { Exercise } from '@yeti/database/src/models/Exercise';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendLocalNotification } from '../services/notificationService';
@@ -47,6 +52,7 @@ const exerciseRepository = new ExerciseRepository(database, supabase);
 
 interface WorkoutState {
   exercises: Exercise[];
+  exerciseSearchIndex: Array<{ ex: Exercise; entry: ExerciseSearchIndexEntry }>;
   workoutPlans: WorkoutPlan[];
   loading: boolean;
   error: string | null;
@@ -67,6 +73,7 @@ interface WorkoutState {
 
 export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   exercises: [],
+  exerciseSearchIndex: [],
   workoutPlans: [],
   loading: false,
   error: null,
@@ -89,7 +96,11 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         ...ex,
         search_aliases: aliasMap.get(ex.id) ?? [],
       }));
-      set({ exercises: withAliases, loading: false, error: null });
+      const exerciseSearchIndex = withAliases.map(ex => ({
+        ex,
+        entry: buildExerciseSearchIndexEntry(ex),
+      }));
+      set({ exercises: withAliases, exerciseSearchIndex, loading: false, error: null });
     } catch (error: any) {
       const msg = error?.message || 'Failed to load exercises';
       set({ loading: false, error: msg });

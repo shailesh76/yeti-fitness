@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   buildExerciseSearchIndexEntry,
   scoreExerciseRelevance,
@@ -6,6 +7,7 @@ import {
   matchesExerciseSearch,
   EXERCISE_RELEVANCE,
   FIRST_PARTY_SOURCE_TYPE,
+  isExerciseCacheSearchComplete,
 } from '../packages/database/src/repositories/ExerciseRepository';
 
 const FP = FIRST_PARTY_SOURCE_TYPE;
@@ -135,6 +137,10 @@ describe('rankExercisesByRelevance — required production queries', () => {
     expect(r[0]).toBe('pendulum');
   });
 
+  it('"Pendulum" → Pendulum Squat is first', () => {
+    expect(rankedIds(catalog, 'Pendulum')[0]).toBe('pendulum');
+  });
+
   // ── Matching parity + stability ────────────────────────────────────────────
 
   it('ranking preserves matching membership (same set as matchesExerciseSearch, only reordered)', () => {
@@ -152,5 +158,44 @@ describe('rankExercisesByRelevance — required production queries', () => {
 
   it('is a pure, stable transform — repeated calls yield identical ordering', () => {
     expect(rankedIds(catalog, 'squat')).toEqual(rankedIds(catalog, 'squat'));
+  });
+});
+
+describe('Exercise Library first-input responsiveness contract', () => {
+  const screen = readFileSync('apps/mobile/app/exercises/index.tsx', 'utf8');
+  const store = readFileSync('apps/mobile/store/useWorkoutStore.ts', 'utf8');
+
+  it('keeps visible input state immediate and result state debounced separately', () => {
+    expect(screen).toContain('value={searchQuery}');
+    expect(screen).toContain('onChangeText={setSearchQuery}');
+    expect(screen).toContain('const deferredQuery = useDebouncedValue(searchQuery, 120)');
+    expect(screen).toContain('normalizeSearchToken(deferredQuery)');
+  });
+
+  it('does not reconstruct the search index when searchQuery changes', () => {
+    expect(screen).not.toContain('buildExerciseSearchIndexEntry');
+    expect(screen).toContain('exerciseSearchIndex.filter');
+    expect(store).toContain('entry: buildExerciseSearchIndexEntry(ex)');
+  });
+
+  it('does not fetch the catalog for the first or subsequent queries', () => {
+    expect(screen).toMatch(/useEffect\(\(\) => \{\s*fetchExercises\(\);\s*\}, \[userId\]\);/);
+    expect(screen).not.toMatch(/useEffect\([\s\S]{0,160}fetchExercises\(\)[\s\S]{0,80}\[searchQuery/);
+  });
+
+  it('virtualizes the catalog instead of rerendering every exercise card', () => {
+    expect(screen).toContain('<FlatList');
+    expect(screen).toContain('initialNumToRender={12}');
+    expect(screen).toContain('maxToRenderPerBatch={12}');
+    expect(screen).not.toContain('{filteredExercises.map(');
+  });
+
+  it('treats a legacy-only local cache as incomplete for canonical search', () => {
+    expect(isExerciseCacheSearchComplete([
+      { name: 'Barbell Hack Squat', source_type: 'legacy_catalog' },
+    ])).toBe(false);
+    expect(isExerciseCacheSearchComplete([
+      { name: 'Hack Squat', source_type: FIRST_PARTY_SOURCE_TYPE },
+    ])).toBe(true);
   });
 });
