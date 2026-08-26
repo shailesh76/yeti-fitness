@@ -62,6 +62,8 @@ interface LogState {
   prs: any[];
   activeSession: ActiveSession | null;
   loading: boolean;
+  historyError: string | null;
+  prsError: string | null;
   
   startSession: (planId: string, planName: string, exercises: any[]) => void;
   updateSetLog: (exerciseIdx: number, setIdx: number, fields: Partial<LoggedSet>) => void;
@@ -78,6 +80,8 @@ export const useLogStore = create<LogState>((set, get) => ({
   prs: [],
   activeSession: null,
   loading: false,
+  historyError: null,
+  prsError: null,
 
   prependWorkoutLog: (log) => set((state) => ({
     logsHistory: state.logsHistory.some((item) => item.id === log.id)
@@ -201,7 +205,7 @@ export const useLogStore = create<LogState>((set, get) => ({
   },
 
   fetchLogsHistory: async (userId, startDate, endDate, limit = 50) => {
-    set({ loading: true });
+    set({ loading: true, historyError: null });
     try {
       const sessions = startDate && endDate
         ? await workoutRepository.getWorkoutHistoryForRange(userId, startDate, endDate)
@@ -273,15 +277,16 @@ export const useLogStore = create<LogState>((set, get) => ({
         const merged = [...mappedLogs, ...keptPrevious].sort(
           (a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
         );
-        return { logsHistory: merged, loading: false };
+        return { logsHistory: merged, loading: false, historyError: null };
       });
-    } catch (e) {
+    } catch (e: any) {
       console.warn("fetchLogsHistory failed:", e);
-      set({ loading: false });
+      set({ loading: false, historyError: e?.message || 'Failed to load workout history' });
     }
   },
 
   fetchPRs: async (userId) => {
+    set({ prsError: null });
     try {
       const data = dedupePersonalRecords(await workoutRepository.getPersonalRecords(userId));
       // Map PRs to legacy shape
@@ -306,9 +311,10 @@ export const useLogStore = create<LogState>((set, get) => ({
           };
         })
       );
-      set({ prs: mapped });
-    } catch (e) {
+      set({ prs: mapped, prsError: null });
+    } catch (e: any) {
       console.warn("fetchPRs failed:", e);
+      set({ prsError: e?.message || 'Failed to load personal records' });
     }
   },
 

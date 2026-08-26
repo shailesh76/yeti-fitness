@@ -8,12 +8,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AppShell from '../../components/AppShell';
 import { P, sharedStyles } from '../../constants/premiumTheme';
 import { displayLabel } from '../../utils/exerciseDisplay';
+import { matchesExerciseSearch, normalizeSearchToken } from '@yeti/database/src/repositories/ExerciseRepository';
 
 // Used only until exercise_taxonomy has loaded from the server.
 const FALLBACK_MUSCLES = ['Arms', 'Back', 'Cardio', 'Chest', 'Core', 'Full Body', 'Legs', 'Shoulders'];
 
 export default function ExercisesScreen() {
-  const { exercises, fetchExercises, loading } = useWorkoutStore();
+  const { exercises, fetchExercises, loading, error } = useWorkoutStore();
   const session = useAuthStore((state) => state.session);
   const { exerciseRepository } = useRepositories();
   const router = useRouter();
@@ -33,19 +34,20 @@ export default function ExercisesScreen() {
 
   const userId = session?.user?.id;
 
+  // Authoritative fetch: triggered when the authenticated session is ready or changes
   useEffect(() => {
     fetchExercises();
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    exerciseRepository.getTaxonomy().then(setTaxonomy);
-  }, []);
+    exerciseRepository.getTaxonomy().then(setTaxonomy).catch(() => {});
+  }, [exerciseRepository]);
 
   useEffect(() => {
     if (!userId) return;
-    exerciseRepository.getFavoriteIds(userId).then(setFavoriteIds);
-    exerciseRepository.getRecentExerciseIds(userId, 8).then(setRecentIds);
-  }, [userId]);
+    exerciseRepository.getFavoriteIds(userId).then(setFavoriteIds).catch(() => {});
+    exerciseRepository.getRecentExerciseIds(userId, 8).then(setRecentIds).catch(() => {});
+  }, [userId, exerciseRepository]);
 
   const muscleOptions = ['All', ...(taxonomy.muscle?.length ? taxonomy.muscle : FALLBACK_MUSCLES)];
   const equipmentOptions = ['All', ...(taxonomy.equipment || [])];
@@ -80,44 +82,42 @@ export default function ExercisesScreen() {
     [recentIds, exercises]
   );
 
-  const filteredExercises = exercises.filter(ex => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch = !q ||
-      ex.name.toLowerCase().includes(q) ||
-      (ex.instructions && ex.instructions.toLowerCase().includes(q)) ||
-      (ex.equipment && ex.equipment.toLowerCase().includes(q)) ||
-      (ex.category && ex.category.toLowerCase().includes(q)) ||
-      (ex.body_part && ex.body_part.toLowerCase().includes(q)) ||
-      (ex.primary_muscle && ex.primary_muscle.toLowerCase().includes(q)) ||
-      (ex.target_muscle && ex.target_muscle.toLowerCase().includes(q)) ||
-      (ex.muscle_group && ex.muscle_group.toLowerCase().includes(q)) ||
-      (ex.movement_pattern && ex.movement_pattern.toLowerCase().includes(q)) ||
-      (typeof ex.secondary_muscles === 'string' && ex.secondary_muscles.toLowerCase().includes(q)) ||
-      (Array.isArray(ex.search_aliases) && ex.search_aliases.some((a: string) => a.toLowerCase().includes(q)));
+  const filteredExercises = useMemo(() => {
+    return exercises.filter(ex => {
+      const matchesSearch = matchesExerciseSearch(ex, searchQuery);
 
-    // Muscle filter falls back across every muscle field the catalog uses
-    // (curated rows key on primary_muscle/target_muscle, legacy rows on
-    // muscle_group). A row is never dropped merely because muscle_group is null.
-    let matchesMuscle = selectedMuscle === 'All';
-    if (!matchesMuscle) {
-      const selMuscle = selectedMuscle.toLowerCase();
-      const parts = selMuscle.includes('/') ? selMuscle.split('/') : [selMuscle];
-      const muscleFields = [ex.muscle_group, ex.primary_muscle, ex.target_muscle, ex.body_part]
-        .filter(Boolean)
-        .map((m: string) => m.toLowerCase());
-      matchesMuscle = muscleFields.some(field => parts.some(part => field.includes(part)));
-    }
+      // Muscle filter falls back across every muscle field the catalog uses
+      // (curated rows key on primary_muscle/target_muscle, legacy rows on muscle_group).
+      let matchesMuscle = selectedMuscle === 'All';
+      if (!matchesMuscle) {
+        const selMuscle = normalizeSearchToken(selectedMuscle);
+        const parts = selMuscle.split(' ').filter(Boolean);
+        const muscleFields = [ex.muscle_group, ex.primary_muscle, ex.target_muscle, ex.body_part]
+          .filter(Boolean)
+          .map(normalizeSearchToken);
+        matchesMuscle = muscleFields.some(field => parts.some(part => field.includes(part)));
+      }
 
-    // Case-insensitive so curated equipment/category vocabulary matches the
-    // taxonomy-derived chips regardless of casing.
-    const matchesEquipment = selectedEquipment === 'All' ||
-      (!!ex.equipment && ex.equipment.toLowerCase() === selectedEquipment.toLowerCase());
-    const matchesCategory = selectedCategory === 'All' ||
-      (!!ex.category && ex.category.toLowerCase() === selectedCategory.toLowerCase());
-    const matchesFavorites = !favoritesOnly || favoriteIds.has(ex.id);
+      // Case & token-insensitive equipment/category matching
+      const matchesEquipment = selectedEquipment === 'All' ||
+        (!!ex.equipment && normalizeSearchToken(ex.equipment) === normalizeSearchToken(selectedEquipment));
+      const matchesCategory = selectedCategory === 'All' ||
+        (!!ex.category && normalizeSearchToken(ex.category) === normalizeSearchToken(selectedCategory));
+      const matchesFavorites = !favoritesOnly || favoriteIds.has(ex.id);
 
-    return matchesSearch && matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
-  });
+      return matchesSearch && matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
+    });
+  }, [exercises, searchQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
+
+  const hasActiveFilters = searchQuery || selectedMuscle !== 'All' || selectedEquipment !== 'All' || selectedCategory !== 'All' || favoritesOnly;
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setSelectedMuscle('All');
+    setSelectedEquipment('All');
+    setSelectedCategory('All');
+    setFavoritesOnly(false);
+  };
 
   return (
     <AppShell activeTab="workout">
@@ -280,9 +280,28 @@ export default function ExercisesScreen() {
             </View>
           )}
 
-          {loading ? (
+          {/* Catalog State Management */}
+          {loading && exercises.length === 0 ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={P.ACCENT} />
+              <Text style={[styles.emptyText, { marginTop: 12 }]}>Loading exercise catalog...</Text>
+            </View>
+          ) : exercises.length === 0 ? (
+            <View style={styles.stateCard}>
+              <Text style={styles.stateTitle}>{error ? 'Failed to Load Exercises' : 'Exercise Catalog Empty'}</Text>
+              <Text style={styles.stateSubtitle}>
+                {error || 'Unable to load exercises from the server. Please check your connection and reload.'}
+              </Text>
+              <TouchableOpacity
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Reload exercise catalog"
+                onPress={() => fetchExercises()}
+                style={styles.retryBtn}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.retryBtnText}>Reload Catalog</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <ScrollView
@@ -291,7 +310,21 @@ export default function ExercisesScreen() {
               contentContainerStyle={{ pb: 120 } as any}
             >
               {filteredExercises.length === 0 ? (
-                <Text style={styles.emptyText}>No exercises found.</Text>
+                <View style={styles.noMatchesContainer}>
+                  <Text style={styles.emptyText}>No exercises match your search and filters.</Text>
+                  {hasActiveFilters && (
+                    <TouchableOpacity
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear all filters"
+                      onPress={clearAllFilters}
+                      style={styles.clearBtn}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.clearBtnText}>Clear Filters</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               ) : (
                 <View style={styles.gridContainer}>
                   {filteredExercises.map(ex => {
@@ -300,11 +333,6 @@ export default function ExercisesScreen() {
                       <View key={ex.id} style={[sharedStyles.card, styles.exerciseCard]}>
                         <View style={[styles.accentBar, { backgroundColor: 'rgba(255,255,255,0.04)' }]} />
 
-                        {/* Plain View, not TouchableOpacity: it previously wrapped the
-                            favorite button, which on web renders accessibilityRole="button"
-                            as a real <button> - nesting one <button> inside another is
-                            invalid HTML and threw a hydration error. The navigable area
-                            and the favorite button are now independent sibling touchables. */}
                         <View style={styles.cardTrigger}>
                           <TouchableOpacity
                             accessible={true}
@@ -357,46 +385,37 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    width: '100%',
-    maxW: 640,
-    alignSelf: 'center',
-    paddingHorizontal: 24,
-  } as any,
+    paddingHorizontal: 20,
+  },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 12 : 20,
-    paddingBottom: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-    backgroundColor: P.BG,
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
     color: P.TEXT_PRI,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 10,
-    color: P.TEXT_SEC,
     fontWeight: '800',
+    color: P.TEXT_SEC,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     marginTop: 2,
   },
   searchContainer: {
-    paddingTop: 16,
+    marginBottom: 8,
   },
   searchInput: {
     backgroundColor: 'rgba(0,0,0,0.3)',
-    color: P.TEXT_PRI,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    minHeight: 48,
     borderRadius: 14,
-    fontSize: 15,
-    fontWeight: '600',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#FFF',
+    fontSize: 14,
     borderWidth: 1,
     borderColor: P.CARD_BORDER,
   },
@@ -450,10 +469,10 @@ const styles = StyleSheet.create({
   chipText: {
     color: P.TEXT_MUT,
     fontSize: 10,
-    fontWeight: '850',
+    fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  } as any,
+  },
   chipTextSelected: {
     color: P.ACCENT,
   },
@@ -465,10 +484,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  stateCard: {
+    marginTop: 40,
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+  },
+  stateTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: P.TEXT_PRI,
+    marginBottom: 6,
+  },
+  stateSubtitle: {
+    fontSize: 13,
+    color: P.TEXT_MUT,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: P.ACCENT,
+    borderRadius: 99,
+  },
+  retryBtnText: {
+    color: '#FFF',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  noMatchesContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
   emptyText: {
     color: P.TEXT_MUT,
     textAlign: 'center',
-    marginTop: 40,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  clearBtn: {
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: P.CARD_BORDER,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  clearBtnText: {
+    color: P.ACCENT,
+    fontSize: 12,
     fontWeight: '700',
   },
   gridContainer: {
@@ -527,4 +597,3 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
-

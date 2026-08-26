@@ -5,6 +5,9 @@ import {
   toPlainExercise,
   exerciseHasResolvableMedia,
   canonicalExerciseName,
+  normalizeSearchToken,
+  buildExerciseSearchCorpus,
+  matchesExerciseSearch,
   FIRST_PARTY_SOURCE_TYPE,
 } from '../packages/database/src/repositories/ExerciseRepository';
 
@@ -110,6 +113,172 @@ describe('canonicalExerciseName (regression guard)', () => {
   it('strips the technical legacy suffix but keeps legitimate "Legacy" names', () => {
     expect(canonicalExerciseName('Squat (Legacy a45e)', 'a45e-1111')).toBe('Squat');
     expect(canonicalExerciseName('Legacy Strength Press')).toBe('Legacy Strength Press');
+  });
+});
+
+// ── Multi-token normalized search tests ─────────────────────────────────────
+
+describe('normalizeSearchToken & buildExerciseSearchCorpus', () => {
+  it('normalizes hyphens, slashes, punctuation, and extra whitespace', () => {
+    expect(normalizeSearchToken('Chest-Supported T-Bar / Row')).toBe('chest supported t bar row');
+    expect(normalizeSearchToken('  Single-Arm   Lat-Pulldown...  ')).toBe('single arm lat pulldown');
+    expect(normalizeSearchToken(null)).toBe('');
+    expect(normalizeSearchToken(undefined)).toBe('');
+  });
+
+  it('builds a comprehensive search corpus across all exercise fields and aliases', () => {
+    const ex = {
+      name: 'Smith Machine Incline Press',
+      equipment: 'smith machine',
+      category: 'strength',
+      primary_muscle: 'pectoralis major',
+      target_muscle: 'clavicular head (upper chest)',
+      muscle_group: 'Chest',
+      movement_pattern: 'horizontal push',
+      body_part: 'chest',
+      instructions: 'Press the bar smoothly on the guide rails',
+      search_aliases: ['incline smith bench', 'smith incline press'],
+    };
+    const corpus = buildExerciseSearchCorpus(ex);
+    expect(corpus).toContain('smith machine incline press');
+    expect(corpus).toContain('pectoralis major');
+    expect(corpus).toContain('clavicular head upper chest');
+    expect(corpus).toContain('incline smith bench');
+  });
+});
+
+describe('matchesExerciseSearch — required production queries', () => {
+  const sampleCatalog = [
+    {
+      id: 'smith-inc',
+      name: 'Smith Machine Incline Press',
+      equipment: 'smith machine',
+      category: 'strength',
+      primary_muscle: 'pectoralis major',
+      target_muscle: 'clavicular head (upper chest)',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'chest-tbar',
+      name: 'Chest-Supported T-Bar Row',
+      equipment: 'bench / specialty',
+      category: 'strength',
+      primary_muscle: 'latissimus dorsi',
+      target_muscle: 'rhomboids & middle traps',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'chest-db',
+      name: 'Chest-Supported Dumbbell Row',
+      equipment: 'dumbbells',
+      category: 'strength',
+      primary_muscle: 'latissimus dorsi',
+      target_muscle: 'rhomboids & middle traps',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'single-lat',
+      name: 'Single-Arm Lat Pulldown',
+      equipment: 'cable machine',
+      category: 'strength',
+      primary_muscle: 'latissimus dorsi',
+      target_muscle: 'latissimus dorsi',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'preacher-curl',
+      name: 'Preacher Curl',
+      equipment: 'preacher bench',
+      category: 'strength',
+      primary_muscle: 'biceps brachii',
+      target_muscle: 'short head (biceps)',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'hack-squat',
+      name: 'Linear Hack Squat',
+      equipment: 'selectorized / plate-loaded machine',
+      category: 'strength',
+      primary_muscle: 'quadriceps',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'pendulum-squat',
+      name: 'Pendulum Squat',
+      equipment: 'pendulum squat machine',
+      category: 'strength',
+      primary_muscle: 'quadriceps',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'hip-thrust',
+      name: 'Plate-Loaded Hip Thrust',
+      equipment: 'bench / specialty',
+      category: 'strength',
+      primary_muscle: 'gluteus maximus',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'overhead-tri',
+      name: 'Overhead Dumbbell Extension',
+      equipment: 'dumbbell',
+      category: 'strength',
+      primary_muscle: 'triceps brachii',
+      movement_pattern: 'overhead triceps extension',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+  ];
+
+  it('matches "Incline smith" -> Smith Machine Incline Press (multi-token reversed order)', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Incline smith'));
+    expect(matches.map(m => m.id)).toContain('smith-inc');
+  });
+
+  it('matches "Chest supported row" -> first-party Chest-Supported Row variants (hyphen-insensitive)', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Chest supported row'));
+    expect(matches.map(m => m.id)).toContain('chest-tbar');
+    expect(matches.map(m => m.id)).toContain('chest-db');
+  });
+
+  it('matches "Single arm lat" -> Single-Arm Lat Pulldown', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Single arm lat'));
+    expect(matches.map(m => m.id)).toContain('single-lat');
+  });
+
+  it('matches "Preacher curl" -> Preacher Curl', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Preacher curl'));
+    expect(matches.map(m => m.id)).toContain('preacher-curl');
+  });
+
+  it('matches "Hack squat" -> Linear Hack Squat', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Hack squat'));
+    expect(matches.map(m => m.id)).toContain('hack-squat');
+  });
+
+  it('matches "Pendulum squat" -> Pendulum Squat', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Pendulum squat'));
+    expect(matches.map(m => m.id)).toContain('pendulum-squat');
+  });
+
+  it('matches "Hip thrust" -> Plate-Loaded Hip Thrust', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Hip thrust'));
+    expect(matches.map(m => m.id)).toContain('hip-thrust');
+  });
+
+  it('matches "Overhead triceps extension" -> Overhead Dumbbell Extension via movement pattern', () => {
+    const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Overhead triceps extension'));
+    expect(matches.map(m => m.id)).toContain('overhead-tri');
+  });
+
+  it('matches exercises via alias matching', () => {
+    const exWithAlias = {
+      id: 'ohp',
+      name: 'Overhead Press',
+      search_aliases: ['military press', 'strict press'],
+    };
+    expect(matchesExerciseSearch(exWithAlias, 'military press')).toBe(true);
+    expect(matchesExerciseSearch(exWithAlias, 'strict')).toBe(true);
+    expect(matchesExerciseSearch(exWithAlias, 'bench press')).toBe(false);
   });
 });
 

@@ -221,6 +221,52 @@ export function normalizeExerciseList(rows: any[]): any[] {
   return deduped.sort((a, b) => (isFirstParty(b) ? 1 : 0) - (isFirstParty(a) ? 1 : 0));
 }
 
+/**
+ * Normalizes a string for search matching: lowercases, converts hyphens/underscores/slashes/punctuation
+ * to spaces, collapses multiple whitespace characters, and trims.
+ */
+export function normalizeSearchToken(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .replace(/[-_.,/\\()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Builds the combined searchable text corpus for an exercise DTO / model.
+ */
+export function buildExerciseSearchCorpus(ex: any): string {
+  if (!ex) return '';
+  const fields = [
+    ex.name,
+    ex.equipment,
+    ex.category,
+    ex.body_part,
+    ex.primary_muscle,
+    ex.target_muscle,
+    ex.muscle_group,
+    ex.movement_pattern,
+    ex.instructions,
+    ...(Array.isArray(ex.search_aliases) ? ex.search_aliases : []),
+  ];
+  return fields.map(normalizeSearchToken).filter(Boolean).join(' ');
+}
+
+/**
+ * Multi-token search predicate: splits the query into individual normalized tokens,
+ * and requires every token to be present in the exercise search corpus.
+ */
+export function matchesExerciseSearch(ex: any, searchQuery: string): boolean {
+  const q = normalizeSearchToken(searchQuery);
+  if (!q) return true;
+  const tokens = q.split(' ').filter(Boolean);
+  if (tokens.length === 0) return true;
+  const corpus = buildExerciseSearchCorpus(ex);
+  return tokens.every(token => corpus.includes(token));
+}
+
 // ─── AI Coach exercise-name resolution ───────────────────────────────────────
 // The AI Coach's deterministic program generator (supabase/functions/_shared/ai/
 // programGenerator.ts) works purely on exercise NAME strings pulled from the

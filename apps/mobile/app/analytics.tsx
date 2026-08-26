@@ -158,6 +158,8 @@ export default function AnalyticsScreen() {
   const mealLogs = useFoodStore((s) => s.mealLogs);
   const prs = useLogStore((s) => s.prs);
   const history = useLogStore((s) => s.logsHistory);
+  const historyError = useLogStore((s) => s.historyError);
+  const prsError = useLogStore((s) => s.prsError);
   const fetchPRs = useLogStore((s) => s.fetchPRs);
   const fetchLogsHistory = useLogStore((s) => s.fetchLogsHistory);
   const { progressRepository, userRepository } = useRepositories();
@@ -733,7 +735,20 @@ export default function AnalyticsScreen() {
               <Animated.View entering={FadeInDown.duration(400)} style={s.card}>
                 <Text style={s.cardTitle}>Workout Summary</Text>
                 <Text style={s.cardSubtitle}>Last {rangeLabel(dateRange)}</Text>
-                {workoutAnalytics.hasData ? (
+                {historyError ? (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="alert-circle-outline" size={28} color="#EF4444" />
+                    <Text style={s.emptyTitle}>Failed to load workout history</Text>
+                    <Text style={s.emptySub}>{historyError}</Text>
+                    <TouchableOpacity
+                      style={[s.primaryBtn, { marginTop: 12, paddingHorizontal: 20 }]}
+                      onPress={() => userId && fetchLogsHistory(userId)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 13 }}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : workoutAnalytics.hasData ? (
                   <>
                     {workoutAnalytics.inRangeSessionsCount === 0 && (
                       <View style={{ marginBottom: 12, padding: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.03)' }}>
@@ -1033,7 +1048,20 @@ export default function AnalyticsScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {strengthAnalytics.currentPrs.length > 0 ? (
+                {prsError ? (
+                  <View style={s.emptyBox}>
+                    <Ionicons name="alert-circle-outline" size={28} color="#EF4444" />
+                    <Text style={s.emptyTitle}>Failed to load personal records</Text>
+                    <Text style={s.emptySub}>{prsError}</Text>
+                    <TouchableOpacity
+                      style={[s.primaryBtn, { marginTop: 12, paddingHorizontal: 20 }]}
+                      onPress={() => userId && fetchPRs(userId)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 13 }}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : strengthAnalytics.currentPrs.length > 0 ? (
                   <>
                     {strengthAnalytics.currentPrs.map((pr, idx) => renderPrRow(pr, idx, true))}
 
@@ -1245,15 +1273,15 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
 
-  tabsScrollView: { height: 42, maxHeight: 42, flexGrow: 0, flexShrink: 0, marginBottom: 12 },
-  tabsRow: { height: 42, paddingLeft: 20, paddingRight: 28, gap: 8, alignItems: 'center' },
+  tabsScrollView: { height: 44, maxHeight: 44, flexGrow: 0, flexShrink: 0, marginBottom: 12 },
+  tabsRow: { flexDirection: 'row', height: 44, paddingLeft: 20, paddingRight: 28, gap: 8, alignItems: 'center' },
   tabBtn: {
     minWidth: 84,
     height: 36,
     minHeight: 36,
     maxHeight: 36,
     paddingHorizontal: 16,
-    borderRadius: 99,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
@@ -1264,7 +1292,7 @@ const s = StyleSheet.create({
     alignSelf: 'center',
   },
   tabBtnActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
-  tabBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
+  tabBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B', lineHeight: 18, textAlign: 'center' },
   tabBtnTextActive: { color: '#FFFFFF' },
 
   card: {

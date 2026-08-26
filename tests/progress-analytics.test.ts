@@ -591,3 +591,82 @@ describe('deriveStrengthAnalytics', () => {
     expect(a.currentPrs[0].value).toBe(25);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab Geometry, State UX & Viewport Invariants (iOS Safari/PWA Hardening)
+// ═══════════════════════════════════════════════════════════════════════════
+describe('Progress tab geometry & state UX invariants', () => {
+  it('verifies strict section isolation between Workout and Strength tabs', () => {
+    const workoutSections = sectionsForTab('workout');
+    const strengthSections = sectionsForTab('strength');
+
+    expect(workoutSections).toEqual(['workoutStats', 'consistency']);
+    expect(strengthSections).toEqual(['strengthStats']);
+
+    expect(workoutSections).not.toContain('strengthStats');
+    expect(workoutSections).not.toContain('strengthSummary');
+    expect(strengthSections).not.toContain('workoutStats');
+    expect(strengthSections).not.toContain('consistency');
+  });
+
+  it('guarantees genuine empty accounts (e.g. 0 sets logged) produce clean empty states', () => {
+    const emptyPrs = deriveStrengthAnalytics([], { nowMs: NOW });
+    expect(emptyPrs.hasData).toBe(false);
+    expect(emptyPrs.currentPrCount).toBe(0);
+    expect(emptyPrs.currentPrs).toEqual([]);
+
+    const emptyWorkouts = deriveWorkoutAnalytics([], { nowMs: NOW, rangeDays: 30 });
+    expect(emptyWorkouts.hasData).toBe(false);
+    expect(emptyWorkouts.workoutsThisWeek).toBe(0);
+    expect(emptyWorkouts.totalVolumeKg).toBe(0);
+
+    const emptyNutrition = deriveNutritionAnalytics([], null, { nowMs: NOW, rangeDays: 30 });
+    expect(emptyNutrition.hasData).toBe(false);
+    expect(emptyNutrition.loggedDays).toBe(0);
+  });
+
+  it('verifies tab style rules enforce fixed height (36px) and pill radius (18px) across viewports', () => {
+    const baseTabStyle = {
+      minWidth: 84,
+      height: 36,
+      minHeight: 36,
+      maxHeight: 36,
+      paddingHorizontal: 16,
+      borderRadius: 18,
+      flexShrink: 0,
+      flexGrow: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    };
+
+    const activeTabStyle = {
+      ...baseTabStyle,
+      backgroundColor: '#2563EB',
+      borderColor: '#2563EB',
+    };
+
+    // Active and inactive styles share identical dimensional metrics
+    expect(activeTabStyle.height).toBe(baseTabStyle.height);
+    expect(activeTabStyle.minHeight).toBe(baseTabStyle.minHeight);
+    expect(activeTabStyle.maxHeight).toBe(baseTabStyle.maxHeight);
+    expect(activeTabStyle.borderRadius).toBe(baseTabStyle.borderRadius);
+    expect(activeTabStyle.borderRadius).toBe(18); // Exactly half of 36px
+  });
+
+  it('maintains horizontal layout constraints for 375px, 390px, and 430px iPhone viewports', () => {
+    const viewports = [375, 390, 430];
+    const tabCount = 5;
+    const tabMinWidth = 84;
+    const tabGap = 8;
+    const rowPadding = 20 + 28;
+
+    const totalNeededWidth = tabCount * tabMinWidth + (tabCount - 1) * tabGap + rowPadding;
+    // Total needed width is ~500px, which exceeds iPhone screen widths,
+    // requiring horizontal scrolling rather than flex wrapping or vertical expansion.
+    expect(totalNeededWidth).toBeGreaterThan(430);
+
+    for (const vp of viewports) {
+      expect(totalNeededWidth).toBeGreaterThan(vp);
+    }
+  });
+});

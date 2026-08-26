@@ -49,6 +49,7 @@ interface WorkoutState {
   exercises: Exercise[];
   workoutPlans: WorkoutPlan[];
   loading: boolean;
+  error: string | null;
   lastSyncedAt: string | null;
   /** Authoritative active assignment metadata resolved from highest assigned_at */
   activeAssignmentId: string | null;
@@ -68,13 +69,14 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   exercises: [],
   workoutPlans: [],
   loading: false,
+  error: null,
   lastSyncedAt: null,
   activeAssignmentId: null,
   activePlanId: null,
   assignedAt: null,
   
   fetchExercises: async () => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       // Aliases are fetched alongside the catalog (fails closed to an empty map)
       // so the library search can match common gym vernacular. This lights up as
@@ -87,10 +89,11 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         ...ex,
         search_aliases: aliasMap.get(ex.id) ?? [],
       }));
-      set({ exercises: withAliases, loading: false });
-    } catch (error) {
-      set({ loading: false });
-      console.error(error);
+      set({ exercises: withAliases, loading: false, error: null });
+    } catch (error: any) {
+      const msg = error?.message || 'Failed to load exercises';
+      set({ loading: false, error: msg });
+      console.error('fetchExercises failed:', error);
     }
   },
 
