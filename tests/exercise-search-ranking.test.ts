@@ -165,11 +165,12 @@ describe('Exercise Library first-input responsiveness contract', () => {
   const screen = readFileSync('apps/mobile/app/exercises/index.tsx', 'utf8');
   const store = readFileSync('apps/mobile/store/useWorkoutStore.ts', 'utf8');
 
-  it('keeps visible input state immediate and result state debounced separately', () => {
-    expect(screen).toContain('value={searchQuery}');
-    expect(screen).toContain('onChangeText={setSearchQuery}');
-    expect(screen).toContain('const deferredQuery = useDebouncedValue(searchQuery, 120)');
-    expect(screen).toContain('normalizeSearchToken(deferredQuery)');
+  it('keeps visible input state immediate and result state debounced separately via ExerciseSearchBar', () => {
+    expect(screen).toContain('export const ExerciseSearchBar = memo(');
+    expect(screen).toContain('value={localText}');
+    expect(screen).toContain('onChangeText={handleChangeText}');
+    expect(screen).toContain('onDebouncedChange(localText)');
+    expect(screen).toContain('normalizeSearchToken(searchQuery)');
   });
 
   it('does not reconstruct the search index when searchQuery changes', () => {

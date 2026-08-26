@@ -8,6 +8,8 @@ import {
   normalizeSearchToken,
   buildExerciseSearchCorpus,
   matchesExerciseSearch,
+  buildExerciseSearchIndexEntry,
+  scoreExerciseRelevance,
   FIRST_PARTY_SOURCE_TYPE,
 } from '../packages/database/src/repositories/ExerciseRepository';
 
@@ -147,8 +149,7 @@ describe('normalizeSearchToken & buildExerciseSearchCorpus', () => {
   });
 });
 
-describe('matchesExerciseSearch — required production queries', () => {
-  const sampleCatalog = [
+const sampleCatalog = [
     {
       id: 'smith-inc',
       name: 'Smith Machine Incline Press',
@@ -196,6 +197,14 @@ describe('matchesExerciseSearch — required production queries', () => {
     },
     {
       id: 'hack-squat',
+      name: 'Hack Squat',
+      equipment: 'hack squat machine',
+      category: 'strength',
+      primary_muscle: 'quadriceps',
+      source_type: FIRST_PARTY_SOURCE_TYPE,
+    },
+    {
+      id: 'linear-hack-squat',
       name: 'Linear Hack Squat',
       equipment: 'selectorized / plate-loaded machine',
       category: 'strength',
@@ -229,6 +238,7 @@ describe('matchesExerciseSearch — required production queries', () => {
     },
   ];
 
+describe('matchesExerciseSearch — required production queries', () => {
   it('matches "Incline smith" -> Smith Machine Incline Press (multi-token reversed order)', () => {
     const matches = sampleCatalog.filter(ex => matchesExerciseSearch(ex, 'Incline smith'));
     expect(matches.map(m => m.id)).toContain('smith-inc');
@@ -279,6 +289,87 @@ describe('matchesExerciseSearch — required production queries', () => {
     expect(matchesExerciseSearch(exWithAlias, 'military press')).toBe(true);
     expect(matchesExerciseSearch(exWithAlias, 'strict')).toBe(true);
     expect(matchesExerciseSearch(exWithAlias, 'bench press')).toBe(false);
+  });
+});
+
+describe('Exercise Library Search Query Thresholds & Relevance Ranking', () => {
+  const indexedCatalog = sampleCatalog.map(ex => ({
+    ex,
+    entry: buildExerciseSearchIndexEntry(ex),
+  }));
+
+  // Mirrors the exact filteredExercises filter/rank pipeline from ExercisesScreen
+  function executeScreenSearch(searchQuery: string, items = indexedCatalog) {
+    const q = normalizeSearchToken(searchQuery);
+    // 1. Empty or 1 character query -> returns catalog untouched (no expensive relevance ranking)
+    if (!q || q.length < 2) {
+      return items.map(s => s.ex);
+    }
+    // 2. 2+ characters -> executes deterministic relevance ranking
+    return items
+      .map((s, index) => ({ ex: s.ex, index, score: scoreExerciseRelevance(s.entry, q) }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+      .map(s => s.ex);
+  }
+
+  it('preserves normal catalog order for empty query and 1-character query', () => {
+    const emptyResult = executeScreenSearch('');
+    expect(emptyResult).toHaveLength(sampleCatalog.length);
+    expect(emptyResult.map(e => e.id)).toEqual(sampleCatalog.map(e => e.id));
+
+    // Single character "i" must NOT execute full-corpus ranking across instructions/metadata
+    const oneCharResult = executeScreenSearch('i');
+    expect(oneCharResult).toHaveLength(sampleCatalog.length);
+    expect(oneCharResult.map(e => e.id)).toEqual(sampleCatalog.map(e => e.id));
+
+    // Single character "s" must also preserve normal catalog order
+    const oneCharS = executeScreenSearch('s');
+    expect(oneCharS).toHaveLength(sampleCatalog.length);
+    expect(oneCharS.map(e => e.id)).toEqual(sampleCatalog.map(e => e.id));
+  });
+
+  it('executes relevance ranking for 2+ character queries and preserves key movement rankings', () => {
+    // "Pendulum" -> Pendulum Squat is top result
+    const pendulumRes = executeScreenSearch('Pendulum');
+    expect(pendulumRes.length).toBeGreaterThan(0);
+    expect(pendulumRes[0].id).toBe('pendulum-squat');
+
+    // "Hack squat" -> Canonical "Hack Squat" is Rank #1 (EXACT_NAME), followed by "Linear Hack Squat"
+    const hackRes = executeScreenSearch('Hack squat');
+    expect(hackRes.length).toBeGreaterThanOrEqual(2);
+    expect(hackRes[0].id).toBe('hack-squat');
+    expect(hackRes[0].name).toBe('Hack Squat');
+    expect(hackRes[1].id).toBe('linear-hack-squat');
+
+    // "Single arm lat" -> Single-Arm Lat Pulldown is top result
+    const singleLatRes = executeScreenSearch('Single arm lat');
+    expect(singleLatRes.length).toBeGreaterThan(0);
+    expect(singleLatRes[0].id).toBe('single-lat');
+
+    // "Incline smith" -> Smith Machine Incline Press is top result
+    const smithRes = executeScreenSearch('Incline smith');
+    expect(smithRes.length).toBeGreaterThan(0);
+    expect(smithRes[0].id).toBe('smith-inc');
+
+    // "Chest supported row" -> Chest-Supported rows rank ahead
+    const chestRes = executeScreenSearch('Chest supported row');
+    expect(chestRes.length).toBeGreaterThan(0);
+    expect(['chest-tbar', 'chest-db']).toContain(chestRes[0].id);
+
+    // "Preacher curl" -> Preacher Curl is top result
+    const preacherRes = executeScreenSearch('Preacher curl');
+    expect(preacherRes.length).toBeGreaterThan(0);
+    expect(preacherRes[0].id).toBe('preacher-curl');
+  });
+
+  it('clearing search query restores the complete unfiltered catalog', () => {
+    const filtered = executeScreenSearch('Incline smith');
+    expect(filtered.length).toBeLessThan(sampleCatalog.length);
+
+    const cleared = executeScreenSearch('');
+    expect(cleared).toHaveLength(sampleCatalog.length);
+    expect(cleared.map(e => e.id)).toEqual(sampleCatalog.map(e => e.id));
   });
 });
 

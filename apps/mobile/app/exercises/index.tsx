@@ -13,19 +13,62 @@ import {
   normalizeSearchToken,
 } from '@yeti/database/src/repositories/ExerciseRepository';
 
-/** Keeps the TextInput immediately responsive while deferring the heavy filter/rank
- * pass by ~120ms, so fast typing never re-ranks the full catalog on every keystroke. */
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 // Used only until exercise_taxonomy has loaded from the server.
 const FALLBACK_MUSCLES = ['Arms', 'Back', 'Cardio', 'Chest', 'Core', 'Full Body', 'Legs', 'Shoulders'];
+
+interface ExerciseSearchBarProps {
+  value: string;
+  onDebouncedChange: (query: string) => void;
+  debounceMs?: number;
+}
+
+export const ExerciseSearchBar = memo(({
+  value,
+  onDebouncedChange,
+  debounceMs = 120,
+}: ExerciseSearchBarProps) => {
+  const [localText, setLocalText] = useState(value);
+  const [focused, setFocused] = useState(false);
+
+  // Synchronize local state if parent resets or updates value externally (e.g. "Clear Filters" or Recently Trained pill click)
+  useEffect(() => {
+    setLocalText(value);
+  }, [value]);
+
+  // Debounce notification to parent
+  useEffect(() => {
+    if (localText === value) return;
+    const timer = setTimeout(() => {
+      onDebouncedChange(localText);
+    }, debounceMs);
+    return () => clearTimeout(timer);
+  }, [localText, value, onDebouncedChange, debounceMs]);
+
+  const handleChangeText = (text: string) => {
+    setLocalText(text);
+    if (!text.trim() && value) {
+      onDebouncedChange('');
+    }
+  };
+
+  return (
+    <View style={styles.searchContainer}>
+      <TextInput
+        style={[
+          styles.searchInput,
+          focused ? styles.searchInputFocused : null,
+        ]}
+        placeholder="Search exercises, equipment, muscles..."
+        placeholderTextColor="#444"
+        value={localText}
+        onChangeText={handleChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      />
+    </View>
+  );
+});
+ExerciseSearchBar.displayName = 'ExerciseSearchBar';
 
 const ExerciseCard = memo(({
   exercise,
@@ -91,7 +134,6 @@ export default function ExercisesScreen() {
   const [selectedEquipment, setSelectedEquipment] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [focusedSearch, setFocusedSearch] = useState(false);
 
   const [taxonomy, setTaxonomy] = useState<Record<string, string[]>>({});
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -147,12 +189,12 @@ export default function ExercisesScreen() {
     [recentIds, exercises]
   );
 
-  // The heavy filter/rank pass runs off a debounced query; the TextInput itself stays
-  // bound to the immediate `searchQuery` (below) so typing always feels instant.
-  const deferredQuery = useDebouncedValue(searchQuery, 120);
+  const handleDebouncedSearchChange = useCallback((query: string) => {
+    setSearchQuery(query);
+  }, []);
 
   const filteredExercises = useMemo(() => {
-    const q = normalizeSearchToken(deferredQuery);
+    const q = normalizeSearchToken(searchQuery);
     const selMuscleParts = selectedMuscle === 'All'
       ? []
       : normalizeSearchToken(selectedMuscle).split(' ').filter(Boolean);
@@ -170,10 +212,11 @@ export default function ExercisesScreen() {
       return matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
     });
 
-    // No query → keep the catalog's first-party-first order untouched.
-    if (!q) return facetMatched.map(s => s.ex);
+    // Empty query OR 1 character query → keep the catalog's first-party-first order untouched.
+    // 1-character queries do not run pathological full-corpus search across 2,450 rows.
+    if (!q || q.length < 2) return facetMatched.map(s => s.ex);
 
-    // Query present → deterministic relevance ranking. Membership (score > 0) is
+    // Query present (2+ characters) → deterministic relevance ranking. Membership (score > 0) is
     // identical to the old boolean match; only the ORDER changes so the exercise the
     // athlete searched for surfaces first. Catalog order is the stable tie-break.
     return facetMatched
@@ -181,7 +224,7 @@ export default function ExercisesScreen() {
       .filter(s => s.score > 0)
       .sort((a, b) => (b.score - a.score) || (a.index - b.index))
       .map(s => s.ex);
-  }, [exerciseSearchIndex, deferredQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
+  }, [exerciseSearchIndex, searchQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
 
   const openExercise = useCallback((id: string) => {
     router.push(`/exercises/${id}${builderPickSuffix}`);
@@ -220,21 +263,11 @@ export default function ExercisesScreen() {
             </View>
           </View>
 
-          {/* Search Input */}
-          <View style={styles.searchContainer}>
-            <TextInput
-              style={[
-                styles.searchInput,
-                focusedSearch ? styles.searchInputFocused : null
-              ]}
-              placeholder="Search exercises, equipment, muscles..."
-              placeholderTextColor="#444"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onFocus={() => setFocusedSearch(true)}
-              onBlur={() => setFocusedSearch(false)}
-            />
-          </View>
+          {/* Search Input (Isolated Leaf Component) */}
+          <ExerciseSearchBar
+            value={searchQuery}
+            onDebouncedChange={handleDebouncedSearchChange}
+          />
 
           {/* Recently Trained */}
           {recentExercises.length > 0 && !searchQuery && (
