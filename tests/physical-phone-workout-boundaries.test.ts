@@ -104,8 +104,9 @@ describe('physical phone workout boundaries', () => {
 
   it('fixes every Progress tab to the same compact cross-axis size', () => {
     const source = fs.readFileSync('apps/mobile/app/analytics.tsx', 'utf8');
-    expect(source).toMatch(/tabsScrollView:\s*\{[^}]*height:\s*42[^}]*maxHeight:\s*42[^}]*flexGrow:\s*0/s);
-    expect(source).toMatch(/tabBtn:\s*\{[^}]*height:\s*36[^}]*minHeight:\s*36[^}]*maxHeight:\s*36[^}]*flexGrow:\s*0/s);
+    expect(source).toMatch(/tabsScrollView:\s*\{[^}]*height:\s*44[^}]*maxHeight:\s*44[^}]*flexGrow:\s*0/s);
+    expect(source).toMatch(/tabsRow:\s*\{[^}]*height:\s*44[^}]*alignItems:\s*'center'/s);
+    expect(source).toMatch(/tabBtn:\s*\{[^}]*height:\s*36[^}]*minHeight:\s*36[^}]*maxHeight:\s*36[^}]*borderRadius:\s*18[^}]*flexGrow:\s*0/s);
     expect(source).toMatch(/<ScrollView[^>]*horizontal/);
     expect(source).toMatch(/numberOfLines=\{1\}>\{tab\.label\}/);
   });

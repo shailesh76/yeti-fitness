@@ -8,7 +8,22 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AppShell from '../../components/AppShell';
 import { P, sharedStyles } from '../../constants/premiumTheme';
 import { displayLabel } from '../../utils/exerciseDisplay';
-import { matchesExerciseSearch, normalizeSearchToken } from '@yeti/database/src/repositories/ExerciseRepository';
+import {
+  buildExerciseSearchIndexEntry,
+  scoreExerciseRelevance,
+  normalizeSearchToken,
+} from '@yeti/database/src/repositories/ExerciseRepository';
+
+/** Keeps the TextInput immediately responsive while deferring the heavy filter/rank
+ * pass by ~120ms, so fast typing never re-ranks the full catalog on every keystroke. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 // Used only until exercise_taxonomy has loaded from the server.
 const FALLBACK_MUSCLES = ['Arms', 'Back', 'Cardio', 'Chest', 'Core', 'Full Body', 'Legs', 'Shoulders'];
@@ -82,32 +97,48 @@ export default function ExercisesScreen() {
     [recentIds, exercises]
   );
 
+  // Precompute each exercise's normalized search surfaces ONCE per catalog change
+  // (not per keystroke). Rebuilds only when the `exercises` array itself changes.
+  const searchIndex = useMemo(
+    () => exercises.map(ex => ({ ex, entry: buildExerciseSearchIndexEntry(ex) })),
+    [exercises]
+  );
+
+  // The heavy filter/rank pass runs off a debounced query; the TextInput itself stays
+  // bound to the immediate `searchQuery` (below) so typing always feels instant.
+  const deferredQuery = useDebouncedValue(searchQuery, 120);
+
   const filteredExercises = useMemo(() => {
-    return exercises.filter(ex => {
-      const matchesSearch = matchesExerciseSearch(ex, searchQuery);
+    const q = normalizeSearchToken(deferredQuery);
+    const selMuscleParts = selectedMuscle === 'All'
+      ? []
+      : normalizeSearchToken(selectedMuscle).split(' ').filter(Boolean);
+    const selEquipment = selectedEquipment === 'All' ? '' : normalizeSearchToken(selectedEquipment);
+    const selCategory = selectedCategory === 'All' ? '' : normalizeSearchToken(selectedCategory);
 
-      // Muscle filter falls back across every muscle field the catalog uses
-      // (curated rows key on primary_muscle/target_muscle, legacy rows on muscle_group).
-      let matchesMuscle = selectedMuscle === 'All';
-      if (!matchesMuscle) {
-        const selMuscle = normalizeSearchToken(selectedMuscle);
-        const parts = selMuscle.split(' ').filter(Boolean);
-        const muscleFields = [ex.muscle_group, ex.primary_muscle, ex.target_muscle, ex.body_part]
-          .filter(Boolean)
-          .map(normalizeSearchToken);
-        matchesMuscle = muscleFields.some(field => parts.some(part => field.includes(part)));
-      }
-
-      // Case & token-insensitive equipment/category matching
-      const matchesEquipment = selectedEquipment === 'All' ||
-        (!!ex.equipment && normalizeSearchToken(ex.equipment) === normalizeSearchToken(selectedEquipment));
-      const matchesCategory = selectedCategory === 'All' ||
-        (!!ex.category && normalizeSearchToken(ex.category) === normalizeSearchToken(selectedCategory));
+    // Facet filtering (muscle/equipment/category/favorites) is independent of the query.
+    // Muscle falls back across every muscle field the catalog uses (curated rows key on
+    // primary/target_muscle, legacy rows on muscle_group) and never drops null-muscle rows.
+    const facetMatched = searchIndex.filter(({ ex, entry }) => {
+      const matchesMuscle = selMuscleParts.length === 0 || selMuscleParts.some(part => entry.muscles.includes(part));
+      const matchesEquipment = !selEquipment || entry.equipment === selEquipment;
+      const matchesCategory = !selCategory || entry.category === selCategory;
       const matchesFavorites = !favoritesOnly || favoriteIds.has(ex.id);
-
-      return matchesSearch && matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
+      return matchesMuscle && matchesEquipment && matchesCategory && matchesFavorites;
     });
-  }, [exercises, searchQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
+
+    // No query → keep the catalog's first-party-first order untouched.
+    if (!q) return facetMatched.map(s => s.ex);
+
+    // Query present → deterministic relevance ranking. Membership (score > 0) is
+    // identical to the old boolean match; only the ORDER changes so the exercise the
+    // athlete searched for surfaces first. Catalog order is the stable tie-break.
+    return facetMatched
+      .map((s, index) => ({ ex: s.ex, index, score: scoreExerciseRelevance(s.entry, q) }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+      .map(s => s.ex);
+  }, [searchIndex, deferredQuery, selectedMuscle, selectedEquipment, selectedCategory, favoritesOnly, favoriteIds]);
 
   const hasActiveFilters = searchQuery || selectedMuscle !== 'All' || selectedEquipment !== 'All' || selectedCategory !== 'All' || favoritesOnly;
 

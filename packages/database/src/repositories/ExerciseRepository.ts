@@ -267,6 +267,115 @@ export function matchesExerciseSearch(ex: any, searchQuery: string): boolean {
   return tokens.every(token => corpus.includes(token));
 }
 
+// ─── Deterministic relevance ranking ─────────────────────────────────────────
+// matchesExerciseSearch answers the boolean "does this row match?"; the helpers
+// below answer "how well does it match?" so the exercise the athlete clearly meant
+// ranks first. buildExerciseSearchIndexEntry() does ALL the lower-casing / regex
+// normalization once per exercise when the catalog changes — it is never meant to
+// run per keystroke. scoreExerciseRelevance() then works purely off those
+// precomputed strings (substring/prefix/equality checks only).
+
+/** Joins several raw fields into one normalized, space-separated haystack. */
+function joinNormalized(fields: Array<string | null | undefined>): string {
+  return fields.map(normalizeSearchToken).filter(Boolean).join(' ');
+}
+
+/**
+ * Precomputed, normalized search surfaces for one exercise. Build ONCE per exercise
+ * whenever the catalog changes (never per keystroke) and feed each entry to
+ * scoreExerciseRelevance for every query.
+ */
+export interface ExerciseSearchIndexEntry {
+  /** normalized exercise display name */
+  name: string;
+  /** name + aliases — the first-party canonical / alias surface */
+  nameAlias: string;
+  /** equipment + category + muscle + body-part + movement metadata */
+  metadata: string;
+  /** muscle fields only (drives the muscle facet without matching equipment text) */
+  muscles: string;
+  /** normalized equipment (exact-match equipment facet) */
+  equipment: string;
+  /** normalized category (exact-match category facet) */
+  category: string;
+  /** full corpus incl. instructions + aliases — membership parity with matchesExerciseSearch */
+  corpus: string;
+  firstParty: boolean;
+}
+
+export function buildExerciseSearchIndexEntry(ex: any): ExerciseSearchIndexEntry {
+  const aliases = Array.isArray(ex?.search_aliases) ? ex.search_aliases : [];
+  return {
+    name: normalizeSearchToken(ex?.name),
+    nameAlias: joinNormalized([ex?.name, ...aliases]),
+    metadata: joinNormalized([
+      ex?.equipment, ex?.category, ex?.primary_muscle, ex?.target_muscle,
+      ex?.muscle_group, ex?.body_part, ex?.movement_pattern,
+    ]),
+    muscles: joinNormalized([ex?.primary_muscle, ex?.target_muscle, ex?.muscle_group, ex?.body_part]),
+    equipment: normalizeSearchToken(ex?.equipment),
+    category: normalizeSearchToken(ex?.category),
+    corpus: buildExerciseSearchCorpus(ex),
+    firstParty: isFirstParty(ex),
+  };
+}
+
+/**
+ * Deterministic relevance tiers (higher = more relevant). Spaced by 100 so the small
+ * first-party tie-break can never lift a lower-tier row above a higher-tier one:
+ * relevance dominates, first-party only breaks ties WITHIN the same tier.
+ */
+export const EXERCISE_RELEVANCE = {
+  EXACT_NAME: 600,
+  NAME_PREFIX: 500,
+  NAME_ALL_TOKENS: 400,
+  ALIAS: 300,
+  METADATA: 200,
+  INSTRUCTIONS: 100,
+  NONE: 0,
+  FIRST_PARTY_BONUS: 10,
+} as const;
+
+/**
+ * Scores one precomputed entry against a NORMALIZED query. Returns NONE (0) when the
+ * row is not a match at all — this is the same membership as matchesExerciseSearch
+ * (the INSTRUCTIONS tier == "every token somewhere in the full corpus"), so callers
+ * filter on score > 0 and sort on score descending.
+ */
+export function scoreExerciseRelevance(entry: ExerciseSearchIndexEntry, normalizedQuery: string): number {
+  const q = normalizedQuery;
+  if (!q) return EXERCISE_RELEVANCE.NONE;
+  const tokens = q.split(' ').filter(Boolean);
+  if (tokens.length === 0) return EXERCISE_RELEVANCE.NONE;
+
+  let base: number;
+  if (entry.name === q) base = EXERCISE_RELEVANCE.EXACT_NAME;
+  else if (entry.name.startsWith(q)) base = EXERCISE_RELEVANCE.NAME_PREFIX;
+  else if (tokens.every(t => entry.name.includes(t))) base = EXERCISE_RELEVANCE.NAME_ALL_TOKENS;
+  else if (tokens.every(t => entry.nameAlias.includes(t))) base = EXERCISE_RELEVANCE.ALIAS;
+  else if (tokens.every(t => entry.metadata.includes(t))) base = EXERCISE_RELEVANCE.METADATA;
+  else if (tokens.every(t => entry.corpus.includes(t))) base = EXERCISE_RELEVANCE.INSTRUCTIONS;
+  else return EXERCISE_RELEVANCE.NONE;
+
+  return base + (entry.firstParty ? EXERCISE_RELEVANCE.FIRST_PARTY_BONUS : 0);
+}
+
+/**
+ * Pure, catalog-order-stable ranker used by the library screen's regression tests
+ * (and any non-faceted caller). Input order — already first-party-first from
+ * normalizeExerciseList — is the final deterministic tie-break, so equal-relevance
+ * rows never reshuffle between renders/engines. Empty query → input order, no drops.
+ */
+export function rankExercisesByRelevance<T extends Record<string, any>>(list: T[], query: string): T[] {
+  const q = normalizeSearchToken(query);
+  if (!q) return list.slice();
+  return list
+    .map((ex, index) => ({ ex, index, score: scoreExerciseRelevance(buildExerciseSearchIndexEntry(ex), q) }))
+    .filter(s => s.score > 0)
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map(s => s.ex);
+}
+
 // ─── AI Coach exercise-name resolution ───────────────────────────────────────
 // The AI Coach's deterministic program generator (supabase/functions/_shared/ai/
 // programGenerator.ts) works purely on exercise NAME strings pulled from the
