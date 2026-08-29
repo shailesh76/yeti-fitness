@@ -36,7 +36,7 @@ create policy "Users can update own profile."
 
 -- 2. Create Exercises Table
 create table public.exercises (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   name text not null,
   muscle_group text,
   instructions text,
@@ -53,7 +53,7 @@ create policy "Exercises are viewable by everyone."
 
 -- 3. Create Workout Plans Table
 create table public.workout_plans (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   coach_id uuid references public.profiles(id),
   user_id uuid references public.profiles(id),
   name text not null,
@@ -68,7 +68,7 @@ create policy "Users can view their own workout plans."
 
 -- 4. Create Workout Logs Table
 create table public.workout_logs (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) not null,
   workout_plan_id uuid references public.workout_plans(id),
   started_at timestamp with time zone not null,

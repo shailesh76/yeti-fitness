@@ -1,5 +1,5 @@
 create table public.workout_plan_exercises (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   workout_plan_id uuid references public.workout_plans(id) on delete cascade not null,
   exercise_id uuid references public.exercises(id) not null,
   sets integer not null default 3,

@@ -3,7 +3,7 @@
 
 -- 1. Create progress_photos table
 create table public.progress_photos (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   photo_key text not null,
   notes text,
