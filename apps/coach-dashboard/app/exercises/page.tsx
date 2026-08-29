@@ -36,6 +36,7 @@ interface DbExercise {
   tempo?: string;
   source_type: string;
   source_id?: string;
+  created_by_coach_id?: string | null;
   license?: string;
   recommended_rest_seconds?: number;
   hypertrophy_reps?: string;
@@ -79,6 +80,7 @@ export default function ExerciseLibraryPage() {
   const [selectedMedia, setSelectedMedia] = useState<ExerciseMediaRecord[]>([]);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
   const [canManageMedia, setCanManageMedia] = useState(false);
+  const [editorIdentity, setEditorIdentity] = useState<{ userId: string; role: string } | null>(null);
   const [detailTab, setDetailTab] = useState<'overview' | 'instructions' | 'muscles' | 'variations'>('overview');
 
   // Filter & Search Controls
@@ -112,6 +114,7 @@ export default function ExerciseLibraryPage() {
         const { count } = await supabase
           .from('exercises')
           .select('*', { count: 'exact', head: true })
+          .is('archived_at', null)
           .eq('source_type', 'yeti_first_party');
         if (count !== null) setYetiCount(count);
       } catch (err) {
@@ -127,7 +130,10 @@ export default function ExerciseLibraryPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-      if (!cancelled) setCanManageMedia(data?.role === 'coach' || data?.role === 'admin');
+      if (!cancelled) {
+        setCanManageMedia(data?.role === 'coach' || data?.role === 'admin');
+        setEditorIdentity(data?.role ? { userId: user.id, role: data.role } : null);
+      }
     }
     loadMediaPermission();
     return () => { cancelled = true; };
@@ -157,7 +163,8 @@ export default function ExerciseLibraryPage() {
       // 2. Build Base Exercise Query
       let query = supabase
         .from('exercises')
-        .select('*', { count: 'exact' });
+        .select('*', { count: 'exact' })
+        .is('archived_at', null);
 
       // Apply Source Filter
       if (sourceFilter === 'yeti_first_party') {
@@ -382,13 +389,15 @@ export default function ExerciseLibraryPage() {
               <span>Refresh</span>
             </button>
 
-            <button 
-              onClick={() => router.push('/exercises/new')}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-colors shadow-lg shadow-blue-600/20"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Add Exercise</span>
-            </button>
+            {editorIdentity?.role === 'coach' && (
+              <button
+                onClick={() => router.push('/exercises/new')}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-colors shadow-lg shadow-blue-600/20"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Custom Exercise</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -950,6 +959,18 @@ export default function ExerciseLibraryPage() {
 
               {/* Action Buttons */}
               <div className="space-y-2 pt-2">
+                {(editorIdentity?.role === 'admin'
+                  || (editorIdentity?.role === 'coach'
+                    && selectedExercise.source_type === 'custom'
+                    && selectedExercise.created_by_coach_id === editorIdentity.userId)) && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/exercises/${selectedExercise.id}/edit`)}
+                    className="w-full border border-white/10 bg-[#161C28] py-2.5 text-xs font-bold text-white hover:bg-white/5"
+                  >
+                    Edit exercise
+                  </button>
+                )}
                 <button 
                   onClick={() => router.push('/plans/builder')}
                   className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs transition-colors shadow-lg shadow-blue-600/20 flex items-center justify-center gap-1.5"

@@ -1,288 +1,134 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../../lib/supabase';
-import { uploadFileToR2 } from '../../../lib/r2';
-import { ArrowLeft, Upload, FileText, CheckCircle, AlertTriangle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, Save } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import {
+  buildExerciseEditorRpcArgs,
+  ExerciseEditorErrors,
+  ExerciseEditorForm,
+  isExerciseEditorDirty,
+  validateExerciseEditor,
+} from '@/lib/exerciseEditor';
 
-const MUSCLE_GROUPS = ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core', 'Cardio', 'Full Body'];
+const INPUT = 'w-full rounded-md border border-white/10 bg-[#161C28] px-3 py-2 text-sm text-white outline-none focus:border-blue-500';
+const TEXTAREA = `${INPUT} min-h-24 resize-y`;
+const EMPTY_FORM: ExerciseEditorForm = {
+  name: '', primaryMuscle: '', equipment: '', category: '', movementPattern: '', difficulty: '', unilateral: false,
+  setupInstructions: '', executionInstructions: '', breathing: '', coachingCues: '', commonMistakes: '', safetyNotes: '',
+  defaultSets: '3', defaultReps: '', defaultRepsPrescription: '', tempo: '', archived: false,
+};
 
-export default function NewExercise() {
+export default function NewExercisePage() {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [muscleGroup, setMuscleGroup] = useState('Chest');
-  const [instructions, setInstructions] = useState('');
-  
-  const [gifFile, setGifFile] = useState<File | null>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [coachId, setCoachId] = useState<string | null>(null);
+  const [form, setForm] = useState<ExerciseEditorForm>(EMPTY_FORM);
+  const [errors, setErrors] = useState<ExerciseEditorErrors>({});
+  const [status, setStatus] = useState<'loading' | 'ready' | 'denied'>('loading');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const dirty = useMemo(() => isExerciseEditorDirty(EMPTY_FORM, form), [form]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        router.push('/');
-      } else {
-        setCoachId(session.user.id);
-      }
-    });
-  }, [router]);
+    void (async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) return setStatus('denied');
+      const { data } = await supabase.from('profiles').select('role').eq('id', authData.user.id).maybeSingle();
+      setStatus(data?.role === 'coach' ? 'ready' : 'denied');
+    })();
+  }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'gif' | 'video') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
-    setErrorMsg('');
-    if (type === 'gif') {
-      if (file.size > 5 * 1024 * 1024) {
-        setErrorMsg('GIF size must be less than 5MB, dude.');
-        return;
-      }
-      setGifFile(file);
-    } else {
-      if (file.size > 50 * 1024 * 1024) {
-        setErrorMsg('Video size must be less than 50MB.');
-        return;
-      }
-      setVideoFile(file);
-    }
-  };
+  function update<K extends keyof ExerciseEditorForm>(key: K, value: ExerciseEditorForm[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+    setMessage(null);
+  }
 
-  const uploadToStorage = async (file: File, folder: string): Promise<string> => {
-    // Simulate upload progress since we don't have direct progress events in the Edge function upload
-    const interval = setInterval(() => {
-      setUploadProgress((prev: number) => Math.min(prev + 10, 90));
-    }, 150);
+  function cancel() {
+    if (!dirty || window.confirm('Discard this unsaved custom exercise?')) router.push('/exercises');
+  }
 
-    try {
-      const r2Folder = `exercises/${folder}`;
-      const result = await uploadFileToR2(file, r2Folder);
-
-      clearInterval(interval);
-      if (!result.success || !result.url) {
-        throw new Error(result.error || `Upload to R2 failed for folder ${folder}`);
-      }
-
-      return result.url;
-    } catch (err) {
-      clearInterval(interval);
-      throw err;
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name || !instructions || !gifFile || !coachId) {
-      setErrorMsg('Please enter a name, instructions, and upload a guide GIF.');
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    const nextErrors = validateExerciseEditor(form);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setMessage('Correct the highlighted fields before saving.');
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      setErrorMsg('');
-      setUploadProgress(10);
-
-      // 1. Upload GIF
-      const gifUrl = await uploadToStorage(gifFile, 'gifs');
-      setUploadProgress(60);
-
-      // 2. Upload Video (if provided)
-      let videoUrl = '';
-      if (videoFile) {
-        videoUrl = await uploadToStorage(videoFile, 'videos');
-      }
-      setUploadProgress(90);
-
-      // 3. Save Exercise record
-      const { error } = await supabase
-        .from('exercises')
-        .insert({
-          name,
-          muscle_group: muscleGroup,
-          instructions,
-          gif_url: gifUrl,
-          video_url: videoUrl || null,
-          created_by_coach_id: coachId
-        });
-
-      if (error) throw error;
-
-      setUploadProgress(100);
-      router.push('/dashboard');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'An error occurred during submission.');
-      setUploadProgress(0);
-    } finally {
-      setIsSubmitting(false);
+    setSaving(true);
+    setMessage(null);
+    const { data, error } = await supabase.rpc('save_exercise_editor', buildExerciseEditorRpcArgs(null, form));
+    setSaving(false);
+    if (error) {
+      setMessage(error.message || 'Exercise was not created.');
+      return;
     }
-  };
+    router.replace(`/exercises/${data}/edit`);
+  }
+
+  if (status === 'loading') return <StatePanel title="Checking exercise permissions" loading />;
+  if (status === 'denied') return <StatePanel title="Only coaches can create custom exercises" onBack={() => router.push('/exercises')} />;
 
   return (
-    <div className="min-h-screen bg-[#131313] text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* Background hacker grid overlay */}
-      <div 
-        style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.012) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.012) 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
-      />
-
-      <div className="w-full max-w-2xl bg-[#161616]/80 backdrop-blur-xl p-8 rounded-3xl border border-white/[0.06] shadow-2xl relative z-10">
-        {/* Glow Header bar */}
-        <div style={{ backgroundImage: 'linear-gradient(90deg, #39FF6A, #00fbfb)', height: 3, position: 'absolute', top: 0, left: 0, right: 0 }} />
-
-        {/* Back Button */}
-        <button 
-          onClick={() => router.back()}
-          className="flex items-center text-gray-400 hover:text-white transition-all text-xs font-bold uppercase tracking-wider gap-2 mb-6"
-        >
-          <ArrowLeft size={16} /> Back to Dashboard
+    <main className="mx-auto min-h-screen max-w-6xl bg-[#0B1117] px-5 py-7 text-gray-100">
+      <div className="mb-6 flex items-center justify-between gap-3 border-b border-white/10 pb-5">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={cancel} className="p-2 text-gray-400 hover:text-white" title="Back to exercises"><ArrowLeft className="h-5 w-5" /></button>
+          <div><p className="text-xs font-bold uppercase text-blue-400">Exercise Editor</p><h1 className="text-xl font-bold">Create custom exercise</h1></div>
+        </div>
+        <button form="new-exercise-form" type="submit" disabled={saving} className="flex min-h-11 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-bold disabled:opacity-40">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Create
         </button>
- 
-        <h1 className="text-3xl font-black tracking-tight mb-1">Create Exercise</h1>
-        <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-8">Add visual guides to the library</p>
-
-        {errorMsg && (
-          <div className="bg-red-500/10 border border-red-500/20 text-[#ffb4ab] text-xs px-4 py-3.5 rounded-xl mb-6 flex items-center gap-2.5">
-            <AlertTriangle size={16} />
-            <span className="font-semibold">{errorMsg}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Exercise Name */}
-          <div>
-            <label className="block text-gray-400 text-[10px] font-black uppercase tracking-wider mb-2">Exercise Name</label>
-            <input 
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="e.g. Incline DB Bench Press"
-              className="w-full bg-black/40 text-white px-4 py-3.5 rounded-xl border border-white/[0.04] focus:border-[#39FF6A]/40 transition-all font-semibold outline-none"
-            />
-          </div>
-
-          {/* Muscle Group Selector */}
-          <div>
-            <label className="block text-gray-400 text-[10px] font-black uppercase tracking-wider mb-2">Muscle Group</label>
-            <select
-              value={muscleGroup}
-              onChange={e => setMuscleGroup(e.target.value)}
-              className="w-full bg-black/40 text-white px-4 py-3.5 rounded-xl border border-white/[0.04] focus:border-[#39FF6A]/40 transition-all font-bold outline-none"
-            >
-              {MUSCLE_GROUPS.map(mg => (
-                <option key={mg} value={mg} className="bg-[#161616] text-white font-semibold">{mg}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Instructions */}
-          <div>
-            <label className="block text-gray-400 text-[10px] font-black uppercase tracking-wider mb-2">Instructions</label>
-            <textarea
-              value={instructions}
-              onChange={e => setInstructions(e.target.value)}
-              placeholder="Provide step-by-step performance cues..."
-              rows={4}
-              className="w-full bg-black/40 text-white px-4 py-3.5 rounded-xl border border-white/[0.04] focus:border-[#39FF6A]/40 transition-all font-semibold outline-none resize-none leading-relaxed"
-            />
-          </div>
-
-          {/* Media Upload Fields */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* GIF upload */}
-            <div className="flex flex-col">
-              <label className="block text-gray-400 text-[10px] font-black uppercase tracking-wider mb-2">Guide GIF (Max 5MB)</label>
-              <label className={`flex-1 flex flex-col items-center justify-center border border-dashed rounded-2xl cursor-pointer p-5 transition-all text-center ${
-                gifFile ? 'border-[#39FF6A]/50 bg-[#39FF6A]/5' : 'border-white/[0.08] bg-black/20 hover:border-[#39FF6A]/30'
-              }`}>
-                <input 
-                  type="file" 
-                  accept="image/gif"
-                  onChange={e => handleFileChange(e, 'gif')}
-                  className="hidden"
-                />
-                {gifFile ? (
-                  <>
-                    <CheckCircle className="text-[#39FF6A] mb-2" size={24} />
-                    <span className="text-white text-xs font-black truncate max-w-[180px]">{gifFile.name}</span>
-                    <span className="text-gray-500 text-[9px] font-bold mt-1 uppercase">{(gifFile.size/1024/1024).toFixed(2)} MB</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="text-gray-500 mb-2" size={24} />
-                    <span className="text-gray-400 text-xs font-semibold">Choose GIF File</span>
-                    <span className="text-gray-600 text-[9px] font-bold mt-1 uppercase">Required</span>
-                  </>
-                )}
-              </label>
-            </div>
-
-            {/* Video upload */}
-            <div className="flex flex-col">
-              <label className="block text-gray-400 text-[10px] font-black uppercase tracking-wider mb-2">Reference Video (Max 50MB)</label>
-              <label className={`flex-1 flex flex-col items-center justify-center border border-dashed rounded-2xl cursor-pointer p-5 transition-all text-center ${
-                videoFile ? 'border-[#00fbfb]/50 bg-[#00fbfb]/5' : 'border-white/[0.08] bg-black/20 hover:border-[#00fbfb]/30'
-              }`}>
-                <input 
-                  type="file" 
-                  accept="video/*"
-                  onChange={e => handleFileChange(e, 'video')}
-                  className="hidden"
-                />
-                {videoFile ? (
-                  <>
-                    <CheckCircle className="text-[#00fbfb] mb-2" size={24} />
-                    <span className="text-white text-xs font-black truncate max-w-[180px]">{videoFile.name}</span>
-                    <span className="text-gray-500 text-[9px] font-bold mt-1 uppercase">{(videoFile.size/1024/1024).toFixed(2)} MB</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="text-gray-500 mb-2" size={24} />
-                    <span className="text-gray-400 text-xs font-semibold">Choose Video File</span>
-                    <span className="text-gray-600 text-[9px] font-bold mt-1 uppercase">Optional</span>
-                  </>
-                )}
-              </label>
-            </div>
-
-          </div>
-
-          {/* Upload Progress Bar */}
-          {isSubmitting && (
-            <div className="space-y-2 pt-2">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-gray-500 font-bold uppercase">Uploading assets...</span>
-                <span className="text-[#39FF6A] font-mono font-black">{uploadProgress}%</span>
-              </div>
-              <div className="h-2 bg-black/40 rounded-full overflow-hidden border border-white/[0.02]">
-                <div 
-                  className="h-full bg-gradient-to-r from-[#39FF6A] to-[#00fbfb] rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-[#39FF6A] text-black font-black py-4 rounded-xl active:scale-[0.98] transition-all text-xs uppercase tracking-widest justify-center items-center flex"
-          >
-            {isSubmitting ? 'Uploading & Creating...' : 'Create Exercise'}
-          </button>
-        </form>
       </div>
-    </div>
+
+      <div className="mb-5 rounded-md border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
+        New exercises are created as coach-owned custom records. Media is managed separately.
+      </div>
+      {message && <div className="mb-5 flex items-center gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><AlertCircle className="h-4 w-4" />{message}</div>}
+
+      <form id="new-exercise-form" className="space-y-7" onSubmit={save}>
+        <section><h2 className="mb-3 text-sm font-bold">Core details</h2><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Field label="Name" error={errors.name}><input className={INPUT} value={form.name} onChange={(e) => update('name', e.target.value)} /></Field>
+          <Field label="Primary muscle"><input className={INPUT} value={form.primaryMuscle} onChange={(e) => update('primaryMuscle', e.target.value)} /></Field>
+          <Field label="Equipment"><input className={INPUT} value={form.equipment} onChange={(e) => update('equipment', e.target.value)} /></Field>
+          <Field label="Category"><input className={INPUT} value={form.category} onChange={(e) => update('category', e.target.value)} /></Field>
+          <Field label="Movement pattern"><input className={INPUT} value={form.movementPattern} onChange={(e) => update('movementPattern', e.target.value)} /></Field>
+          <Field label="Difficulty"><input className={INPUT} value={form.difficulty} onChange={(e) => update('difficulty', e.target.value)} /></Field>
+          <Field label="Laterality"><div className="grid h-10 grid-cols-2 rounded-md border border-white/10 bg-[#161C28] p-1"><button type="button" onClick={() => update('unilateral', false)} className={`rounded text-xs font-bold ${!form.unilateral ? 'bg-blue-600' : 'text-gray-400'}`}>Bilateral</button><button type="button" onClick={() => update('unilateral', true)} className={`rounded text-xs font-bold ${form.unilateral ? 'bg-blue-600' : 'text-gray-400'}`}>Unilateral</button></div></Field>
+        </div></section>
+        <section><h2 className="mb-3 text-sm font-bold">Instructions</h2><div className="grid gap-4 md:grid-cols-2">
+          <Field label="Setup instructions"><textarea className={TEXTAREA} value={form.setupInstructions} onChange={(e) => update('setupInstructions', e.target.value)} /></Field>
+          <Field label="Execution instructions"><textarea className={TEXTAREA} value={form.executionInstructions} onChange={(e) => update('executionInstructions', e.target.value)} /></Field>
+          <Field label="Breathing"><textarea className={TEXTAREA} value={form.breathing} onChange={(e) => update('breathing', e.target.value)} /></Field>
+          <Field label="Safety notes"><textarea className={TEXTAREA} value={form.safetyNotes} onChange={(e) => update('safetyNotes', e.target.value)} /></Field>
+          <Field label="Coaching cues" hint="One cue per line" error={errors.coachingCues}><textarea className={TEXTAREA} value={form.coachingCues} onChange={(e) => update('coachingCues', e.target.value)} /></Field>
+          <Field label="Common mistakes" hint="One mistake per line" error={errors.commonMistakes}><textarea className={TEXTAREA} value={form.commonMistakes} onChange={(e) => update('commonMistakes', e.target.value)} /></Field>
+        </div></section>
+        <section><h2 className="mb-3 text-sm font-bold">Default prescription</h2><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Field label="Sets" error={errors.defaultSets}><input inputMode="numeric" className={INPUT} value={form.defaultSets} onChange={(e) => update('defaultSets', e.target.value)} /></Field>
+          <Field label="Numeric reps" hint="Compatibility fallback" error={errors.defaultReps}><input inputMode="numeric" className={INPUT} value={form.defaultReps} onChange={(e) => update('defaultReps', e.target.value)} /></Field>
+          <Field label="Display prescription"><input className={INPUT} value={form.defaultRepsPrescription} onChange={(e) => update('defaultRepsPrescription', e.target.value)} /></Field>
+          <Field label="Tempo" error={errors.tempo}><input className={INPUT} value={form.tempo} onChange={(e) => update('tempo', e.target.value)} /></Field>
+        </div></section>
+      </form>
+    </main>
   );
+}
+
+function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: React.ReactNode }) {
+  return <label className="block"><span className="mb-1 block text-xs font-bold text-gray-300">{label}</span>{children}{hint && !error && <span className="mt-1 block text-[10px] text-gray-500">{hint}</span>}{error && <span className="mt-1 block text-[10px] text-rose-400">{error}</span>}</label>;
+}
+
+function StatePanel({ title, loading = false, onBack }: { title: string; loading?: boolean; onBack?: () => void }) {
+  return <main className="flex min-h-screen items-center justify-center bg-[#0B1117] px-5 text-gray-100"><div className="text-center">{loading && <Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin text-gray-400" />}<h1 className="text-lg font-bold">{title}</h1>{onBack && <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-md bg-blue-600 px-4 text-sm font-bold">Back to exercises</button>}</div></main>;
 }
