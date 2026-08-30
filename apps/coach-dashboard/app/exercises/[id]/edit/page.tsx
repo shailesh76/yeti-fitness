@@ -47,7 +47,7 @@ interface ExerciseRow {
   archived_at: string | null;
 }
 
-type LoadState = 'loading' | 'ready' | 'not-found' | 'denied' | 'error';
+type LoadState = 'loading' | 'ready' | 'not-found' | 'unauthenticated' | 'denied' | 'error';
 
 const INPUT_CLASS = 'w-full rounded-md border border-white/10 bg-[#161C28] px-3 py-2 text-sm text-white outline-none focus:border-blue-500';
 const TEXTAREA_CLASS = `${INPUT_CLASS} min-h-28 resize-y`;
@@ -73,24 +73,24 @@ export default function ExerciseEditorPage() {
   const loadExercise = useCallback(async () => {
     setLoadState('loading');
     setMessage(null);
-    const { data: authData } = await supabase.auth.getUser();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
     const user = authData.user;
-    if (!user) {
-      setLoadState('denied');
+    if (authError || !user) {
+      setLoadState('unauthenticated');
       return;
     }
 
     const [
       { data: profile, error: profileError },
       { data: row, error: exerciseError },
-      { data: aliasesData },
-      { data: tagsData },
-      { data: musclesData },
-      { data: altsData },
-      { data: progsData },
-      { data: regsData },
-      { data: derivedProgsData },
-      { data: derivedRegsData },
+      { data: aliasesData, error: aliasesError },
+      { data: tagsData, error: tagsError },
+      { data: musclesData, error: musclesError },
+      { data: altsData, error: alternativesError },
+      { data: progsData, error: progressionsError },
+      { data: regsData, error: regressionsError },
+      { data: derivedProgsData, error: derivedProgressionsError },
+      { data: derivedRegsData, error: derivedRegressionsError },
     ] = await Promise.all([
       supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
       supabase.from('exercises').select([
@@ -112,12 +112,21 @@ export default function ExerciseEditorPage() {
     ]);
 
     if (profileError || exerciseError) {
-      setMessage({ kind: 'error', text: profileError?.message || exerciseError?.message || 'Could not load exercise.' });
+      setMessage({ kind: 'error', text: 'The exercise editor could not be loaded.' });
       setLoadState('error');
       return;
     }
     if (!row) {
       setLoadState('not-found');
+      return;
+    }
+
+    const relationError = aliasesError || tagsError || musclesError || alternativesError
+      || progressionsError || regressionsError || derivedProgressionsError || derivedRegressionsError;
+    if (relationError) {
+      console.error('Exercise relation data could not be loaded.', { exerciseId });
+      setMessage({ kind: 'error', text: 'Exercise relationships could not be loaded. No changes were made.' });
+      setLoadState('error');
       return;
     }
 
@@ -270,6 +279,7 @@ export default function ExerciseEditorPage() {
 
   if (loadState === 'loading') return <StatePanel icon={<Loader2 className="h-7 w-7 animate-spin" />} title="Loading exercise" />;
   if (loadState === 'not-found') return <StatePanel icon={<AlertCircle className="h-7 w-7" />} title="Exercise not found" action={leaveEditor} />;
+  if (loadState === 'unauthenticated') return <StatePanel icon={<AlertCircle className="h-7 w-7" />} title="Your session has expired" action={() => router.replace('/login')} actionLabel="Sign in" />;
   if (loadState === 'denied') return <StatePanel icon={<AlertCircle className="h-7 w-7" />} title="You do not have permission to edit this exercise" action={leaveEditor} />;
   if (loadState === 'error' || !form || !exercise) return <StatePanel icon={<AlertCircle className="h-7 w-7" />} title={message?.text || 'Could not load exercise'} action={() => void loadExercise()} actionLabel="Retry" />;
 

@@ -201,13 +201,14 @@ describe('exercise media URL management', () => {
     expect(pageSource).toContain(".in('exercise_id', idChunk)");
     expect(pageSource).toContain('.range(from, to)');
     expect(pageSource).toContain('matchesExerciseMediaFilter');
-    expect(pageSource).toContain('nextTotalCount = filtered.length');
-    expect(pageSource).toContain('nextExercises = filtered.slice(from, from + pageSize)');
+    expect(pageSource).toContain('nextTotalCount = filteredIds.length');
+    expect(pageSource).toContain('const pageIds = filteredIds.slice(from, from + pageSize)');
+    expect(pageSource).toContain(".select(mediaStatusFilter === 'all' ? '*' : 'id'");
     expect(pageSource).toContain('<option value="missing_gif">Missing GIF</option>');
     expect(pageSource).toContain('<option value="missing_video">Missing Video</option>');
     expect(pageSource).toContain('<option value="missing_thumbnail">Missing Thumbnail</option>');
     expect(pageSource).not.toContain("query = query.eq('media_status', mediaStatusFilter)");
-    expect(pageSource).toContain("data?.role === 'coach' || data?.role === 'admin'");
+    expect(pageSource).toContain("profile.role === 'coach' || profile.role === 'admin'");
   });
 
   it('prefers valid signed R2 media over dead or placeholder external URLs', async () => {

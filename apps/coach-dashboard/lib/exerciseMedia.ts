@@ -29,6 +29,17 @@ export interface ExerciseMediaPageResult {
   error: { message: string } | null;
 }
 
+export interface ExercisePageResult<T> {
+  data: T[] | null;
+  count: number | null;
+  error: { message: string } | null;
+}
+
+export type ExercisePageLoader<T> = (
+  from: number,
+  to: number,
+) => Promise<ExercisePageResult<T>>;
+
 export type ExerciseMediaPageLoader = (
   exerciseIds: string[],
   from: number,
@@ -98,7 +109,12 @@ export function hasDuplicateExerciseMediaUrl(
   return rows.some((row) => row.id !== excludeId && row.url?.trim() === candidate);
 }
 
-export function isUsableExerciseMedia(row: Pick<ExerciseMediaRecord, 'r2_key' | 'url'>): boolean {
+export function isPublishableExerciseMediaStatus(status: string | null | undefined): boolean {
+  return status?.trim().toUpperCase() === 'READY';
+}
+
+export function isUsableExerciseMedia(row: Pick<ExerciseMediaRecord, 'r2_key' | 'url' | 'media_status'>): boolean {
+  if (!isPublishableExerciseMediaStatus(row.media_status)) return false;
   return Boolean(row.r2_key?.trim()) || Boolean(row.url && isValidExerciseMediaUrl(row.url));
 }
 
@@ -130,9 +146,11 @@ export function previewErrorKey(row: Pick<ExerciseMediaRecord, 'id' | 'r2_key' |
 export type R2UrlSigner = (key: string) => Promise<string | null>;
 
 export async function resolveExerciseMediaUrl(
-  row: Pick<ExerciseMediaRecord, 'r2_key' | 'url'>,
+  row: Pick<ExerciseMediaRecord, 'r2_key' | 'url' | 'media_status'>,
   signR2?: R2UrlSigner,
 ): Promise<string | null> {
+  if (!isPublishableExerciseMediaStatus(row.media_status)) return null;
+
   const r2Key = row.r2_key?.trim();
   if (r2Key && signR2) {
     try {
@@ -151,6 +169,32 @@ export async function resolveExerciseMediaUrl(
   }
 
   return null;
+}
+
+export async function fetchAllExerciseRows<T extends { id: string }>(
+  loadPage: ExercisePageLoader<T>,
+  pageSize = 1000,
+): Promise<{ rows: T[]; count: number }> {
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    throw new Error('Invalid exercise page size.');
+  }
+
+  const rowsById = new Map<string, T>();
+  let expectedCount: number | null = null;
+  for (let from = 0; ; from += pageSize) {
+    const { data, count, error } = await loadPage(from, from + pageSize - 1);
+    if (error) throw new Error(`Could not load complete exercise set: ${error.message}`);
+    if (expectedCount === null && count !== null) expectedCount = count;
+    const page = data ?? [];
+    for (const row of page) rowsById.set(row.id, row);
+    if (page.length < pageSize || (expectedCount !== null && rowsById.size >= expectedCount)) break;
+  }
+
+  const rows = Array.from(rowsById.values());
+  if (expectedCount !== null && rows.length < expectedCount) {
+    throw new Error(`Could not load complete exercise set: expected ${expectedCount}, received ${rows.length}.`);
+  }
+  return { rows, count: expectedCount ?? rows.length };
 }
 
 export async function fetchAllExerciseMediaRows(

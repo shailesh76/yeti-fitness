@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PROTECTED_PREFIXES = ['/dashboard', '/plans', '/admin'];
+const PROTECTED_PREFIXES = ['/dashboard', '/plans', '/admin', '/exercises'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -92,12 +92,15 @@ export async function middleware(request: NextRequest) {
 
     console.log(`[Middleware] Access granted to Coach!`);
   } catch (err: any) {
-    console.error(`[Middleware] Unhandled exception:`, err);
+    console.error(`[Middleware] Authentication check failed:`, err instanceof Error ? err.message : 'Unknown error');
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = '/login';
+    return NextResponse.redirect(loginUrl);
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/plans/:path*', '/admin/:path*', '/admin'],
+  matcher: ['/dashboard/:path*', '/plans/:path*', '/admin/:path*', '/admin', '/exercises/:path*', '/exercises'],
 };

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
-import { fetchAllExerciseMediaRows, matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
+import { fetchAllExerciseMediaRows, fetchAllExerciseRows, matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
 import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 
 interface DbExercise {
@@ -59,6 +59,20 @@ interface ExerciseMuscle {
   role: string;
 }
 
+type CatalogAuthState = 'checking' | 'authenticated' | 'unauthenticated';
+
+interface ExerciseTaxonomyOptions {
+  category: string[];
+  muscle: string[];
+  equipment: string[];
+}
+
+const EMPTY_TAXONOMY: ExerciseTaxonomyOptions = { category: [], muscle: [], equipment: [] };
+
+function taxonomyLabel(value: string): string {
+  return value.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export default function ExerciseLibraryPage() {
   const router = useRouter();
 
@@ -81,6 +95,9 @@ export default function ExerciseLibraryPage() {
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
   const [canManageMedia, setCanManageMedia] = useState(false);
   const [editorIdentity, setEditorIdentity] = useState<{ userId: string; role: string } | null>(null);
+  const [authState, setAuthState] = useState<CatalogAuthState>('checking');
+  const [taxonomy, setTaxonomy] = useState<ExerciseTaxonomyOptions>(EMPTY_TAXONOMY);
+  const [taxonomyError, setTaxonomyError] = useState(false);
   const [detailTab, setDetailTab] = useState<'overview' | 'instructions' | 'muscles' | 'variations'>('overview');
 
   // Filter & Search Controls
@@ -107,8 +124,9 @@ export default function ExerciseLibraryPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch Yeti total count on mount
+  // Fetch Yeti total count only after a live client session is confirmed.
   useEffect(() => {
+    if (authState !== 'authenticated') return;
     async function fetchCounts() {
       try {
         const { count } = await supabase
@@ -122,25 +140,55 @@ export default function ExerciseLibraryPage() {
       }
     }
     fetchCounts();
-  }, []);
+  }, [authState]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadMediaPermission() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-      if (!cancelled) {
-        setCanManageMedia(data?.role === 'coach' || data?.role === 'admin');
-        setEditorIdentity(data?.role ? { userId: user.id, role: data.role } : null);
+    async function loadAuthenticatedContext() {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (authError || !user) {
+        setAuthState('unauthenticated');
+        setCanManageMedia(false);
+        setEditorIdentity(null);
+        router.replace('/login');
+        return;
+      }
+
+      setAuthState('authenticated');
+      const [{ data: profile, error: profileError }, { data: taxonomyRows, error: taxonomyLoadError }] = await Promise.all([
+        supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
+        supabase.from('exercise_taxonomy').select('kind, value').in('kind', ['category', 'muscle', 'equipment']).order('value'),
+      ]);
+      if (cancelled) return;
+
+      if (!profileError && profile?.role) {
+        setCanManageMedia(profile.role === 'coach' || profile.role === 'admin');
+        setEditorIdentity({ userId: user.id, role: profile.role });
+      } else {
+        setCanManageMedia(false);
+        setEditorIdentity(null);
+      }
+
+      if (taxonomyLoadError) {
+        setTaxonomyError(true);
+      } else {
+        const grouped: ExerciseTaxonomyOptions = { category: [], muscle: [], equipment: [] };
+        for (const row of taxonomyRows ?? []) {
+          const kind = row.kind as keyof ExerciseTaxonomyOptions;
+          if (kind in grouped && row.value && !grouped[kind].includes(row.value)) grouped[kind].push(row.value);
+        }
+        setTaxonomy(grouped);
+        setTaxonomyError(false);
       }
     }
-    loadMediaPermission();
+    void loadAuthenticatedContext();
     return () => { cancelled = true; };
-  }, []);
+  }, [router]);
 
   // Main Exercises Query Function
   const fetchExercises = useCallback(async () => {
+    if (authState !== 'authenticated') return;
     setLoading(true);
     setError(null);
 
@@ -163,7 +211,7 @@ export default function ExerciseLibraryPage() {
       // 2. Build Base Exercise Query
       let query = supabase
         .from('exercises')
-        .select('*', { count: 'exact' })
+        .select(mediaStatusFilter === 'all' ? '*' : 'id', { count: 'exact' })
         .is('archived_at', null);
 
       // Apply Source Filter
@@ -225,19 +273,20 @@ export default function ExerciseLibraryPage() {
         query = query.range(from, from + pageSize - 1);
       }
 
-      const { data, count, error: fetchErr } = await query;
-
-      if (fetchErr) {
-        throw fetchErr;
-      }
-
-      let nextExercises = data || [];
-      let nextTotalCount = count || 0;
-      if (mediaStatusFilter !== 'all') {
-        if (nextExercises.length < nextTotalCount) {
-          throw new Error('The complete matching exercise set could not be loaded for media filtering.');
-        }
-        const exerciseIds = nextExercises.map((exercise) => exercise.id);
+      let nextExercises: DbExercise[] = [];
+      let nextTotalCount = 0;
+      if (mediaStatusFilter === 'all') {
+        const { data, count, error: fetchErr } = await query;
+        if (fetchErr) throw fetchErr;
+        nextExercises = (data || []) as DbExercise[];
+        nextTotalCount = count || 0;
+      } else {
+        const completeSet = await fetchAllExerciseRows<{ id: string }>(async (from, to) => {
+          const { data, count, error } = await query.range(from, to);
+          return { data: (data || []) as Array<{ id: string }>, count, error };
+        });
+        const exerciseIds = completeSet.rows.map((exercise) => exercise.id);
+        nextTotalCount = completeSet.count;
         const mediaByExercise = new Map<string, ExerciseMediaRecord[]>();
         if (exerciseIds.length > 0) {
           const mediaRows = await fetchAllExerciseMediaRows(exerciseIds, async (idChunk, from, to) => {
@@ -255,12 +304,21 @@ export default function ExerciseLibraryPage() {
             mediaByExercise.set(row.exercise_id, rows);
           }
         }
-        const filtered = nextExercises.filter((exercise) =>
-          matchesExerciseMediaFilter(mediaByExercise.get(exercise.id) ?? [], mediaStatusFilter as ExerciseMediaCompletenessFilter),
+        const filteredIds = exerciseIds.filter((exerciseId) =>
+          matchesExerciseMediaFilter(mediaByExercise.get(exerciseId) ?? [], mediaStatusFilter as ExerciseMediaCompletenessFilter),
         );
-        nextTotalCount = filtered.length;
+        nextTotalCount = filteredIds.length;
         const from = (page - 1) * pageSize;
-        nextExercises = filtered.slice(from, from + pageSize);
+        const pageIds = filteredIds.slice(from, from + pageSize);
+        if (pageIds.length > 0) {
+          const { data: pageRows, error: pageError } = await supabase
+            .from('exercises')
+            .select('*')
+            .in('id', pageIds);
+          if (pageError) throw pageError;
+          const rowsById = new Map(((pageRows || []) as DbExercise[]).map((row) => [row.id, row]));
+          nextExercises = pageIds.map((id) => rowsById.get(id)).filter((row): row is DbExercise => Boolean(row));
+        }
       }
       setExercises(nextExercises);
       setTotalCount(nextTotalCount);
@@ -279,12 +337,12 @@ export default function ExerciseLibraryPage() {
     }
   }, [
     sourceFilter, categoryFilter, muscleGroupFilter, equipmentFilter,
-    difficultyFilter, mediaStatusFilter, debouncedSearch, sortBy, page
+    difficultyFilter, mediaStatusFilter, debouncedSearch, sortBy, page, authState
   ]);
 
   useEffect(() => {
-    fetchExercises();
-  }, [fetchExercises]);
+    if (authState === 'authenticated') void fetchExercises();
+  }, [authState, fetchExercises]);
 
   const loadExerciseSubDetails = useCallback(async () => {
     const exerciseId = selectedExercise?.id;
@@ -331,6 +389,17 @@ export default function ExerciseLibraryPage() {
   };
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
+
+  if (authState !== 'authenticated') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1117] px-6 text-center text-gray-100">
+        <div className="max-w-sm rounded-xl border border-white/10 bg-[#111A23] p-6">
+          <p className="text-sm font-bold text-white">{authState === 'checking' ? 'Checking your session' : 'Your session has expired'}</p>
+          <p className="mt-2 text-xs text-gray-400">{authState === 'checking' ? 'Confirming access to the exercise catalog.' : 'Redirecting you to sign in again.'}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-8 max-w-[1700px] mx-auto min-h-screen text-gray-100 bg-[#0B1117] font-sans">
@@ -463,15 +532,7 @@ export default function ExerciseLibraryPage() {
               className="w-full bg-[#161C28] border border-white/10 rounded-xl px-2.5 py-1.5 text-white focus:outline-none"
             >
               <option value="all">All Categories</option>
-              <option value="chest">Chest</option>
-              <option value="back">Back</option>
-              <option value="legs">Legs</option>
-              <option value="shoulders">Shoulders</option>
-              <option value="biceps">Biceps</option>
-              <option value="triceps">Triceps</option>
-              <option value="core">Core</option>
-              <option value="conditioning">Conditioning</option>
-              <option value="mobility">Mobility</option>
+              {taxonomy.category.map((value) => <option key={value} value={value}>{taxonomyLabel(value)}</option>)}
             </select>
           </div>
 
@@ -484,16 +545,7 @@ export default function ExerciseLibraryPage() {
               className="w-full bg-[#161C28] border border-white/10 rounded-xl px-2.5 py-1.5 text-white focus:outline-none"
             >
               <option value="all">All Muscles</option>
-              <option value="chest">Chest</option>
-              <option value="back">Back</option>
-              <option value="quadriceps">Quadriceps</option>
-              <option value="hamstrings">Hamstrings</option>
-              <option value="glutes">Glutes</option>
-              <option value="shoulders">Shoulders</option>
-              <option value="biceps">Biceps</option>
-              <option value="triceps">Triceps</option>
-              <option value="calves">Calves</option>
-              <option value="abs">Abs / Core</option>
+              {taxonomy.muscle.map((value) => <option key={value} value={value}>{taxonomyLabel(value)}</option>)}
             </select>
           </div>
 
@@ -506,13 +558,7 @@ export default function ExerciseLibraryPage() {
               className="w-full bg-[#161C28] border border-white/10 rounded-xl px-2.5 py-1.5 text-white focus:outline-none"
             >
               <option value="all">All Equipment</option>
-              <option value="barbell">Barbell</option>
-              <option value="dumbbell">Dumbbell</option>
-              <option value="cable">Cable Machine</option>
-              <option value="machine">Machine</option>
-              <option value="bodyweight">Bodyweight</option>
-              <option value="resistance band">Resistance Band</option>
-              <option value="air bike">Air Bike</option>
+              {taxonomy.equipment.map((value) => <option key={value} value={value}>{taxonomyLabel(value)}</option>)}
             </select>
           </div>
 
@@ -601,6 +647,12 @@ export default function ExerciseLibraryPage() {
             <p className="font-bold">Failed to load exercises</p>
             <p className="text-[11px] opacity-80">{error}</p>
           </div>
+        </div>
+      )}
+      {taxonomyError && (
+        <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <p>Exercise filter options could not be loaded. Refresh the page before applying taxonomy filters.</p>
         </div>
       )}
 

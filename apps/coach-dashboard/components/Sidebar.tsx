@@ -29,7 +29,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [coachName, setCoachName] = useState<string>("...");
-  const [userRole, setUserRole] = useState<string>("coach");
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMounted, setIsMounted] = useState(false);

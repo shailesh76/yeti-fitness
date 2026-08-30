@@ -9,6 +9,7 @@ import {
   formatForMediaUrl,
   hasDuplicateExerciseMediaUrl,
   isExternalMedia,
+  isUsableExerciseMedia,
   isValidExerciseMediaUrl,
   orderExerciseMedia,
   previewErrorKey,
@@ -46,9 +47,11 @@ function typeLabel(type: ExerciseMediaType) {
 
 function mediaStatusLabel(media: ExerciseMediaRecord[]) {
   if (media.length === 0) return 'Missing media';
-  const types = new Set(media.map((item) => item.media_type));
+  const publishable = media.filter(isUsableExerciseMedia);
+  if (publishable.length === 0) return 'Planned / unavailable';
+  const types = new Set(publishable.map((item) => item.media_type));
   if (types.has('gif') && types.has('video') && (types.has('image') || types.has('thumbnail'))) return 'Complete';
-  return `${media.length} asset${media.length === 1 ? '' : 's'}`;
+  return `${publishable.length} published asset${publishable.length === 1 ? '' : 's'}`;
 }
 
 export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading, canManage, onChanged }: ExerciseMediaManagerProps) {
@@ -90,6 +93,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }, [orderedMedia]);
 
   const selected = orderedMedia.find((item) => item.id === selectedId) ?? orderedMedia[0] ?? null;
+  const selectedIsPublishable = selected ? isUsableExerciseMedia(selected) : false;
   const selectedUrl = selected ? resolvedUrls[selected.id] : null;
   const selectedPreviewErrorKey = selected ? previewErrorKey(selected, selectedUrl) : null;
 
@@ -206,13 +210,13 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         ) : (
           <div className="px-6 text-center">
             <ImageIcon className="mx-auto mb-2 h-8 w-8 text-gray-600" />
-            <p className="text-xs font-bold text-gray-300">{selected ? 'Media unavailable' : 'No media available'}</p>
-            <p className="mt-1 text-[10px] text-gray-500">{selected ? 'The media URL could not be loaded.' : 'Add an HTTPS GIF, video, or image URL.'}</p>
+            <p className="text-xs font-bold text-gray-300">{selected && !selectedIsPublishable ? 'Planned media' : selected ? 'Media unavailable' : 'No media available'}</p>
+            <p className="mt-1 text-[10px] text-gray-500">{selected && !selectedIsPublishable ? 'This asset is not published yet.' : selected ? 'The published media URL could not be loaded.' : 'Add an HTTPS GIF, video, or image URL.'}</p>
           </div>
         )}
         {selected && (
           <span className="absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[9px] font-bold text-white">
-            {typeLabel(selected.media_type)} · {selected.r2_key ? 'R2' : 'URL'}
+            {typeLabel(selected.media_type)} · {selectedIsPublishable ? selected.r2_key ? 'R2' : 'URL' : selected.media_status ?? 'Unavailable'}
           </span>
         )}
       </div>

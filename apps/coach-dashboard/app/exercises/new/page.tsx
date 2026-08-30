@@ -26,16 +26,17 @@ export default function NewExercisePage() {
   const router = useRouter();
   const [form, setForm] = useState<ExerciseEditorForm>(EMPTY_FORM);
   const [errors, setErrors] = useState<ExerciseEditorErrors>({});
-  const [status, setStatus] = useState<'loading' | 'ready' | 'denied'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'unauthenticated' | 'denied' | 'error'>('loading');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const dirty = useMemo(() => isExerciseEditorDirty(EMPTY_FORM, form), [form]);
 
   useEffect(() => {
     void (async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData.user) return setStatus('denied');
-      const { data } = await supabase.from('profiles').select('role').eq('id', authData.user.id).maybeSingle();
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) return setStatus('unauthenticated');
+      const { data, error: profileError } = await supabase.from('profiles').select('role').eq('id', authData.user.id).maybeSingle();
+      if (profileError) return setStatus('error');
       setStatus(data?.role === 'coach' ? 'ready' : 'denied');
     })();
   }, []);
@@ -80,6 +81,8 @@ export default function NewExercisePage() {
   }
 
   if (status === 'loading') return <StatePanel title="Checking exercise permissions" loading />;
+  if (status === 'unauthenticated') return <StatePanel title="Your session has expired" onBack={() => router.replace('/login')} actionLabel="Sign in" />;
+  if (status === 'error') return <StatePanel title="Exercise permissions could not be loaded" onBack={() => router.push('/exercises')} />;
   if (status === 'denied') return <StatePanel title="Only coaches can create custom exercises" onBack={() => router.push('/exercises')} />;
 
   return (
@@ -140,6 +143,6 @@ function Field({ label, hint, error, children }: { label: string; hint?: string;
   return <label className="block"><span className="mb-1 block text-xs font-bold text-gray-300">{label}</span>{children}{hint && !error && <span className="mt-1 block text-[10px] text-gray-500">{hint}</span>}{error && <span className="mt-1 block text-[10px] text-rose-400">{error}</span>}</label>;
 }
 
-function StatePanel({ title, loading = false, onBack }: { title: string; loading?: boolean; onBack?: () => void }) {
-  return <main className="flex min-h-screen items-center justify-center bg-[#0B1117] px-5 text-gray-100"><div className="text-center">{loading && <Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin text-gray-400" />}<h1 className="text-lg font-bold">{title}</h1>{onBack && <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-md bg-blue-600 px-4 text-sm font-bold">Back to exercises</button>}</div></main>;
+function StatePanel({ title, loading = false, onBack, actionLabel = 'Back to exercises' }: { title: string; loading?: boolean; onBack?: () => void; actionLabel?: string }) {
+  return <main className="flex min-h-screen items-center justify-center bg-[#0B1117] px-5 text-gray-100"><div className="text-center">{loading && <Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin text-gray-400" />}<h1 className="text-lg font-bold">{title}</h1>{onBack && <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-md bg-blue-600 px-4 text-sm font-bold">{actionLabel}</button>}</div></main>;
 }
