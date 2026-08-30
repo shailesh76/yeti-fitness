@@ -7,6 +7,8 @@ settings:
 overrides:
   '@expo/config-plugins': 56.0.13
 
+packageExtensionsChecksum: 8e9f22cf653a69850d07e2695ed0e692
+
 importers:
 
   .:
@@ -297,6 +299,9 @@ importers:
       '@nozbe/watermelondb':
         specifier: ^0.28.0
         version: 0.28.0
+      '@yeti/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       typescript:
         specifier: ^5.4.5
@@ -10922,6 +10927,7 @@ snapshots:
 
   lucide-react@0.395.0(react@18.3.1):
     dependencies:
+      '@types/react': 18.3.31
       react: 18.3.1
 
   lz-string@1.5.0: {}
