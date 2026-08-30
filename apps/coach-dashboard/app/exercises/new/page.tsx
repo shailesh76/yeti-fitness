@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import { AlertCircle, ArrowLeft, Loader2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
-  buildExerciseEditorRpcArgs,
+  buildExerciseEditorV2Payload,
   ExerciseEditorErrors,
   ExerciseEditorForm,
   isExerciseEditorDirty,
   validateExerciseEditor,
 } from '@/lib/exerciseEditor';
+import { ExerciseRelationSections } from '@/components/ExerciseRelationSections';
 
 const INPUT = 'w-full rounded-md border border-white/10 bg-[#161C28] px-3 py-2 text-sm text-white outline-none focus:border-blue-500';
 const TEXTAREA = `${INPUT} min-h-24 resize-y`;
@@ -18,6 +19,7 @@ const EMPTY_FORM: ExerciseEditorForm = {
   name: '', primaryMuscle: '', equipment: '', category: '', movementPattern: '', difficulty: '', unilateral: false,
   setupInstructions: '', executionInstructions: '', breathing: '', coachingCues: '', commonMistakes: '', safetyNotes: '',
   defaultSets: '3', defaultReps: '', defaultRepsPrescription: '', tempo: '', archived: false,
+  aliases: [], tags: [], muscles: [], alternatives: [], progressions: [], regressions: [],
 };
 
 export default function NewExercisePage() {
@@ -67,7 +69,8 @@ export default function NewExercisePage() {
 
     setSaving(true);
     setMessage(null);
-    const { data, error } = await supabase.rpc('save_exercise_editor', buildExerciseEditorRpcArgs(null, form));
+    const payload = buildExerciseEditorV2Payload(null, form);
+    const { data, error } = await supabase.rpc('save_exercise_editor_v2', { p_payload: payload });
     setSaving(false);
     if (error) {
       setMessage(error.message || 'Exercise was not created.');
@@ -92,7 +95,7 @@ export default function NewExercisePage() {
       </div>
 
       <div className="mb-5 rounded-md border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
-        New exercises are created as coach-owned custom records. Media is managed separately.
+        New exercises are created as coach-owned custom records. Relations and media can be configured immediately.
       </div>
       {message && <div className="mb-5 flex items-center gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><AlertCircle className="h-4 w-4" />{message}</div>}
 
@@ -120,6 +123,14 @@ export default function NewExercisePage() {
           <Field label="Display prescription"><input className={INPUT} value={form.defaultRepsPrescription} onChange={(e) => update('defaultRepsPrescription', e.target.value)} /></Field>
           <Field label="Tempo" error={errors.tempo}><input className={INPUT} value={form.tempo} onChange={(e) => update('tempo', e.target.value)} /></Field>
         </div></section>
+
+        {/* Phase B Relational & Taxonomy Sections */}
+        <ExerciseRelationSections
+          form={form}
+          errors={errors}
+          currentExerciseId={null}
+          onChange={update}
+        />
       </form>
     </main>
   );

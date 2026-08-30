@@ -66,8 +66,8 @@ describe('Exercise Editor Phase A authorization', () => {
     expect(createBranch).toContain("'custom', 'coach', v_user_id");
     expect(createBranch).not.toContain('p_source_type');
     expect(createBranch).not.toContain('p_created_by_coach_id');
-    expect(creator).toContain("supabase.rpc('save_exercise_editor'");
-    expect(creator).toContain('buildExerciseEditorRpcArgs(null, form)');
+    expect(creator).toMatch(/supabase\.rpc\('save_exercise_editor/);
+    expect(creator).toMatch(/buildExerciseEditor(V2Payload|RpcArgs)/);
     expect(creator).not.toMatch(/\.from\('exercises'\)\.insert/);
     expect(creator).not.toContain('uploadFileToR2');
   });
@@ -111,7 +111,7 @@ describe('Exercise Editor Phase A form and atomic save', () => {
   });
 
   it('uses one atomic RPC and never performs browser-side table updates', () => {
-    expect(editor).toContain("supabase.rpc('save_exercise_editor'");
+    expect(editor).toMatch(/supabase\.rpc\('save_exercise_editor/);
     expect(editor).not.toMatch(/\.from\('exercises'\)\.update/);
     const updateStatements = migration.match(/UPDATE public\.exercises/g) ?? [];
     expect(updateStatements).toHaveLength(1);

@@ -5,13 +5,20 @@ import { useParams, useRouter } from 'next/navigation';
 import { AlertCircle, Archive, ArrowLeft, Check, Loader2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
-  buildExerciseEditorRpcArgs,
+  buildExerciseEditorV2Payload,
   canEditExercise,
+  DerivedRelationItem,
+  ExerciseAlternativeItem,
   ExerciseEditorErrors,
   ExerciseEditorForm,
+  ExerciseMuscleItem,
+  ExerciseProgressionItem,
+  ExerciseRegressionItem,
+  ExerciseTagItem,
   isExerciseEditorDirty,
   validateExerciseEditor,
 } from '@/lib/exerciseEditor';
+import { ExerciseRelationSections } from '@/components/ExerciseRelationSections';
 
 interface ExerciseRow {
   id: string;
@@ -45,29 +52,6 @@ type LoadState = 'loading' | 'ready' | 'not-found' | 'denied' | 'error';
 const INPUT_CLASS = 'w-full rounded-md border border-white/10 bg-[#161C28] px-3 py-2 text-sm text-white outline-none focus:border-blue-500';
 const TEXTAREA_CLASS = `${INPUT_CLASS} min-h-28 resize-y`;
 
-function rowToForm(row: ExerciseRow): ExerciseEditorForm {
-  return {
-    name: row.name,
-    primaryMuscle: row.primary_muscle ?? '',
-    equipment: row.equipment ?? '',
-    category: row.category ?? '',
-    movementPattern: row.movement_pattern ?? '',
-    difficulty: row.difficulty ?? '',
-    unilateral: row.unilateral ?? false,
-    setupInstructions: row.setup_instructions ?? '',
-    executionInstructions: row.execution_instructions ?? '',
-    breathing: row.breathing ?? '',
-    coachingCues: (row.coaching_cues ?? []).join('\n'),
-    commonMistakes: (row.common_mistakes ?? []).join('\n'),
-    safetyNotes: row.safety_notes ?? '',
-    defaultSets: String(row.default_sets ?? 3),
-    defaultReps: row.default_reps == null ? '' : String(row.default_reps),
-    defaultRepsPrescription: row.default_reps_prescription ?? '',
-    tempo: row.tempo ?? '',
-    archived: Boolean(row.archived_at),
-  };
-}
-
 export default function ExerciseEditorPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -76,6 +60,7 @@ export default function ExerciseEditorPage() {
   const [exercise, setExercise] = useState<ExerciseRow | null>(null);
   const [initialForm, setInitialForm] = useState<ExerciseEditorForm | null>(null);
   const [form, setForm] = useState<ExerciseEditorForm | null>(null);
+  const [derivedRelations, setDerivedRelations] = useState<DerivedRelationItem[]>([]);
   const [errors, setErrors] = useState<ExerciseEditorErrors>({});
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -95,7 +80,18 @@ export default function ExerciseEditorPage() {
       return;
     }
 
-    const [{ data: profile, error: profileError }, { data: row, error: exerciseError }] = await Promise.all([
+    const [
+      { data: profile, error: profileError },
+      { data: row, error: exerciseError },
+      { data: aliasesData },
+      { data: tagsData },
+      { data: musclesData },
+      { data: altsData },
+      { data: progsData },
+      { data: regsData },
+      { data: derivedProgsData },
+      { data: derivedRegsData },
+    ] = await Promise.all([
       supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
       supabase.from('exercises').select([
         'id', 'name', 'primary_muscle', 'equipment', 'category', 'movement_pattern', 'difficulty',
@@ -104,6 +100,15 @@ export default function ExerciseEditorPage() {
         'default_reps_prescription', 'tempo', 'source_type', 'source', 'source_id',
         'created_by_coach_id', 'license', 'archived_at',
       ].join(',')).eq('id', exerciseId).maybeSingle(),
+      supabase.from('exercise_aliases').select('id, alias').eq('exercise_id', exerciseId),
+      supabase.from('exercise_tags').select('id, tag, tag_type').eq('exercise_id', exerciseId),
+      supabase.from('exercise_muscles').select('id, muscle, role').eq('exercise_id', exerciseId),
+      supabase.from('exercise_alternatives').select('id, alternative_exercise_id, reason, alternative:exercises!exercise_alternatives_alternative_exercise_id_fkey(id, name, slug)').eq('exercise_id', exerciseId),
+      supabase.from('exercise_progressions').select('id, progression_exercise_id, difficulty_delta, progression:exercises!exercise_progressions_progression_exercise_id_fkey(id, name, slug)').eq('exercise_id', exerciseId),
+      supabase.from('exercise_regressions').select('id, regression_exercise_id, difficulty_delta, regression:exercises!exercise_regressions_regression_exercise_id_fkey(id, name, slug)').eq('exercise_id', exerciseId),
+      // Derived relations
+      supabase.from('exercise_regressions').select('exercise_id, exercise:exercises!exercise_regressions_exercise_id_fkey(id, name, slug)').eq('regression_exercise_id', exerciseId),
+      supabase.from('exercise_progressions').select('exercise_id, exercise:exercises!exercise_progressions_exercise_id_fkey(id, name, slug)').eq('progression_exercise_id', exerciseId),
     ]);
 
     if (profileError || exerciseError) {
@@ -124,7 +129,91 @@ export default function ExerciseEditorPage() {
       return;
     }
 
-    const nextForm = rowToForm(typedRow);
+    // Process aliases
+    const aliases = (aliasesData || []).map((a: any) => a.alias);
+
+    // Process tags
+    const tags: ExerciseTagItem[] = (tagsData || []).map((t: any) => ({
+      id: t.id,
+      tag: t.tag,
+      tagType: t.tag_type,
+    }));
+
+    // Process muscles
+    const muscles: ExerciseMuscleItem[] = (musclesData || []).map((m: any) => ({
+      id: m.id,
+      muscle: m.muscle,
+      role: m.role,
+    }));
+
+    // Process alternatives
+    const alternatives: ExerciseAlternativeItem[] = (altsData || []).map((a: any) => ({
+      id: a.id,
+      alternativeExerciseId: a.alternative_exercise_id,
+      name: a.alternative?.name || a.alternative_exercise_id,
+      reason: a.reason || '',
+    }));
+
+    // Process progressions
+    const progressions: ExerciseProgressionItem[] = (progsData || []).map((p: any) => ({
+      id: p.id,
+      progressionExerciseId: p.progression_exercise_id,
+      name: p.progression?.name || p.progression_exercise_id,
+      difficultyDelta: p.difficulty_delta ?? 1,
+    }));
+
+    // Process regressions
+    const regressions: ExerciseRegressionItem[] = (regsData || []).map((r: any) => ({
+      id: r.id,
+      regressionExerciseId: r.regression_exercise_id,
+      name: r.regression?.name || r.regression_exercise_id,
+      difficultyDelta: r.difficulty_delta ?? -1,
+    }));
+
+    // Process derived inverse relations
+    const derived: DerivedRelationItem[] = [
+      ...(derivedProgsData || []).map((dp: any) => ({
+        exerciseId: dp.exercise_id,
+        name: dp.exercise?.name || dp.exercise_id,
+        slug: dp.exercise?.slug,
+        relationship: 'derived_progression' as const,
+      })),
+      ...(derivedRegsData || []).map((dr: any) => ({
+        exerciseId: dr.exercise_id,
+        name: dr.exercise?.name || dr.exercise_id,
+        slug: dr.exercise?.slug,
+        relationship: 'derived_regression' as const,
+      })),
+    ];
+    setDerivedRelations(derived);
+
+    const nextForm: ExerciseEditorForm = {
+      name: typedRow.name,
+      primaryMuscle: typedRow.primary_muscle ?? '',
+      equipment: typedRow.equipment ?? '',
+      category: typedRow.category ?? '',
+      movementPattern: typedRow.movement_pattern ?? '',
+      difficulty: typedRow.difficulty ?? '',
+      unilateral: typedRow.unilateral ?? false,
+      setupInstructions: typedRow.setup_instructions ?? '',
+      executionInstructions: typedRow.execution_instructions ?? '',
+      breathing: typedRow.breathing ?? '',
+      coachingCues: (typedRow.coaching_cues ?? []).join('\n'),
+      commonMistakes: (typedRow.common_mistakes ?? []).join('\n'),
+      safetyNotes: typedRow.safety_notes ?? '',
+      defaultSets: String(typedRow.default_sets ?? 3),
+      defaultReps: typedRow.default_reps == null ? '' : String(typedRow.default_reps),
+      defaultRepsPrescription: typedRow.default_reps_prescription ?? '',
+      tempo: typedRow.tempo ?? '',
+      archived: Boolean(typedRow.archived_at),
+      aliases,
+      tags,
+      muscles,
+      alternatives,
+      progressions,
+      regressions,
+    };
+
     setExercise(typedRow);
     setInitialForm(nextForm);
     setForm(nextForm);
@@ -156,7 +245,7 @@ export default function ExerciseEditorPage() {
   async function save(nextArchived = form?.archived ?? false) {
     if (!form || saving) return;
     const nextForm = { ...form, archived: nextArchived };
-    const nextErrors = validateExerciseEditor(nextForm);
+    const nextErrors = validateExerciseEditor(nextForm, exerciseId);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       setMessage({ kind: 'error', text: 'Correct the highlighted fields before saving.' });
@@ -165,7 +254,8 @@ export default function ExerciseEditorPage() {
 
     setSaving(true);
     setMessage(null);
-    const { error } = await supabase.rpc('save_exercise_editor', buildExerciseEditorRpcArgs(exerciseId, nextForm));
+    const payload = buildExerciseEditorV2Payload(exerciseId, nextForm);
+    const { error } = await supabase.rpc('save_exercise_editor_v2', { p_payload: payload });
     if (error) {
       setMessage({ kind: 'error', text: error.message || 'Exercise changes were not saved.' });
       setSaving(false);
@@ -233,6 +323,15 @@ export default function ExerciseEditorPage() {
           <Field label="Display prescription"><input className={INPUT_CLASS} placeholder="8-12 or 30-60 sec" value={form.defaultRepsPrescription} onChange={(e) => update('defaultRepsPrescription', e.target.value)} /></Field>
           <Field label="Tempo" error={errors.tempo}><input className={INPUT_CLASS} placeholder="2-0-2-0" value={form.tempo} onChange={(e) => update('tempo', e.target.value)} /></Field>
         </div></section>
+
+        {/* Phase B Relational & Taxonomy Sections */}
+        <ExerciseRelationSections
+          form={form}
+          errors={errors}
+          currentExerciseId={exerciseId}
+          derivedRelations={derivedRelations}
+          onChange={update}
+        />
       </form>
     </main>
   );
