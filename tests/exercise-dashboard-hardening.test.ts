@@ -7,6 +7,7 @@ import {
   type ExerciseMediaRecord,
 } from '../apps/coach-dashboard/lib/exerciseMedia';
 import { canEditExercise } from '../apps/coach-dashboard/lib/exerciseEditor';
+import { buildExerciseFilterOptions } from '../apps/coach-dashboard/lib/exerciseCatalogFilters';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 const middleware = read('apps/coach-dashboard/middleware.ts');
@@ -58,12 +59,36 @@ describe('Exercise Dashboard catalog filters', () => {
     }
   });
 
-  it('loads canonical taxonomy values instead of sending friendly labels as database values', () => {
-    expect(library).toContain("from('exercise_taxonomy')");
-    expect(library).toContain("['category', 'muscle', 'equipment']");
+  it('derives filter choices from the exact exercise columns being queried', () => {
+    expect(library).toContain(".select('id, category, primary_muscle, target_muscle, equipment, difficulty', { count: 'exact' })");
+    expect(library).not.toContain("from('exercise_taxonomy')");
     expect(library).toContain('value={value}');
     expect(library).not.toContain('<option value="air bike">Air Bike</option>');
-    expect(library).toContain('<option value="beginner">Beginner</option>');
+    expect(library).toContain("query.eq('category', categoryFilter)");
+    expect(library).toContain("query.eq('equipment', equipmentFilter)");
+    expect(library).toContain("query.eq('difficulty', difficultyFilter)");
+  });
+
+  it('offers the representative Back Squat filter values without inventing Air Bike', () => {
+    const options = buildExerciseFilterOptions([{
+      id: 'back-squat', category: 'legs', primary_muscle: 'quadriceps', target_muscle: 'quadriceps',
+      equipment: 'barbell', difficulty: 'beginner',
+    }, {
+      id: 'bike', category: 'cardio', primary_muscle: 'cardiovascular system', target_muscle: null,
+      equipment: 'cardio ergometer', difficulty: 'intermediate',
+    }]);
+    expect(options).toEqual({
+      category: ['cardio', 'legs'],
+      muscle: ['cardiovascular system', 'quadriceps'],
+      equipment: ['barbell', 'cardio ergometer'],
+      difficulty: ['beginner', 'intermediate'],
+    });
+    expect(options.equipment).not.toContain('air bike');
+  });
+
+  it('applies muscle filtering even when a search query is active', () => {
+    expect(library).not.toContain("} else if (muscleGroupFilter !== 'all') {");
+    expect(library).toContain("if (muscleGroupFilter !== 'all') {");
   });
 
   it('loads more than 1,000 matching exercises in bounded pages', async () => {
@@ -111,6 +136,13 @@ describe('Exercise Dashboard media publication semantics', () => {
 });
 
 describe('Exercise Editor relation and role safety', () => {
+  it('guards relation edits through in-app, unload, and browser-back navigation', () => {
+    expect(editor).toContain("window.addEventListener('beforeunload', warn)");
+    expect(editor).toContain("window.addEventListener('popstate', guardBrowserBack)");
+    expect(editor).toContain("window.confirm('Discard your unsaved exercise changes?')");
+    expect(editor).toContain('copyExerciseEditorForm(nextForm)');
+  });
+
   it('surfaces every relation query error before constructing a savable form', () => {
     for (const error of ['aliasesError', 'tagsError', 'musclesError', 'alternativesError', 'progressionsError', 'regressionsError']) {
       expect(editor).toContain(error);

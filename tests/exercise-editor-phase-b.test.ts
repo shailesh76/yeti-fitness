@@ -5,6 +5,7 @@ import {
   buildExerciseEditorRpcArgs,
   buildExerciseEditorV2Payload,
   canEditExercise,
+  copyExerciseEditorForm,
   ExerciseEditorForm,
   isExerciseEditorDirty,
   validateExerciseEditor,
@@ -243,6 +244,24 @@ describe('Exercise Editor Phase B: Form Validation & Payload Building', () => {
 
     // Regressions change
     expect(isExerciseEditorDirty(baseForm, { ...baseForm, regressions: [] })).toBe(true);
+  });
+
+  it('keeps the saved relation baseline isolated and resets it after save', () => {
+    const baseline = copyExerciseEditorForm(baseForm);
+    const edited = copyExerciseEditorForm(baseForm);
+    edited.aliases.splice(0, 1);
+    edited.regressions.length = 0;
+    edited.muscles[0] = { ...edited.muscles[0], muscle: 'glutes' };
+
+    expect(isExerciseEditorDirty(baseline, edited)).toBe(true);
+    expect(baseline.aliases).toEqual(baseForm.aliases);
+    expect(baseline.regressions).toEqual(baseForm.regressions);
+
+    const savedBaseline = copyExerciseEditorForm(edited);
+    expect(isExerciseEditorDirty(savedBaseline, edited)).toBe(false);
+
+    const reverted = copyExerciseEditorForm(baseline);
+    expect(isExerciseEditorDirty(baseline, reverted)).toBe(false);
   });
 });
 

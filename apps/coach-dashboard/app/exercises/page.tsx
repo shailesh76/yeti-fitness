@@ -10,6 +10,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
 import { fetchAllExerciseMediaRows, fetchAllExerciseRows, matchesExerciseMediaFilter, type ExerciseMediaCompletenessFilter, type ExerciseMediaRecord } from '@/lib/exerciseMedia';
+import { buildExerciseFilterOptions, type ExerciseFilterOptions, type ExerciseFilterSourceRow } from '@/lib/exerciseCatalogFilters';
 import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 
 interface DbExercise {
@@ -61,13 +62,7 @@ interface ExerciseMuscle {
 
 type CatalogAuthState = 'checking' | 'authenticated' | 'unauthenticated';
 
-interface ExerciseTaxonomyOptions {
-  category: string[];
-  muscle: string[];
-  equipment: string[];
-}
-
-const EMPTY_TAXONOMY: ExerciseTaxonomyOptions = { category: [], muscle: [], equipment: [] };
+const EMPTY_TAXONOMY: ExerciseFilterOptions = { category: [], muscle: [], equipment: [], difficulty: [] };
 
 function taxonomyLabel(value: string): string {
   return value.replace(/\b\w/g, (character) => character.toUpperCase());
@@ -96,7 +91,7 @@ export default function ExerciseLibraryPage() {
   const [canManageMedia, setCanManageMedia] = useState(false);
   const [editorIdentity, setEditorIdentity] = useState<{ userId: string; role: string } | null>(null);
   const [authState, setAuthState] = useState<CatalogAuthState>('checking');
-  const [taxonomy, setTaxonomy] = useState<ExerciseTaxonomyOptions>(EMPTY_TAXONOMY);
+  const [taxonomy, setTaxonomy] = useState<ExerciseFilterOptions>(EMPTY_TAXONOMY);
   const [taxonomyError, setTaxonomyError] = useState(false);
   const [detailTab, setDetailTab] = useState<'overview' | 'instructions' | 'muscles' | 'variations'>('overview');
 
@@ -156,9 +151,17 @@ export default function ExerciseLibraryPage() {
       }
 
       setAuthState('authenticated');
-      const [{ data: profile, error: profileError }, { data: taxonomyRows, error: taxonomyLoadError }] = await Promise.all([
+      const [{ data: profile, error: profileError }, filterOptionsResult] = await Promise.all([
         supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
-        supabase.from('exercise_taxonomy').select('kind, value').in('kind', ['category', 'muscle', 'equipment']).order('value'),
+        fetchAllExerciseRows<ExerciseFilterSourceRow>(async (from, to) => {
+          const { data, count, error } = await supabase
+            .from('exercises')
+            .select('id, category, primary_muscle, target_muscle, equipment, difficulty', { count: 'exact' })
+            .is('archived_at', null)
+            .range(from, to);
+          return { data: (data || []) as ExerciseFilterSourceRow[], count, error };
+        }).then(({ rows }) => ({ options: buildExerciseFilterOptions(rows), error: null }))
+          .catch((error: unknown) => ({ options: EMPTY_TAXONOMY, error })),
       ]);
       if (cancelled) return;
 
@@ -170,15 +173,10 @@ export default function ExerciseLibraryPage() {
         setEditorIdentity(null);
       }
 
-      if (taxonomyLoadError) {
+      if (filterOptionsResult.error) {
         setTaxonomyError(true);
       } else {
-        const grouped: ExerciseTaxonomyOptions = { category: [], muscle: [], equipment: [] };
-        for (const row of taxonomyRows ?? []) {
-          const kind = row.kind as keyof ExerciseTaxonomyOptions;
-          if (kind in grouped && row.value && !grouped[kind].includes(row.value)) grouped[kind].push(row.value);
-        }
-        setTaxonomy(grouped);
+        setTaxonomy(filterOptionsResult.options);
         setTaxonomyError(false);
       }
     }
@@ -224,19 +222,13 @@ export default function ExerciseLibraryPage() {
       }
 
       // Apply Category Filter
-      if (categoryFilter !== 'all') {
-        query = query.ilike('category', `%${categoryFilter}%`);
-      }
+      if (categoryFilter !== 'all') query = query.eq('category', categoryFilter);
 
       // Apply Equipment Filter
-      if (equipmentFilter !== 'all') {
-        query = query.ilike('equipment', `%${equipmentFilter}%`);
-      }
+      if (equipmentFilter !== 'all') query = query.eq('equipment', equipmentFilter);
 
       // Apply Difficulty Filter
-      if (difficultyFilter !== 'all') {
-        query = query.ilike('difficulty', `%${difficultyFilter}%`);
-      }
+      if (difficultyFilter !== 'all') query = query.eq('difficulty', difficultyFilter);
 
       // Apply Search Query (Combines Name, Slug, Equipment, Primary Muscle, Target Muscle, and Alias IDs)
       if (debouncedSearch.trim()) {
@@ -256,7 +248,9 @@ export default function ExerciseLibraryPage() {
         }
 
         query = query.or(orConditions.join(','));
-      } else if (muscleGroupFilter !== 'all') {
+      }
+
+      if (muscleGroupFilter !== 'all') {
         query = query.or(`primary_muscle.ilike.%${muscleGroupFilter}%,target_muscle.ilike.%${muscleGroupFilter}%`);
       }
 
@@ -571,9 +565,7 @@ export default function ExerciseLibraryPage() {
               className="w-full bg-[#161C28] border border-white/10 rounded-xl px-2.5 py-1.5 text-white focus:outline-none"
             >
               <option value="all">All Difficulties</option>
-              <option value="beginner">Beginner</option>
-              <option value="intermediate">Intermediate</option>
-              <option value="advanced">Advanced</option>
+              {taxonomy.difficulty.map((value) => <option key={value} value={value}>{taxonomyLabel(value)}</option>)}
             </select>
           </div>
 

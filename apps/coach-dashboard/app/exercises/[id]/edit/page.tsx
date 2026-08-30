@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import {
   buildExerciseEditorV2Payload,
   canEditExercise,
+  copyExerciseEditorForm,
   DerivedRelationItem,
   ExerciseAlternativeItem,
   ExerciseEditorErrors,
@@ -225,7 +226,7 @@ export default function ExerciseEditorPage() {
 
     setExercise(typedRow);
     setInitialForm(nextForm);
-    setForm(nextForm);
+    setForm(copyExerciseEditorForm(nextForm));
     setLoadState('ready');
   }, [exerciseId]);
 
@@ -233,12 +234,22 @@ export default function ExerciseEditorPage() {
 
   useEffect(() => {
     if (!dirty) return;
+    const editorUrl = window.location.href;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
+    const guardBrowserBack = () => {
+      if (!window.confirm('Discard your unsaved exercise changes?')) {
+        window.history.pushState(null, '', editorUrl);
+      }
+    };
     window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
+    window.addEventListener('popstate', guardBrowserBack);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      window.removeEventListener('popstate', guardBrowserBack);
+    };
   }, [dirty]);
 
   function update<K extends keyof ExerciseEditorForm>(key: K, value: ExerciseEditorForm[K]) {
@@ -271,8 +282,8 @@ export default function ExerciseEditorPage() {
       return;
     }
 
-    setForm(nextForm);
     setInitialForm(nextForm);
+    setForm(copyExerciseEditorForm(nextForm));
     setMessage({ kind: 'success', text: nextArchived ? 'Exercise archived.' : form.archived ? 'Exercise restored.' : 'Exercise saved.' });
     setSaving(false);
   }

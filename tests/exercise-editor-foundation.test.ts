@@ -123,7 +123,7 @@ describe('Exercise Editor Phase A form and atomic save', () => {
   it('archives active rows without hiding ID-based historical references', () => {
     expect(migration).toContain('ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NULL');
     expect(migration).toContain('COALESCE(archived_at, pg_catalog.now())');
-    expect(library.match(/\.is\('archived_at', null\)/g)).toHaveLength(2);
+    expect(library.match(/\.is\('archived_at', null\)/g)).toHaveLength(3);
     expect(migration).not.toMatch(/DELETE FROM public\.exercises/);
     expect(migration).not.toMatch(/CREATE POLICY[^;]+archived_at/s);
   });

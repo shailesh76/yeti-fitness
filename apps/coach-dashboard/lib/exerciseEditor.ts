@@ -301,3 +301,15 @@ export function buildExerciseEditorV2Payload(exerciseId: string | null, form: Ex
 export function isExerciseEditorDirty(initial: ExerciseEditorForm, current: ExerciseEditorForm): boolean {
   return JSON.stringify(initial) !== JSON.stringify(current);
 }
+
+export function copyExerciseEditorForm(form: ExerciseEditorForm): ExerciseEditorForm {
+  return {
+    ...form,
+    aliases: [...form.aliases],
+    tags: form.tags.map((tag) => ({ ...tag })),
+    muscles: form.muscles.map((muscle) => ({ ...muscle })),
+    alternatives: form.alternatives.map((alternative) => ({ ...alternative })),
+    progressions: form.progressions.map((progression) => ({ ...progression })),
+    regressions: form.regressions.map((regression) => ({ ...regression })),
+  };
+}
