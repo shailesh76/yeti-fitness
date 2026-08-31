@@ -298,8 +298,50 @@ export function buildExerciseEditorV2Payload(exerciseId: string | null, form: Ex
   };
 }
 
+function sortSemanticRows<T>(rows: T[]): T[] {
+  return rows.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
+function normalizeExerciseEditorForDirtyComparison(form: ExerciseEditorForm) {
+  const {
+    aliases,
+    tags,
+    muscles,
+    alternatives,
+    progressions,
+    regressions,
+    ...coreFields
+  } = form;
+
+  return {
+    ...coreFields,
+    aliases: (aliases || []).map((alias) => alias.trim()).sort(),
+    tags: sortSemanticRows((tags || []).map((tag) => ({
+      tag: tag.tag.trim(),
+      tagType: tag.tagType || 'coach',
+    }))),
+    muscles: sortSemanticRows((muscles || []).map((muscle) => ({
+      muscle: muscle.muscle.trim(),
+      role: muscle.role,
+    }))),
+    alternatives: sortSemanticRows((alternatives || []).map((alternative) => ({
+      alternativeExerciseId: alternative.alternativeExerciseId,
+      reason: optionalText(alternative.reason || ''),
+    }))),
+    progressions: sortSemanticRows((progressions || []).map((progression) => ({
+      progressionExerciseId: progression.progressionExerciseId,
+      difficultyDelta: progression.difficultyDelta ?? 1,
+    }))),
+    regressions: sortSemanticRows((regressions || []).map((regression) => ({
+      regressionExerciseId: regression.regressionExerciseId,
+      difficultyDelta: regression.difficultyDelta ?? -1,
+    }))),
+  };
+}
+
 export function isExerciseEditorDirty(initial: ExerciseEditorForm, current: ExerciseEditorForm): boolean {
-  return JSON.stringify(initial) !== JSON.stringify(current);
+  return JSON.stringify(normalizeExerciseEditorForDirtyComparison(initial))
+    !== JSON.stringify(normalizeExerciseEditorForDirtyComparison(current));
 }
 
 export function copyExerciseEditorForm(form: ExerciseEditorForm): ExerciseEditorForm {

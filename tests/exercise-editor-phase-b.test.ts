@@ -263,6 +263,69 @@ describe('Exercise Editor Phase B: Form Validation & Payload Building', () => {
     const reverted = copyExerciseEditorForm(baseline);
     expect(isExerciseEditorDirty(baseline, reverted)).toBe(false);
   });
+
+  it.each([
+    ['alias', (form: ExerciseEditorForm) => {
+      form.aliases[0] = `${form.aliases[0]} `;
+      form.aliases.reverse();
+    }],
+    ['tag', (form: ExerciseEditorForm) => {
+      form.tags[0] = { id: 'replacement-tag-row', tag: form.tags[0].tag, tagType: form.tags[0].tagType };
+      form.tags.reverse();
+    }],
+    ['muscle', (form: ExerciseEditorForm) => {
+      form.muscles[1] = { id: 'replacement-muscle-row', muscle: form.muscles[1].muscle, role: form.muscles[1].role };
+      form.muscles.reverse();
+    }],
+    ['alternative', (form: ExerciseEditorForm) => {
+      form.alternatives[0] = {
+        id: 'replacement-alternative-row',
+        alternativeExerciseId: form.alternatives[0].alternativeExerciseId,
+        name: 'Refreshed display name',
+        reason: form.alternatives[0].reason,
+      };
+    }],
+    ['progression', (form: ExerciseEditorForm) => {
+      form.progressions[0] = {
+        id: 'replacement-progression-row',
+        progressionExerciseId: form.progressions[0].progressionExerciseId,
+        name: 'Refreshed display name',
+        difficultyDelta: form.progressions[0].difficultyDelta,
+      };
+    }],
+    ['regression', (form: ExerciseEditorForm) => {
+      form.regressions[0] = {
+        id: 'replacement-regression-row',
+        regressionExerciseId: form.regressions[0].regressionExerciseId,
+        name: 'Refreshed display name',
+        difficultyDelta: form.regressions[0].difficultyDelta,
+      };
+    }],
+  ])('treats a removed and re-added semantically identical %s relation as clean', (_label, replaceRelation) => {
+    const loaded = copyExerciseEditorForm(baseForm);
+    loaded.tags.forEach((tag, index) => { tag.id = `tag-row-${index}`; });
+    loaded.muscles.forEach((muscle, index) => { muscle.id = `muscle-row-${index}`; });
+    loaded.alternatives.forEach((alternative, index) => { alternative.id = `alternative-row-${index}`; });
+    loaded.progressions.forEach((progression, index) => { progression.id = `progression-row-${index}`; });
+    loaded.regressions.forEach((regression, index) => { regression.id = `regression-row-${index}`; });
+
+    const reAdded = copyExerciseEditorForm(loaded);
+    replaceRelation(reAdded);
+
+    expect(isExerciseEditorDirty(loaded, reAdded)).toBe(false);
+  });
+
+  it.each([
+    ['muscle role', (form: ExerciseEditorForm) => { form.muscles[1].role = 'stabilizer'; }],
+    ['alternative reason', (form: ExerciseEditorForm) => { form.alternatives[0].reason = 'Different equipment'; }],
+    ['progression delta', (form: ExerciseEditorForm) => { form.progressions[0].difficultyDelta = 2; }],
+    ['regression delta', (form: ExerciseEditorForm) => { form.regressions[0].difficultyDelta = -2; }],
+    ['relation membership', (form: ExerciseEditorForm) => { form.aliases.push('Added alias'); }],
+  ])('keeps a genuine %s change dirty', (_label, changeRelation) => {
+    const changed = copyExerciseEditorForm(baseForm);
+    changeRelation(changed);
+    expect(isExerciseEditorDirty(baseForm, changed)).toBe(true);
+  });
 });
 
 describe('Exercise Editor Phase B: UI Integration', () => {
