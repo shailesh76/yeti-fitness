@@ -19,9 +19,17 @@ export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   console.log(`[Middleware] Creating server client...`);
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseKey) {
+    throw new Error('Supabase client key is missing. Configure NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://drkurkhsmjuixccdblrl.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRya3Vya2hzbWp1aXhjY2RibHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0NjUwNjYsImV4cCI6MjA5ODA0MTA2Nn0.pb7ee-RwIDgLJQ91RihHUgPycg22ZnAwQwD5smRuMx8',
+    supabaseKey,
     {
       cookies: {
         getAll() {

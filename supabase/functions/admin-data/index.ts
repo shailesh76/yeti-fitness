@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createAnonClient, createServiceRoleClient } from '../_shared/supabaseClient.ts'
 import { authorizeAdminDataAction, dispatchAuthorizedAdminAction } from './authorization.ts'
 
 const corsHeaders = {
@@ -10,11 +10,7 @@ const corsHeaders = {
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
 async function verifyAdmin(authHeader: string) {
-  const anonClient = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-    { global: { headers: { Authorization: authHeader } } }
-  )
+  const anonClient = createAnonClient(authHeader)
   const { data: { user }, error } = await anonClient.auth.getUser()
   if (error || !user) return { user: null, role: null, error: 'Unauthenticated' }
 
@@ -29,11 +25,7 @@ async function verifyAdmin(authHeader: string) {
 }
 
 function serviceClient() {
-  return createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    { auth: { persistSession: false } }
-  )
+  return createServiceRoleClient()
 }
 
 function err(msg: string, status = 403) {

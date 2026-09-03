@@ -1,13 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { S3Client, GetObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.535.0"
 import { getSignedUrl } from "https://esm.sh/@aws-sdk/s3-request-presigner@3.535.0"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8"
+import { createAnonClient, createServiceRoleClient } from "../_shared/supabaseClient.ts"
 import { createGetR2SignedUrlHandler } from './handler.ts'
 
-const url = Deno.env.get('SUPABASE_URL') ?? ''
-const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-const service = createClient(url, serviceKey, { auth: { persistSession: false } })
+const service = createServiceRoleClient()
 
 function r2Client() {
   const accessKeyId = Deno.env.get('R2_ACCESS_KEY_ID')
@@ -26,7 +23,7 @@ serve(createGetR2SignedUrlHandler({
     const authHeader = req.headers.get('Authorization') ?? req.headers.get('authorization')
     if (!authHeader) return null
     const token = authHeader.replace(/^Bearer\s+/i, '')
-    const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authHeader } } })
+    const authClient = createAnonClient(authHeader)
     const { data: { user }, error } = await authClient.auth.getUser(token || undefined)
     if (error || !user) return null
     const { data: profile, error: profileError } = await service.from('profiles').select('role').eq('id', user.id).maybeSingle()

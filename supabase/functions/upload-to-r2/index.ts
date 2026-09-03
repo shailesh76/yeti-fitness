@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { S3Client, PutObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.535.0"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8"
+import { createAnonClient } from '../_shared/supabaseClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,11 +23,7 @@ serve(async (req) => {
       })
     }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    const supabaseClient = createAnonClient(authHeader)
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
     if (authError || !user) {

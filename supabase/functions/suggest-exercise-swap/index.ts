@@ -2,7 +2,7 @@
 // Uses the dual-provider AI router (Groq llama-3.1-8b-instant Primary → Gemini 2.5 Flash Fallback).
 // Designed for ultra-fast (<1s) exercise alternative swaps when gym equipment is unavailable.
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createAnonClient, createServiceRoleClient } from "../_shared/supabaseClient.ts";
 import { AINotConfiguredError, executeAiTask, sanitizeAthleteErrorMessage } from "../_shared/ai/index.ts";
 
 const corsHeaders = {
@@ -21,11 +21,7 @@ serve(async (req) => {
     // ── 1. Auth ────────────────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabaseClient = createAnonClient(authHeader);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token || undefined);
     if (authError || !user) {
@@ -34,12 +30,7 @@ serve(async (req) => {
       });
     }
 
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabaseServiceRole = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      serviceRoleKey,
-      { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } }
-    );
+    const supabaseServiceRole = createServiceRoleClient();
 
     // ── 2. Validate input ──────────────────────────────────────────────────
     const { originalExercise, availableEquipment } = await req.json();

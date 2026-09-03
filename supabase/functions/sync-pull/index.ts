@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createAnonClient } from '../_shared/supabaseClient.ts'
 import { mapExerciseForPull } from './exerciseMapping.ts'
 
 const corsHeaders = {
@@ -32,11 +32,7 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || ''
     const token = authHeader.replace(/^Bearer\s+/i, '')
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    const supabaseClient = createAnonClient(authHeader)
 
     const { data: { user } } = await supabaseClient.auth.getUser(token || undefined)
     if (!user) throw new Error("Unauthorized")

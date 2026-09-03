@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createAnonClient, createServiceRoleClient } from "../_shared/supabaseClient.ts";
 import { AINotConfiguredError, AllProvidersFailedError, generateChat, healthCheck, checkProviderCapacity, ProviderAttemptLog, summarizeFallbackReason } from "../_shared/ai/index.ts";
 import { classifyIntentWithHistory, classifySafetySignal, CoachIntent } from "../_shared/ai/intent.ts";
 import { parsePlanEdit, PlanEditAction, PlanEditRequest } from "../_shared/ai/planEdit.ts";
@@ -609,10 +609,7 @@ serve(async (req) => {
     // 1. Auth ------------------------------------------------------------------
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } },
-    );
+    const supabaseClient = createAnonClient(authHeader);
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token || undefined);
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -633,11 +630,7 @@ serve(async (req) => {
       });
     }
 
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabaseServiceRole = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey,
-      { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } },
-    );
+    const supabaseServiceRole = createServiceRoleClient();
 
     const reqBody = await req.json();
     const { message, context, messageHistory, conversationId, action, proposalId } = reqBody;

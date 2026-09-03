@@ -10,9 +10,17 @@ export async function GET(request: NextRequest) {
   if (code) {
     const response = NextResponse.redirect(`${origin}${next}`);
 
+    const supabaseKey =
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseKey) {
+      return NextResponse.redirect(`${origin}/login?error=auth_config_error`);
+    }
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      supabaseKey,
       {
         cookies: {
           getAll() {

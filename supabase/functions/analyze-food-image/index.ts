@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createAnonClient, createServiceRoleClient } from '../_shared/supabaseClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,11 +22,7 @@ serve(async (req) => {
       });
     }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabaseClient = createAnonClient(authHeader);
 
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) {
@@ -37,18 +33,7 @@ serve(async (req) => {
     }
 
     // Initialize service role client to check and log requests securely
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!serviceRoleKey) {
-      return new Response(JSON.stringify({ error: 'System configuration error: service role key missing' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    const supabaseServiceRole = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      serviceRoleKey,
-      { auth: { persistSession: false } }
-    );
+    const supabaseServiceRole = createServiceRoleClient();
 
     // Resolve Entitlements
     const { data: entitlements } = await supabaseServiceRole

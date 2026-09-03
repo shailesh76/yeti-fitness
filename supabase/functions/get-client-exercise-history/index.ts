@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8"
+import { createAnonClient } from '../_shared/supabaseClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,11 +20,7 @@ serve(async (req) => {
       })
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    const supabase = createAnonClient(authHeader)
 
     // Authenticate the user session (either client themselves, or their coach)
     const { data: { user }, error: authError } = await supabase.auth.getUser()

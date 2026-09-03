@@ -10,7 +10,7 @@
 // provider code is the shared service import below; nothing here talks to
 // a provider directly.
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createAnonClient, createServiceRoleClient } from "../_shared/supabaseClient.ts";
 import { AINotConfiguredError, generateChat, sanitizeAthleteErrorMessage } from "../_shared/ai/index.ts";
 
 const corsHeaders = {
@@ -50,21 +50,12 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
+    const supabaseClient = createAnonClient(req.headers.get('Authorization')!);
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     if (authError || !user) throw new Error('Unauthorized');
 
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabaseServiceRole = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      serviceRoleKey,
-      { global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } } }
-    );
+    const supabaseServiceRole = createServiceRoleClient();
 
     const { exerciseId, guidanceType } = await req.json();
     if (!exerciseId || !GUIDANCE_TYPES.includes(guidanceType)) {
