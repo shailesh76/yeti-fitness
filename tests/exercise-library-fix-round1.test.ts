@@ -68,7 +68,15 @@ describe('Exercise Library Fix Round 1 Verification Tests', () => {
     const content = fs.readFileSync(scriptPath, 'utf-8');
 
     expect(content).not.toContain('coach-a@dude.com');
-    expect(content).not.toContain('password123');
+    // Reject any directly quoted non-empty literal assigned to a password property
+    const quotedPasswordLiteralPattern = /password:\s*['"][^'"]+['"]/i;
+    expect(quotedPasswordLiteralPattern.test(content)).toBe(false);
+
+    // Verify pattern discrimination: rejects quoted literals while allowing env/variable expressions
+    expect(quotedPasswordLiteralPattern.test("password: 'literal-secret'")).toBe(true);
+    expect(quotedPasswordLiteralPattern.test('password: "literal-secret"')).toBe(true);
+    expect(quotedPasswordLiteralPattern.test('password: process.env.TEST_PASSWORD')).toBe(false);
+    expect(quotedPasswordLiteralPattern.test('password: resolvedPasswordVariable')).toBe(false);
     expect(content).not.toContain('anon-key-placeholder');
     expect(content).toContain('SUPABASE_SERVICE_ROLE_KEY');
   });

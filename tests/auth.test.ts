@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { LIVE_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, anonClient, signInClient } from './helpers/live';
+﻿import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { LIVE_ENABLED, LIVE_ATHLETE1_AUTH_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, anonClient, signInClient } from './helpers/live';
 import { parseAuthTokensFromUrl } from '../apps/mobile/lib/authTokens';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -83,9 +83,10 @@ describe('parseAuthTokensFromUrl', () => {
 
 // ─── 3. Live: login / logout / session restore ──────────────────────────────
 
-const d = LIVE_ENABLED ? describe : describe.skip;
+const dLive = LIVE_ENABLED ? describe : describe.skip;
+const dAuth = LIVE_ATHLETE1_AUTH_ENABLED ? describe : describe.skip;
 
-d('Live auth — login, logout, session restore', () => {
+dAuth('Live auth — login, logout, session restore', () => {
   it('signs in with valid credentials and returns a matching session', async () => {
     const { client, userId } = await signInClient(TEST_USERS.athlete1.email, TEST_USERS.athlete1.password);
     const { data: { session } } = await client.auth.getSession();
@@ -131,7 +132,7 @@ d('Live auth — login, logout, session restore', () => {
 
 // ─── 4. Live: signup ─────────────────────────────────────────────────────────
 
-d('Live auth — signup', () => {
+dLive('Live auth — signup', () => {
   it('creates a new account for a fresh email', async () => {
     const client = anonClient();
     const email = `auth-test-signup-${Date.now()}@dude-test.com`;
@@ -156,7 +157,7 @@ d('Live auth — signup', () => {
 
 // ─── 5. Live: password reset ─────────────────────────────────────────────────
 
-d('Live auth — password reset', () => {
+dLive('Live auth — password reset', () => {
   // Deliberately NOT a seeded test account (athlete-1, athlete-2, ...): this
   // suite and manual verification call resetPasswordForEmail on those
   // accounts repeatedly across a session. Supabase's abuse protection escalates
@@ -192,7 +193,7 @@ d('Live auth — password reset', () => {
 // ─── 6. Live: OAuth request construction (Google) ────────────────────────────
 // Apple is not covered — deferred per user request; there is no code path to test.
 
-d('Live auth — Google OAuth request construction', () => {
+dLive('Live auth — Google OAuth request construction', () => {
   it('builds a correctly-formed authorize URL for the google provider', async () => {
     const client = anonClient();
     const { data, error } = await client.auth.signInWithOAuth({

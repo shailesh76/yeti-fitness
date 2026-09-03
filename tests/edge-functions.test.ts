@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { LIVE_ENABLED, SUPABASE_URL, ANON_KEY, TEST_USERS, signInClient } from './helpers/live';
+import { LIVE_ENABLED, LIVE_ATHLETE1_AUTH_ENABLED, SUPABASE_URL, ANON_KEY, TEST_USERS, signInClient } from './helpers/live';
 
 /**
  * Edge Function tests (Phase 1).
@@ -82,12 +82,12 @@ d('Edge function — auth contracts (live)', () => {
     return { status: res.status, text };
   }
 
-  it('ai-coach clears authentication for a real user', async () => {
+  (LIVE_ATHLETE1_AUTH_ENABLED ? it : it.skip)('ai-coach clears authentication for a real user', async () => {
     const { status } = await assertClearsAuth('ai-coach', { type: 'workout', message: 'hi', rawContext: {} });
     expect([200, 403, 503]).toContain(status);
   }, 20000);
 
-  it('exercise-guidance clears authentication for a real user', async () => {
+  (LIVE_ATHLETE1_AUTH_ENABLED ? it : it.skip)('exercise-guidance clears authentication for a real user', async () => {
     const { client } = await signInClient(TEST_USERS.athlete1.email, TEST_USERS.athlete1.password);
     const { data: exercise } = await client.from('exercises').select('id').limit(1).maybeSingle();
     expect(exercise?.id).toBeTruthy();

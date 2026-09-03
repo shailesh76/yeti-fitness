@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+﻿import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { LIVE_ENABLED, TEST_USERS, signInClient } from './helpers/live';
+import { LIVE_ENABLED, LIVE_ATHLETE1_AUTH_ENABLED, LIVE_COACH_AUTH_ENABLED, TEST_USERS, signInClient } from './helpers/live';
 
 const RUN_EDITOR_INTEGRATION = process.env.RUN_EXERCISE_EDITOR_INTEGRATION === '1';
 const COACH_TWO_EMAIL = process.env.YETI_TEST_COACH_2_EMAIL || '';

@@ -8,9 +8,17 @@ name: Live Verify (manual)
 # the always-on, side-effect-free default. Use this before a release or
 # whenever you want a real end-to-end confidence check.
 #
-# Requires two repo secrets (Settings → Secrets and variables → Actions):
+# Required repo secrets (Settings → Secrets and variables → Actions):
 #   EXPO_PUBLIC_SUPABASE_URL
 #   EXPO_PUBLIC_SUPABASE_ANON_KEY
+#   TEST_ATHLETE1_PASSWORD   -- password for athlete-1@dude.com
+#   TEST_ATHLETE2_PASSWORD   -- password for athlete-2@dude.com
+#   TEST_COACH_PASSWORD      -- password for coach-a@dude.com
+#
+# Optional repo secrets (override default test user emails if changed):
+#   TEST_ATHLETE1_EMAIL
+#   TEST_ATHLETE2_EMAIL
+#   TEST_COACH_EMAIL
 
 on:
   workflow_dispatch:
@@ -38,4 +46,10 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          TEST_ATHLETE1_PASSWORD: ${{ secrets.TEST_ATHLETE1_PASSWORD }}
+          TEST_ATHLETE2_PASSWORD: ${{ secrets.TEST_ATHLETE2_PASSWORD }}
+          TEST_COACH_PASSWORD: ${{ secrets.TEST_COACH_PASSWORD }}
+          TEST_ATHLETE1_EMAIL: ${{ secrets.TEST_ATHLETE1_EMAIL }}
+          TEST_ATHLETE2_EMAIL: ${{ secrets.TEST_ATHLETE2_EMAIL }}
+          TEST_COACH_EMAIL: ${{ secrets.TEST_COACH_EMAIL }}
         run: pnpm test

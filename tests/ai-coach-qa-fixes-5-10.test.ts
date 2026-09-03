@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+﻿import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'child_process';
 import { classifyIntent, detectWorkoutProgramGenerate, ENGINE_BACKED_INTENTS } from '../supabase/functions/_shared/ai/intent.ts';
 import {
@@ -7,7 +7,7 @@ import {
 } from '../supabase/functions/_shared/ai/coachSchema.ts';
 import { classifyMemory, normalizeMemoryCategory } from '../supabase/functions/_shared/ai/memoryClassifier.ts';
 import { detectNutritionTargetAsk, describeNutritionTarget } from '../supabase/functions/_shared/ai/nutritionTargetLookup.ts';
-import { LIVE_ENABLED, TEST_USERS, signInClient, columnExists } from './helpers/live';
+import { LIVE_ENABLED, LIVE_ATHLETE1_AUTH_ENABLED, TEST_USERS, signInClient, columnExists } from './helpers/live';
 
 // Regression suite for QA-audit Fixes 5-10. Two layers:
 //  - Pure-function tests (always run): the deterministic logic behind each fix —
@@ -567,7 +567,7 @@ describe('Paraphrases — Fix 8 (nutrition-target lookup detection)', () => {
 
 // ── LIVE tests — skip automatically without Supabase credentials ───────────
 
-const d = LIVE_ENABLED ? describe : describe.skip;
+const d = LIVE_ATHLETE1_AUTH_ENABLED ? describe : describe.skip;
 
 d('LIVE — ai_request_logs Fix-10 columns exist on the deployed schema', () => {
   const cols = ['latency_ms', 'conversation_id', 'engine', 'fallback_triggered', 'response_type', 'action_types'];

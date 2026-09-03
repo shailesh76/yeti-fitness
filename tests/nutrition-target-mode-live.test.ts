@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { LIVE_ENABLED, TEST_USERS, signInClient, columnExists, anonClient } from './helpers/live';
+﻿import { describe, it, expect, beforeAll } from 'vitest';
+import { LIVE_ENABLED, LIVE_AUTH_ENABLED, TEST_USERS, signInClient, columnExists, anonClient } from './helpers/live';
 import { calculateNutritionTargets } from '../apps/mobile/services/nutritionUtils';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-const d = LIVE_ENABLED ? describe : describe.skip;
+const d = (LIVE_AUTH_ENABLED) ? describe : describe.skip;
 
 d('Live Nutrition Server Provenance & Target Mode Contract', () => {
   let athlete1: { client: SupabaseClient; userId: string };

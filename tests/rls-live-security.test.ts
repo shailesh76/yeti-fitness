@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+﻿import { describe, it, expect, beforeAll } from 'vitest';
 import {
   LIVE_ENABLED,
+  LIVE_AUTH_ENABLED,
   RUN_MUTATING,
   TEST_USERS,
   anonClient,
@@ -17,7 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * behind RUN_MUTATING_TESTS=1 (activity_logs has no user DELETE policy, so it
  * cannot self-clean). Skipped entirely when Supabase env vars are unavailable.
  */
-const d = LIVE_ENABLED ? describe : describe.skip;
+const d = LIVE_AUTH_ENABLED ? describe : describe.skip;
 
 const USER_SCOPED: Array<[string, string]> = [
   ['activity_logs', 'user_id'],
@@ -86,7 +87,7 @@ d('Live RLS — isolation, coach scope, recursion, anon', () => {
 
 // TC-7: policy-presence — own-row INSERT must succeed (guards the exact activity_logs
 // drift we hit). Gated because activity_logs has no user DELETE policy to self-clean.
-(LIVE_ENABLED && RUN_MUTATING ? describe : describe.skip)(
+(LIVE_AUTH_ENABLED && RUN_MUTATING ? describe : describe.skip)(
   'Live RLS — policy presence (mutating)',
   () => {
     it('athlete can insert own activity_logs row', async () => {

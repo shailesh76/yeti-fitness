@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+﻿import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { execSync } from 'child_process';
-import { LIVE_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, signInClient } from './helpers/live';
+import { LIVE_ENABLED, LIVE_ATHLETE1_AUTH_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, signInClient } from './helpers/live';
 
 // Step 4 — deterministic explicit-memory operations must never call an LLM
 // provider. This is verified two ways:
@@ -13,7 +13,7 @@ import { LIVE_ENABLED, TEST_USERS, SUPABASE_URL, ANON_KEY, signInClient } from '
 // verification opportunity: these tests can only pass right now if the
 // deterministic short-circuit is actually bypassing the provider chain, not
 // merely by coincidence of a provider happening to be healthy.
-const d = LIVE_ENABLED ? describe : describe.skip;
+const d = LIVE_ATHLETE1_AUTH_ENABLED ? describe : describe.skip;
 
 function runSql(sql: string) {
   try {
