@@ -19,6 +19,9 @@
 -- structural change is the exercise-resolution predicate and transaction wrapper.
 -- This rewritten byte representation was NOT the exact SQL historically executed
 -- in production; production applied the UUID-based variant on 2026-08-17.
+-- The pre-rewrite file (fixed-UUID matching), as recorded at commit f4b636d and
+-- production-reconciled on 2026-09-06, had SHA-256:
+--   8b4b2e5d15bd72625a292c662b85acaa481130eff79d0bf791f455e937cd12a4
 -- ============================================================================
 
 BEGIN;

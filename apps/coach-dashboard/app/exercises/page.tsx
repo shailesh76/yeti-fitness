@@ -31,6 +31,8 @@ import { buildExerciseFilterOptions, type ExerciseFilterOptions, type ExerciseFi
 
 const EMPTY_TAXONOMY: ExerciseFilterOptions = { category: [], muscle: [], equipment: [], difficulty: [] };
 
+type CatalogAuthState = 'checking' | 'authenticated' | 'unauthenticated';
+
 function taxonomyLabel(value: string): string {
   return value.replace(/\b\w/g, (character) => character.toUpperCase());
 }
@@ -120,7 +122,7 @@ export default function ExerciseLibraryPage() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [taxonomy, setTaxonomy] = useState<ExerciseFilterOptions>(EMPTY_TAXONOMY);
   const [taxonomyError, setTaxonomyError] = useState(false);
-  const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
+  const [authState, setAuthState] = useState<CatalogAuthState>('checking');
   const [relationCountsMap, setRelationCountsMap] = useState<Map<string, ExerciseRelationCounts>>(new Map());
   const requestSequenceRef = React.useRef(0);
 
@@ -133,8 +135,9 @@ export default function ExerciseLibraryPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch Yeti total count on mount
+  // Fetch Yeti total count only after a live client session is confirmed.
   useEffect(() => {
+    if (authState !== 'authenticated') return;
     async function fetchCounts() {
       try {
         const { count } = await supabase
@@ -148,7 +151,7 @@ export default function ExerciseLibraryPage() {
       }
     }
     fetchCounts();
-  }, []);
+  }, [authState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -386,8 +389,8 @@ export default function ExerciseLibraryPage() {
   ]);
 
   useEffect(() => {
-    void fetchExercises();
-  }, [fetchExercises]);
+    if (authState === 'authenticated') void fetchExercises();
+  }, [authState, fetchExercises]);
 
   // Load Sub-details (Aliases, Muscles, Media) for Selected Exercise
   const loadExerciseSubDetails = useCallback(async () => {
@@ -431,11 +434,12 @@ export default function ExerciseLibraryPage() {
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
-  if (authState === 'loading') {
+  if (authState !== 'authenticated') {
     return (
-      <div className="p-8 max-w-7xl mx-auto space-y-6">
-        <div className="bg-[#111A23] border border-white/10 rounded-2xl p-12 text-center text-gray-400">
-          <p className="text-xs">Checking authorization...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#0B1117] px-6 text-center text-gray-100">
+        <div className="max-w-sm rounded-xl border border-white/10 bg-[#111A23] p-6">
+          <p className="text-sm font-bold text-white">{authState === 'checking' ? 'Checking your session' : 'Your session has expired'}</p>
+          <p className="mt-2 text-xs text-gray-400">{authState === 'checking' ? 'Confirming access to the exercise catalog.' : 'Redirecting you to sign in again.'}</p>
         </div>
       </div>
     );
