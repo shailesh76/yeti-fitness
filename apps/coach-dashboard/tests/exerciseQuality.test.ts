@@ -221,7 +221,7 @@ describe('Phase C Step 2: Catalog Quality Classification Model', () => {
         movement_pattern: 'horizontal push',
         // coaching missing
       };
-      expect(evaluateExerciseQuality(candidate2).status).toBe('needs_content');
+      expect(evaluateExerciseQuality(candidate2).status).toBe('reference_only');
 
       const candidate3: ExerciseQualityInput = {
         id: 'draft-coaching-only',
@@ -234,7 +234,7 @@ describe('Phase C Step 2: Catalog Quality Classification Model', () => {
         breathing: 'Inhale down, exhale up',
         // taxonomy missing
       };
-      expect(evaluateExerciseQuality(candidate3).status).toBe('needs_taxonomy');
+      expect(evaluateExerciseQuality(candidate3).status).toBe('reference_only');
 
       const candidate4: ExerciseQualityInput = {
         id: 'draft-no-tax-no-coach',
@@ -251,6 +251,36 @@ describe('Phase C Step 2: Catalog Quality Classification Model', () => {
       const res5 = evaluateExerciseQuality(candidate5);
       expect(res5.mediaReady).toBe(false);
       expect(res5.status).toBe('content_ready');
+    });
+
+    it('classifies a prescription-only first-party deficiency precisely', () => {
+      const result = evaluateExerciseQuality({ ...fixtureInclineDbTricepsExt, tempo: null });
+      expect(result.status).toBe('needs_prescription');
+      expect(result.taxonomyReady).toBe(true);
+      expect(result.coachingReady).toBe(true);
+      expect(result.rxReady).toBe(false);
+      expect(result.dimensions.prescription.missingFields).toEqual(['tempo']);
+    });
+
+    it('uses deterministic precedence while retaining every deficient dimension', () => {
+      const result = evaluateExerciseQuality({
+        ...fixtureInclineDbTricepsExt,
+        primary_muscle: null,
+        setup_instructions: null,
+        tempo: null,
+        alternatives: [],
+      });
+      expect(result.status).toBe('needs_taxonomy');
+      expect(result.taxonomyReady).toBe(false);
+      expect(result.coachingReady).toBe(false);
+      expect(result.rxReady).toBe(false);
+      expect(result.relationReady).toBe(false);
+    });
+
+    it('does not publish a complete custom exercise', () => {
+      const result = evaluateExerciseQuality({ ...fixtureInclineDbTricepsExt, source_type: 'custom' });
+      expect(result.status).toBe('reference_only');
+      expect(result.fullyPublished).toBe(false);
     });
   });
 
@@ -451,7 +481,8 @@ describe('Phase C Step 2: Catalog Quality Classification Model', () => {
         'fully_published',
         'content_ready',
         'needs_relations',
-        'needs_content',
+        'needs_coaching',
+        'needs_prescription',
         'needs_taxonomy',
         'reference_only',
       ] as const;

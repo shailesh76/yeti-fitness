@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft, Search, SlidersHorizontal, Star, Plus, 
@@ -10,9 +10,6 @@ import {
 import { supabase } from '@/lib/supabase';
 import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
 import {
-  fetchAllExerciseMediaRows,
-  fetchAllExerciseRows,
-  matchesExerciseMediaFilter,
   type ExerciseMediaCompletenessFilter,
   type ExerciseMediaRecord
 } from '@/lib/exerciseMedia';
@@ -20,12 +17,15 @@ import {
   evaluateExerciseQuality,
   getQualityStatusBadgeConfig,
   getQualityStatusLabel,
-  fetchExerciseRelationCounts,
-  matchesQualityFilter,
   type ExerciseQualityFilter,
-  type ExerciseQualityStatus,
   type ExerciseRelationCounts,
 } from '@/lib/exerciseQuality';
+import {
+  filterExerciseQualitySnapshot,
+  loadExerciseQualitySnapshot,
+  type ExerciseQualitySnapshot,
+  type QualityExercise,
+} from '@/lib/exerciseQualitySnapshot';
 import { getExercisePrescriptionDisplay } from '../../../../packages/types/src/exercisePrescription';
 import { buildExerciseFilterOptions, type ExerciseFilterOptions, type ExerciseFilterSourceRow } from '@/lib/exerciseCatalogFilters';
 
@@ -37,7 +37,7 @@ function taxonomyLabel(value: string): string {
   return value.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-interface DbExercise {
+interface DbExercise extends QualityExercise {
   id: string;
   name: string;
   slug: string;
@@ -70,7 +70,7 @@ interface DbExercise {
   media_status?: string;
   media_notes?: string;
   active?: boolean;
-  created_at?: string;
+  created_at?: string | null;
 }
 
 interface ExerciseAlias {
@@ -124,7 +124,8 @@ export default function ExerciseLibraryPage() {
   const [taxonomyError, setTaxonomyError] = useState(false);
   const [authState, setAuthState] = useState<CatalogAuthState>('checking');
   const [relationCountsMap, setRelationCountsMap] = useState<Map<string, ExerciseRelationCounts>>(new Map());
-  const requestSequenceRef = React.useRef(0);
+  const [qualitySnapshot, setQualitySnapshot] = useState<ExerciseQualitySnapshot | null>(null);
+  const [snapshotRevision, setSnapshotRevision] = useState(0);
 
   // Debounce search query input and reset pagination to page 1
   useEffect(() => {
@@ -134,24 +135,6 @@ export default function ExerciseLibraryPage() {
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  // Fetch Yeti total count only after a live client session is confirmed.
-  useEffect(() => {
-    if (authState !== 'authenticated') return;
-    async function fetchCounts() {
-      try {
-        const { count } = await supabase
-          .from('exercises')
-          .select('*', { count: 'exact', head: true })
-          .is('archived_at', null)
-          .eq('source_type', 'yeti_first_party');
-        if (count !== null) setYetiCount(count);
-      } catch (err) {
-        console.error('Error fetching Yeti count:', err);
-      }
-    }
-    fetchCounts();
-  }, [authState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,18 +150,11 @@ export default function ExerciseLibraryPage() {
       }
 
       setAuthState('authenticated');
-      const [{ data: profile, error: profileError }, filterOptionsResult] = await Promise.all([
-        supabase.from('profiles').select('role').eq('id', user.id).maybeSingle(),
-        fetchAllExerciseRows<ExerciseFilterSourceRow>(async (from, to) => {
-          const { data, count, error } = await supabase
-            .from('exercises')
-            .select('id, category, primary_muscle, target_muscle, equipment, difficulty', { count: 'exact' })
-            .is('archived_at', null)
-            .range(from, to);
-          return { data: (data || []) as ExerciseFilterSourceRow[], count, error };
-        }).then(({ rows }) => ({ options: buildExerciseFilterOptions(rows), error: null }))
-          .catch((error: unknown) => ({ options: EMPTY_TAXONOMY, error })),
-      ]);
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
       if (cancelled) return;
 
       if (!profileError && profile?.role) {
@@ -189,208 +165,65 @@ export default function ExerciseLibraryPage() {
         setEditorIdentity(null);
       }
 
-      if (filterOptionsResult.error) {
-        setTaxonomyError(true);
-      } else {
-        setTaxonomy(filterOptionsResult.options);
-        setTaxonomyError(false);
-      }
     }
     void loadAuthenticatedContext();
     return () => { cancelled = true; };
   }, [router]);
 
-  // Main Exercises Query Function
-  const fetchExercises = useCallback(async () => {
+  useEffect(() => {
     if (authState !== 'authenticated') return;
-    const reqSeq = ++requestSequenceRef.current;
-    setLoading(true);
-    setError(null);
-
-    try {
-      // 1. Alias lookup if search query is active
-      let aliasMatchedIds: string[] = [];
-      if (debouncedSearch.trim()) {
-        const s = debouncedSearch.trim();
-        const pattern = s.replace(/[\s-]+/g, '%');
-        const { data: aliasData } = await supabase
-          .from('exercise_aliases')
-          .select('exercise_id')
-          .ilike('alias', `%${pattern}%`);
-
-        if (aliasData && aliasData.length > 0) {
-          aliasMatchedIds = Array.from(new Set(aliasData.map(a => a.exercise_id)));
-        }
-      }
-
-      // 2. Build Base Exercise Query
-      let query = supabase
-        .from('exercises')
-        .select(mediaStatusFilter === 'all' ? '*' : 'id', { count: 'exact' })
-        .is('archived_at', null);
-
-      // Apply Source Filter
-      if (sourceFilter === 'yeti_first_party') {
-        query = query.eq('source_type', 'yeti_first_party');
-      } else if (sourceFilter === 'legacy_catalog') {
-        query = query.eq('source_type', 'legacy_catalog');
-      } else if (sourceFilter === 'custom') {
-        query = query.eq('source_type', 'custom');
-      }
-
-      // Apply Category Filter
-      if (categoryFilter !== 'all') query = query.eq('category', categoryFilter);
-
-      // Apply Equipment Filter
-      if (equipmentFilter !== 'all') query = query.eq('equipment', equipmentFilter);
-
-      // Apply Difficulty Filter
-      if (difficultyFilter !== 'all') query = query.eq('difficulty', difficultyFilter);
-
-      // Apply Search Query (Combines Name, Slug, Equipment, Primary Muscle, Target Muscle, and Alias IDs)
-      if (debouncedSearch.trim()) {
-        const s = debouncedSearch.trim();
-        const pattern = s.replace(/[\s-]+/g, '%');
-        const orConditions = [
-          `name.ilike.%${pattern}%`,
-          `slug.ilike.%${pattern}%`,
-          `equipment.ilike.%${pattern}%`,
-          `primary_muscle.ilike.%${pattern}%`,
-          `target_muscle.ilike.%${pattern}%`
-        ];
-
-        if (aliasMatchedIds.length > 0) {
-          // Format as UUID list in Postgrest syntax
-          orConditions.push(`id.in.(${aliasMatchedIds.join(',')})`);
-        }
-
-        query = query.or(orConditions.join(','));
-      }
-
-      if (muscleGroupFilter !== 'all') {
-        query = query.or(`primary_muscle.ilike.%${muscleGroupFilter}%,target_muscle.ilike.%${muscleGroupFilter}%`);
-      }
-
-      // Apply Sorting
-      if (sortBy === 'az') {
-        query = query.order('name', { ascending: true });
-      } else {
-        query = query.order('created_at', { ascending: false });
-      }
-
-      // Completeness filtering must happen across the full matching result set before pagination.
-      if (mediaStatusFilter === 'all' && qualityFilter === 'all') {
-        const from = (page - 1) * pageSize;
-        query = query.range(from, from + pageSize - 1);
-      }
-
-      let nextExercises: DbExercise[] = [];
-      let nextTotalCount = 0;
-      if (mediaStatusFilter === 'all' && qualityFilter === 'all') {
-        const { data, count, error: fetchErr } = await query;
-        if (fetchErr) throw fetchErr;
-        nextExercises = (data || []) as DbExercise[];
-        nextTotalCount = count || 0;
-        const pageIds = nextExercises.map((exercise) => exercise.id);
-        if (pageIds.length > 0) {
-          const relCounts = await fetchExerciseRelationCounts(pageIds, supabase);
-          setRelationCountsMap(relCounts);
-        }
-      } else {
-        const completeSet = await fetchAllExerciseRows<{ id: string }>(async (from, to) => {
-          const { data, count, error } = await query.range(from, to);
-          return { data: (data || []) as Array<{ id: string }>, count, error };
-        });
-        const exerciseIds = completeSet.rows.map((exercise) => exercise.id);
-        nextTotalCount = completeSet.count;
-        const mediaByExercise = new Map<string, ExerciseMediaRecord[]>();
-        let relCounts = new Map<string, ExerciseRelationCounts>();
-
-        if (exerciseIds.length > 0) {
-          const [mediaRows, fetchedRelCounts] = await Promise.all([
-            fetchAllExerciseMediaRows(exerciseIds, async (idChunk, from, to) => {
-              const { data, error } = await supabase
-                .from('exercise_media')
-                .select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at')
-                .in('exercise_id', idChunk)
-                .order('id', { ascending: true })
-                .range(from, to);
-              return { data: (data || []) as ExerciseMediaRecord[], error };
-            }),
-            fetchExerciseRelationCounts(exerciseIds, supabase),
-          ]);
-          relCounts = fetchedRelCounts;
-          for (const row of mediaRows) {
-            const rows = mediaByExercise.get(row.exercise_id) ?? [];
-            rows.push(row);
-            mediaByExercise.set(row.exercise_id, rows);
-          }
-        }
-
-        let filteredIds = exerciseIds;
-        if (mediaStatusFilter !== 'all') {
-          filteredIds = filteredIds.filter((exerciseId) =>
-            matchesExerciseMediaFilter(mediaByExercise.get(exerciseId) ?? [], mediaStatusFilter as ExerciseMediaCompletenessFilter),
-          );
-        }
-
-        if (qualityFilter !== 'all') {
-          const candidateRecords: DbExercise[] = [];
-          for (let i = 0; i < filteredIds.length; i += 150) {
-            const chunk = filteredIds.slice(i, i + 150);
-            const { data: cData } = await supabase.from('exercises').select('*').in('id', chunk);
-            if (cData) candidateRecords.push(...(cData as DbExercise[]));
-          }
-          const candidateMap = new Map(candidateRecords.map((e) => [e.id, e]));
-          filteredIds = filteredIds.filter((exerciseId) => {
-            const ex = candidateMap.get(exerciseId);
-            return ex ? matchesQualityFilter(ex, qualityFilter, relCounts.get(exerciseId)) : false;
-          });
-        }
-
-        nextTotalCount = filteredIds.length;
-        const from = (page - 1) * pageSize;
-        const pageIds = filteredIds.slice(from, from + pageSize);
-        if (pageIds.length > 0) {
-          const { data: pageRows, error: pageError } = await supabase
-            .from('exercises')
-            .select('*')
-            .in('id', pageIds);
-          if (pageError) throw pageError;
-          const rowsById = new Map(((pageRows || []) as DbExercise[]).map((row) => [row.id, row]));
-          nextExercises = pageIds.map((id) => rowsById.get(id)).filter((row): row is DbExercise => Boolean(row));
-          setRelationCountsMap(relCounts);
-        }
-      }
-
-      if (reqSeq !== requestSequenceRef.current) return;
-
-      setExercises(nextExercises);
-      setTotalCount(nextTotalCount);
-
-      // Functional state avoids closing over a selection from an earlier fetch.
-      setSelectedExercise((current) =>
-        nextExercises.length > 0 && current && nextExercises.some((exercise) => exercise.id === current.id)
-          ? current
-          : nextExercises[0] ?? null,
-      );
-    } catch (err: any) {
-      if (reqSeq !== requestSequenceRef.current) return;
-      console.error('Failed to fetch exercises:', err);
-      setError(err.message || 'Failed to load exercise library.');
-    } finally {
-      if (reqSeq === requestSequenceRef.current) {
-        setLoading(false);
+    let cancelled = false;
+    async function loadSnapshot() {
+      setLoading(true);
+      setError(null);
+      try {
+        const snapshot = await loadExerciseQualitySnapshot(supabase);
+        if (cancelled) return;
+        setQualitySnapshot(snapshot);
+        setRelationCountsMap(snapshot.relationCounts);
+        setYetiCount(snapshot.firstPartySummary.total);
+        setTaxonomy(buildExerciseFilterOptions(snapshot.exercises as ExerciseFilterSourceRow[]));
+        setTaxonomyError(false);
+      } catch (snapshotError) {
+        if (cancelled) return;
+        setTaxonomyError(true);
+        setError(snapshotError instanceof Error ? snapshotError.message : 'Failed to load exercise quality data.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
+    void loadSnapshot();
+    return () => { cancelled = true; };
+  }, [authState, snapshotRevision]);
+
+  const filteredPage = useMemo(() => {
+    if (!qualitySnapshot) return { exercises: [], totalCount: 0, totalPages: 1 };
+    return filterExerciseQualitySnapshot(qualitySnapshot, {
+      search: debouncedSearch,
+      source: sourceFilter,
+      category: categoryFilter,
+      muscle: muscleGroupFilter,
+      equipment: equipmentFilter,
+      difficulty: difficultyFilter,
+      media: mediaStatusFilter as 'all' | ExerciseMediaCompletenessFilter,
+      quality: qualityFilter,
+      sort: sortBy as 'az' | 'newest',
+    }, page, pageSize);
   }, [
-    authState, sourceFilter, categoryFilter, muscleGroupFilter, equipmentFilter,
-    difficultyFilter, mediaStatusFilter, qualityFilter, debouncedSearch, sortBy, page
+    qualitySnapshot, debouncedSearch, sourceFilter, categoryFilter, muscleGroupFilter,
+    equipmentFilter, difficultyFilter, mediaStatusFilter, qualityFilter, sortBy, page,
   ]);
 
   useEffect(() => {
-    if (authState === 'authenticated') void fetchExercises();
-  }, [authState, fetchExercises]);
+    const nextExercises = filteredPage.exercises as DbExercise[];
+    setExercises(nextExercises);
+    setTotalCount(filteredPage.totalCount);
+    setSelectedExercise((current) =>
+      nextExercises.length > 0 && current && nextExercises.some((exercise) => exercise.id === current.id)
+        ? current
+        : nextExercises[0] ?? null,
+    );
+  }, [filteredPage]);
 
   // Load Sub-details (Aliases, Muscles, Media) for Selected Exercise
   const loadExerciseSubDetails = useCallback(async () => {
@@ -461,7 +294,35 @@ export default function ExerciseLibraryPage() {
             Browse and inspect Yeti-certified exercises with HD coaching videos and form cues.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setSnapshotRevision((revision) => revision + 1)}
+          disabled={loading}
+          className="flex min-h-10 items-center justify-center gap-2 rounded-lg border border-white/10 bg-[#111A23] px-3 text-xs font-bold text-gray-200 hover:bg-white/5 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh quality
+        </button>
       </div>
+
+      {qualitySnapshot && (
+        <section className="border-y border-white/10 bg-[#0E161F] py-4" aria-label="Yeti First-Party Quality">
+          <div className="mb-3 flex items-baseline justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-black text-white">Yeti First-Party Quality</h2>
+              <p className="text-[11px] text-gray-400">Curated catalog only. Legacy reference exercises are excluded.</p>
+            </div>
+            <span className="text-lg font-black text-emerald-400">
+              {qualitySnapshot.firstPartySummary.readyPercentage.toFixed(1)}%
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div><p className="text-xl font-black text-white">{qualitySnapshot.firstPartySummary.total}</p><p className="text-[10px] uppercase text-gray-500">Total Yeti</p></div>
+            <div><p className="text-xl font-black text-emerald-400">{qualitySnapshot.firstPartySummary.ready}</p><p className="text-[10px] uppercase text-gray-500">Production ready</p></div>
+            <div><p className="text-xl font-black text-amber-400">{qualitySnapshot.firstPartySummary.incomplete}</p><p className="text-[10px] uppercase text-gray-500">Incomplete</p></div>
+          </div>
+        </section>
+      )}
 
       {/* ── FILTER CONTROLS BAR ── */}
       <div className="bg-[#111A23] border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
@@ -512,9 +373,21 @@ export default function ExerciseLibraryPage() {
               <option value="all">All Quality</option>
               <option value="fully_published">Published</option>
               <option value="content_ready">Ready — Needs Media</option>
+              <option value="needs_media">Needs Media</option>
               <option value="needs_relations">Needs Relations</option>
-              <option value="needs_content">Needs Content</option>
               <option value="needs_taxonomy">Needs Taxonomy</option>
+              <option value="needs_coaching">Needs Coaching</option>
+              <option value="needs_prescription">Needs Prescription</option>
+              <option value="needs_tags">Needs Tags</option>
+              <option value="needs_muscles">Needs Muscles</option>
+              <option value="needs_alternatives">Needs Alternatives</option>
+              <option value="missing_setup">Missing Setup</option>
+              <option value="missing_execution">Missing Execution</option>
+              <option value="missing_cues">Missing Cues</option>
+              <option value="missing_mistakes">Missing Mistakes</option>
+              <option value="missing_safety">Missing Safety</option>
+              <option value="missing_breathing">Missing Breathing</option>
+              <option value="missing_tempo">Missing Tempo</option>
               <option value="reference_only">Reference Only</option>
             </select>
           </div>
@@ -638,7 +511,7 @@ export default function ExerciseLibraryPage() {
         </button>
 
         <button
-          onClick={() => { setSourceFilter('all'); setQualityFilter('fully_published'); setPage(1); }}
+          onClick={() => { setSourceFilter('yeti_first_party'); setQualityFilter('fully_published'); setPage(1); }}
           className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 ${
             qualityFilter === 'fully_published' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'bg-[#111A23] text-gray-400 hover:text-white border border-white/10'
           }`}
@@ -648,7 +521,7 @@ export default function ExerciseLibraryPage() {
         </button>
 
         <button
-          onClick={() => { setSourceFilter('all'); setQualityFilter('content_ready'); setPage(1); }}
+          onClick={() => { setSourceFilter('yeti_first_party'); setQualityFilter('content_ready'); setPage(1); }}
           className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 ${
             qualityFilter === 'content_ready' ? 'bg-blue-600 text-white' : 'bg-[#111A23] text-gray-400 hover:text-white border border-white/10'
           }`}
@@ -657,7 +530,7 @@ export default function ExerciseLibraryPage() {
         </button>
 
         <button
-          onClick={() => { setSourceFilter('all'); setQualityFilter('needs_relations'); setPage(1); }}
+          onClick={() => { setSourceFilter('yeti_first_party'); setQualityFilter('needs_relations'); setPage(1); }}
           className={`px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 ${
             qualityFilter === 'needs_relations' ? 'bg-amber-600 text-white' : 'bg-[#111A23] text-gray-400 hover:text-white border border-white/10'
           }`}
@@ -741,7 +614,7 @@ export default function ExerciseLibraryPage() {
                 const isSelected = selectedExercise?.id === ex.id;
                 const isFav = favorites.has(ex.id);
                 const isYeti = ex.source_type === 'yeti_first_party';
-                const quality = evaluateExerciseQuality(ex, relationCountsMap.get(ex.id));
+                const quality = qualitySnapshot?.assessments.get(ex.id) ?? evaluateExerciseQuality(ex, relationCountsMap.get(ex.id));
                 const qualityBadge = getQualityStatusBadgeConfig(quality.status);
 
                 return (
@@ -865,7 +738,8 @@ export default function ExerciseLibraryPage() {
 
               {/* Quality Assessment Scorecard Banner */}
               {(() => {
-                const quality = evaluateExerciseQuality(selectedExercise, relationCountsMap.get(selectedExercise.id));
+                const quality = qualitySnapshot?.assessments.get(selectedExercise.id)
+                  ?? evaluateExerciseQuality(selectedExercise, relationCountsMap.get(selectedExercise.id));
                 const badge = getQualityStatusBadgeConfig(quality.status);
 
                 return (

@@ -13,6 +13,7 @@ const read = (path: string) => readFileSync(path, 'utf8');
 const middleware = read('apps/coach-dashboard/middleware.ts');
 const sidebar = read('apps/coach-dashboard/components/Sidebar.tsx');
 const library = read('apps/coach-dashboard/app/exercises/page.tsx');
+const qualitySnapshot = read('apps/coach-dashboard/lib/exerciseQualitySnapshot.ts');
 const manager = read('apps/coach-dashboard/components/ExerciseMediaManager.tsx');
 const editor = read('apps/coach-dashboard/app/exercises/[id]/edit/page.tsx');
 const creator = read('apps/coach-dashboard/app/exercises/new/page.tsx');
@@ -43,7 +44,7 @@ describe('Exercise Dashboard authentication hardening', () => {
   it('does not interpret an unauthenticated catalog request as a legitimate zero result', () => {
     expect(library).toContain("type CatalogAuthState = 'checking' | 'authenticated' | 'unauthenticated'");
     expect(library).toContain("if (authState !== 'authenticated') return;");
-    expect(library).toContain("if (authState === 'authenticated') void fetchExercises()");
+    expect(library).toContain('loadExerciseQualitySnapshot(supabase)');
     expect(library).toContain("router.replace('/login')");
     expect(library.indexOf("if (authState !== 'authenticated') {")).toBeLessThan(library.indexOf('No exercises found'));
   });
@@ -51,22 +52,21 @@ describe('Exercise Dashboard authentication hardening', () => {
 
 describe('Exercise Dashboard catalog filters', () => {
   it('preserves source_type filtering and normalized multi-word search', () => {
-    expect(library).toContain("query.eq('source_type', 'yeti_first_party')");
-    expect(library).toContain("query.eq('source_type', 'legacy_catalog')");
-    expect(library).toContain("s.replace(/[\\s-]+/g, '%')");
+    expect(qualitySnapshot).toContain("exercise.source_type !== filters.source");
+    expect(qualitySnapshot).toContain("filters.source !== 'all'");
     for (const field of ['name', 'slug', 'equipment', 'primary_muscle', 'target_muscle']) {
-      expect(library).toContain(`\`${field}.ilike.%\${pattern}%\``);
+      expect(qualitySnapshot).toContain(`exercise.${field}`);
     }
   });
 
   it('derives filter choices from the exact exercise columns being queried', () => {
-    expect(library).toContain(".select('id, category, primary_muscle, target_muscle, equipment, difficulty', { count: 'exact' })");
+    expect(library).toContain('buildExerciseFilterOptions(snapshot.exercises');
     expect(library).not.toContain("from('exercise_taxonomy')");
     expect(library).toContain('value={value}');
     expect(library).not.toContain('<option value="air bike">Air Bike</option>');
-    expect(library).toContain("query.eq('category', categoryFilter)");
-    expect(library).toContain("query.eq('equipment', equipmentFilter)");
-    expect(library).toContain("query.eq('difficulty', difficultyFilter)");
+    expect(qualitySnapshot).toContain('exercise.category !== filters.category');
+    expect(qualitySnapshot).toContain('exercise.equipment !== filters.equipment');
+    expect(qualitySnapshot).toContain('exercise.difficulty !== filters.difficulty');
   });
 
   it('offers the representative Back Squat filter values without inventing Air Bike', () => {
@@ -87,8 +87,9 @@ describe('Exercise Dashboard catalog filters', () => {
   });
 
   it('applies muscle filtering even when a search query is active', () => {
-    expect(library).not.toContain("} else if (muscleGroupFilter !== 'all') {");
-    expect(library).toContain("if (muscleGroupFilter !== 'all') {");
+    expect(qualitySnapshot).toContain("filters.muscle !== 'all'");
+    expect(qualitySnapshot).toContain('exercise.primary_muscle');
+    expect(qualitySnapshot).toContain('exercise.target_muscle');
   });
 
   it('loads more than 1,000 matching exercises in bounded pages', async () => {

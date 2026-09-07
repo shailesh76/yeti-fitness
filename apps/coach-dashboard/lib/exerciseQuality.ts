@@ -1,16 +1,29 @@
 // apps/coach-dashboard/lib/exerciseQuality.ts
 
+import { isUsableExerciseMedia } from './exerciseMedia';
+
 export type ExerciseQualityStatus =
   | 'fully_published'
   | 'content_ready'
   | 'needs_relations'
-  | 'needs_content'
+  | 'needs_coaching'
+  | 'needs_prescription'
   | 'needs_taxonomy'
   | 'reference_only';
 
 export type ExerciseQualityFilter =
   | 'all'
   | 'needs_media'
+  | 'needs_tags'
+  | 'needs_muscles'
+  | 'needs_alternatives'
+  | 'missing_setup'
+  | 'missing_execution'
+  | 'missing_cues'
+  | 'missing_mistakes'
+  | 'missing_safety'
+  | 'missing_breathing'
+  | 'missing_tempo'
   | ExerciseQualityStatus;
 
 export interface QualityDimensionScore {
@@ -25,6 +38,8 @@ export interface ExerciseRelationCounts {
   musclesCount: number;
   alternativesCount: number;
   aliasesCount: number;
+  progressionsCount: number;
+  regressionsCount: number;
 }
 
 export interface ExerciseQualityAssessment {
@@ -95,7 +110,7 @@ export interface ExerciseQualityInput {
   alternatives?: Array<{ id?: string; alternative_exercise_id?: string; reason?: string }>;
   progressions?: Array<{ id?: string; progression_exercise_id?: string }>;
   regressions?: Array<{ id?: string; regression_exercise_id?: string }>;
-  media?: Array<{ id?: string; media_status?: string; url?: string | null }>;
+  media?: Array<{ id?: string; media_status?: string; r2_key?: string | null; url?: string | null }>;
 }
 
 function isMeaningfulString(val: unknown): boolean {
@@ -109,18 +124,6 @@ function isMeaningfulString(val: unknown): boolean {
 function isMeaningfulArray(val: unknown): boolean {
   if (!Array.isArray(val) || val.length === 0) return false;
   return val.some(item => isMeaningfulString(item));
-}
-
-function isValidHttpsUrl(url: unknown): boolean {
-  if (typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  if (!trimmed.startsWith('https://')) return false;
-  try {
-    const parsed = new URL(trimmed);
-    return parsed.protocol === 'https:' && parsed.hostname.includes('.');
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -178,8 +181,8 @@ export function evaluateExerciseQuality(
 
   // 5. Optional Enrichment (0 pts towards 100, informational only)
   const aliasesCount = exercise.aliases ? exercise.aliases.length : (relationCounts ? relationCounts.aliasesCount : 0);
-  const progsCount = exercise.progressions ? exercise.progressions.length : 0;
-  const regsCount = exercise.regressions ? exercise.regressions.length : 0;
+  const progsCount = exercise.progressions ? exercise.progressions.length : (relationCounts ? relationCounts.progressionsCount : 0);
+  const regsCount = exercise.regressions ? exercise.regressions.length : (relationCounts ? relationCounts.regressionsCount : 0);
   let optScore = 0;
   if (aliasesCount > 0) optScore += 1;
   if (progsCount > 0) optScore += 1;
@@ -189,13 +192,17 @@ export function evaluateExerciseQuality(
   // Strict rule: Only verified READY media with a valid HTTPS locator qualifies.
   const mediaList = exercise.media || [];
   const rawMediaStatus = (exercise.media_status || '').toUpperCase();
-  const directVideoValid = isValidHttpsUrl(exercise.video_url);
-  const directGifValid = isValidHttpsUrl(exercise.gif_url);
 
-  const hasReadyMediaRow = mediaList.some(
-    m => (m.media_status || '').toUpperCase() === 'READY' && isValidHttpsUrl(m.url)
-  );
-  const hasReadyDirect = rawMediaStatus === 'READY' && (directVideoValid || directGifValid);
+  const hasReadyMediaRow = mediaList.some((media) => isUsableExerciseMedia({
+    media_status: media.media_status ?? null,
+    r2_key: media.r2_key ?? null,
+    url: media.url ?? null,
+  }));
+  const hasReadyDirect = [exercise.video_url, exercise.gif_url].some((url) => isUsableExerciseMedia({
+    media_status: rawMediaStatus,
+    r2_key: null,
+    url: url ?? null,
+  }));
   const mediaReady = Boolean(hasReadyMediaRow || hasReadyDirect);
 
   const mediaScore = mediaReady ? 10 : 0;
@@ -204,15 +211,14 @@ export function evaluateExerciseQuality(
   }
 
   // Explicit Gate flags
-  const isLegacy = exercise.source_type === 'legacy_catalog';
-  const isCurated = !isLegacy;
+  const isFirstParty = exercise.source_type === 'yeti_first_party';
 
   const taxonomyReady = taxMissing.length === 0;
   const coachingReady = coachMissing.length === 0;
   const rxReady = rxMissing.length === 0;
   const contentReady = taxonomyReady && coachingReady && rxReady;
   const relationReady = missingRelations.length === 0;
-  const fullyPublished = isCurated && contentReady && relationReady && mediaReady;
+  const fullyPublished = isFirstParty && contentReady && relationReady && mediaReady;
 
   // Boolean dimensions (backwards compatible aliases)
   const hasTaxonomy = taxonomyReady;
@@ -225,24 +231,20 @@ export function evaluateExerciseQuality(
   // Classification status determination (Mutually Exclusive Precedence)
   let status: ExerciseQualityStatus;
 
-  if (isLegacy) {
+  if (!isFirstParty) {
     status = 'reference_only';
   } else if (fullyPublished) {
     status = 'fully_published';
-  } else if (contentReady && relationReady) {
-    status = 'content_ready';
-  } else if (contentReady && !relationReady) {
-    status = 'needs_relations';
-  } else if (!hasTaxonomy && !hasCoaching) {
-    status = 'reference_only';
-  } else if (hasTaxonomy && !hasCoaching) {
-    status = 'needs_content';
-  } else if (!hasTaxonomy && hasCoaching) {
+  } else if (!taxonomyReady) {
     status = 'needs_taxonomy';
-  } else if (!hasPrescription) {
-    status = 'needs_content';
+  } else if (!coachingReady) {
+    status = 'needs_coaching';
+  } else if (!rxReady) {
+    status = 'needs_prescription';
+  } else if (!relationReady) {
+    status = 'needs_relations';
   } else {
-    status = 'reference_only';
+    status = 'content_ready';
   }
 
   return {
@@ -316,11 +318,34 @@ export function matchesQualityFilter(
 ): boolean {
   if (filter === 'all') return true;
   const assessment = evaluateExerciseQuality(exercise, relationCounts);
+  return matchesQualityAssessment(assessment, filter);
+}
+
+export function matchesQualityAssessment(
+  assessment: ExerciseQualityAssessment,
+  filter: ExerciseQualityFilter,
+): boolean {
+  if (filter === 'all') return true;
 
   if (filter === 'needs_media') {
-    // Explicit filter: Content & Relations ready, but publishable media pending
-    return assessment.contentReady && assessment.relationReady && !assessment.mediaReady;
+    return !assessment.mediaReady;
   }
+
+  if (filter === 'needs_tags') return assessment.missingRelations.includes('exercise_tags');
+  if (filter === 'needs_muscles') return assessment.missingRelations.includes('exercise_muscles');
+  if (filter === 'needs_alternatives') return assessment.missingRelations.includes('exercise_alternatives');
+
+  const fieldFilters: Partial<Record<ExerciseQualityFilter, string>> = {
+    missing_setup: 'setup_instructions',
+    missing_execution: 'execution_instructions',
+    missing_cues: 'coaching_cues',
+    missing_mistakes: 'common_mistakes',
+    missing_safety: 'safety_notes',
+    missing_breathing: 'breathing',
+    missing_tempo: 'tempo',
+  };
+  const missingField = fieldFilters[filter];
+  if (missingField) return assessment.missingFields.includes(missingField);
 
   return assessment.status === filter;
 }
@@ -335,16 +360,25 @@ export async function fetchExerciseRelationCounts(
 
   const chunkSize = options.chunkSize ?? 150;
   for (const id of exerciseIds) {
-    map.set(id, { tagsCount: 0, musclesCount: 0, alternativesCount: 0, aliasesCount: 0 });
+    map.set(id, {
+      tagsCount: 0,
+      musclesCount: 0,
+      alternativesCount: 0,
+      aliasesCount: 0,
+      progressionsCount: 0,
+      regressionsCount: 0,
+    });
   }
 
   for (let i = 0; i < exerciseIds.length; i += chunkSize) {
     const chunk = exerciseIds.slice(i, i + chunkSize);
-    const [tagsRes, musclesRes, altsRes, aliasesRes] = await Promise.all([
+    const [tagsRes, musclesRes, altsRes, aliasesRes, progressionsRes, regressionsRes] = await Promise.all([
       supabaseClient.from('exercise_tags').select('exercise_id').in('exercise_id', chunk),
       supabaseClient.from('exercise_muscles').select('exercise_id').in('exercise_id', chunk),
       supabaseClient.from('exercise_alternatives').select('exercise_id').in('exercise_id', chunk),
       supabaseClient.from('exercise_aliases').select('exercise_id').in('exercise_id', chunk),
+      supabaseClient.from('exercise_progressions').select('exercise_id').in('exercise_id', chunk),
+      supabaseClient.from('exercise_regressions').select('exercise_id').in('exercise_id', chunk),
     ]);
 
     if (tagsRes.data) {
@@ -371,6 +405,18 @@ export async function fetchExerciseRelationCounts(
         if (entry) entry.aliasesCount++;
       }
     }
+    if (progressionsRes.data) {
+      for (const r of progressionsRes.data) {
+        const entry = map.get(r.exercise_id);
+        if (entry) entry.progressionsCount++;
+      }
+    }
+    if (regressionsRes.data) {
+      for (const r of regressionsRes.data) {
+        const entry = map.get(r.exercise_id);
+        if (entry) entry.regressionsCount++;
+      }
+    }
   }
 
   return map;
@@ -384,12 +430,35 @@ export function getQualityStatusLabel(status: ExerciseQualityStatus | ExerciseQu
       return 'Ready — Needs Media';
     case 'needs_relations':
       return 'Needs Relations';
-    case 'needs_content':
+    case 'needs_coaching':
+      return 'Needs Coaching';
+    case 'needs_prescription':
+      return 'Needs Prescription';
       return 'Needs Content';
     case 'needs_taxonomy':
       return 'Needs Taxonomy';
     case 'needs_media':
-      return 'Ready — Needs Media';
+      return 'Needs Media';
+    case 'needs_tags':
+      return 'Needs Tags';
+    case 'needs_muscles':
+      return 'Needs Muscles';
+    case 'needs_alternatives':
+      return 'Needs Alternatives';
+    case 'missing_setup':
+      return 'Missing Setup';
+    case 'missing_execution':
+      return 'Missing Execution';
+    case 'missing_cues':
+      return 'Missing Cues';
+    case 'missing_mistakes':
+      return 'Missing Mistakes';
+    case 'missing_safety':
+      return 'Missing Safety';
+    case 'missing_breathing':
+      return 'Missing Breathing';
+    case 'missing_tempo':
+      return 'Missing Tempo';
     case 'reference_only':
       return 'Reference Only';
     case 'all':
@@ -431,10 +500,11 @@ export function getQualityStatusBadgeConfig(status: ExerciseQualityStatus): {
         borderClass: 'border-amber-500/20',
         dotColor: 'bg-amber-400',
       };
-    case 'needs_content':
+    case 'needs_coaching':
+    case 'needs_prescription':
     case 'needs_taxonomy':
       return {
-        label: status === 'needs_taxonomy' ? 'Needs Taxonomy' : 'Needs Content',
+        label: getQualityStatusLabel(status),
         bgClass: 'bg-rose-500/10',
         textClass: 'text-rose-400',
         borderClass: 'border-rose-500/20',

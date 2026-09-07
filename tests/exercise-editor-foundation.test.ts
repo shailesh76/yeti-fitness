@@ -15,6 +15,7 @@ const migration = fs.readFileSync(migrationPath, 'utf8');
 const editor = fs.readFileSync(path.resolve('apps/coach-dashboard/app/exercises/[id]/edit/page.tsx'), 'utf8');
 const creator = fs.readFileSync(path.resolve('apps/coach-dashboard/app/exercises/new/page.tsx'), 'utf8');
 const library = fs.readFileSync(path.resolve('apps/coach-dashboard/app/exercises/page.tsx'), 'utf8');
+const qualitySnapshot = fs.readFileSync(path.resolve('apps/coach-dashboard/lib/exerciseQualitySnapshot.ts'), 'utf8');
 
 const baseForm: ExerciseEditorForm = {
   name: 'Goblet Squat', primaryMuscle: 'quadriceps', equipment: 'dumbbell', category: 'strength',
@@ -123,7 +124,7 @@ describe('Exercise Editor Phase A form and atomic save', () => {
   it('archives active rows without hiding ID-based historical references', () => {
     expect(migration).toContain('ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NULL');
     expect(migration).toContain('COALESCE(archived_at, pg_catalog.now())');
-    expect(library.match(/\.is\('archived_at', null\)/g)).toHaveLength(3);
+    expect(qualitySnapshot).toContain("query.is('archived_at', null)");
     expect(migration).not.toMatch(/DELETE FROM public\.exercises/);
     expect(migration).not.toMatch(/CREATE POLICY[^;]+archived_at/s);
   });
