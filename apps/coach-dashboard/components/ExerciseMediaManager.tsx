@@ -6,7 +6,6 @@ import { supabase } from '@/lib/supabase';
 import {
   ExerciseMediaRecord,
   ExerciseMediaType,
-  formatForMediaUrl,
   hasDuplicateExerciseMediaUrl,
   isExternalMedia,
   isUsableExerciseMedia,
@@ -99,7 +98,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
 
   function startAdd(type: EditableMediaType) {
     setMessage(null);
-    setForm({ mode: 'add', type, url: '', status: 'READY', primary: media.length === 0, row: null });
+    setForm({ mode: 'add', type, url: '', status: 'TO_CREATE', primary: media.length === 0, row: null });
   }
 
   function startEdit(row: ExerciseMediaRecord) {
@@ -129,36 +128,35 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
       setSaving(false);
       return;
     }
-    const values = {
-      media_type: form.type,
-      file_format: formatForMediaUrl(form.type, url),
-      url,
-      media_status: form.status.trim() || 'READY',
-      is_primary: form.primary,
-      updated_at: new Date().toISOString(),
-    };
+    const { data, error } = await supabase.functions.invoke('upload-to-r2', {
+      body: {
+        action: 'save-external-media',
+        exerciseId,
+        mediaId: form.row?.id,
+        idempotencyKey: form.mode === 'add' ? crypto.randomUUID() : undefined,
+        mediaType: form.type,
+        url,
+        isPrimary: form.primary,
+      },
+    });
 
-    let error: { message: string } | null = null;
-    if (form.mode === 'add') {
-      const result = await supabase.from('exercise_media').insert({
-        exercise_id: exerciseId,
-        r2_key: null,
-        ...values,
-      });
-      error = result.error;
-    } else if (form.row) {
-      const result = await supabase.from('exercise_media').update({
-        ...values,
-        // Replacing a row removes only its database locator. The R2 object is never deleted.
-        r2_key: null,
-      }).eq('id', form.row.id).eq('exercise_id', exerciseId);
-      error = result.error;
-    }
-
-    if (error) {
-      setMessage({ kind: 'error', text: error.message || 'Could not save media.' });
+    if (error || !data?.success) {
+      setMessage({ kind: 'error', text: data?.error || error?.message || 'Could not save media.' });
       setSaving(false);
       return;
+    }
+
+    const savedMediaId = data.media?.id;
+    if (form.status === 'READY') {
+      const transition = await supabase.functions.invoke('upload-to-r2', {
+        body: { action: 'set-exercise-media-status', exerciseId, mediaId: savedMediaId, status: 'READY' },
+      });
+      if (transition.error || !transition.data?.success) {
+        await onChanged();
+        setMessage({ kind: 'error', text: transition.data?.error || transition.error?.message || 'Media was saved as unpublished but could not be marked ready.' });
+        setSaving(false);
+        return;
+      }
     }
 
     await onChanged();
@@ -171,9 +169,14 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     if (!isExternalMedia(row) || !window.confirm(`Remove this ${typeLabel(row.media_type).toLowerCase()} URL from ${exerciseName}?`)) return;
     setRemovingId(row.id);
     setMessage(null);
-    const { error } = await supabase.from('exercise_media').delete().eq('id', row.id).eq('exercise_id', exerciseId);
-    if (error) {
-      setMessage({ kind: 'error', text: error.message || 'Could not remove media.' });
+    const { data, error } = await supabase.functions.invoke('upload-to-r2', {
+      body: { action: 'delete-exercise-media', exerciseId, mediaId: row.id },
+    });
+    if (error || !data?.success) {
+      setMessage({ kind: 'error', text: data?.error || error?.message || 'Could not remove media.' });
+    } else if (data.cleanupPending) {
+      await onChanged();
+      setMessage({ kind: 'error', text: 'Media record removed, but stored file cleanup is still pending.' });
     } else {
       await onChanged();
       setMessage({ kind: 'success', text: 'External media removed.' });
@@ -252,7 +255,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[10px] text-gray-400">{form.primary ? 'Primary media' : 'Alternate media'}</span>
-            <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })} className="rounded-md border border-white/10 bg-[#161C28] px-2 py-1.5 text-[10px] text-white"><option value="READY">Ready</option><option value="TO_CREATE">To create</option><option value="REVIEW">Review</option></select>
+            <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })} className="rounded-md border border-white/10 bg-[#161C28] px-2 py-1.5 text-[10px] text-white"><option value="TO_CREATE">To create</option><option value="READY">Ready</option></select>
             <button type="button" disabled={saving} onClick={saveMedia} className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-[10px] font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save</button>
           </div>
         </div>

@@ -41,14 +41,17 @@ future change is `supabase/migrations/`, applied via `supabase db push` — see 
 
 ### Exercise catalog
 
-> **Pending exercise-media contract:** `20260816120000_exercise_media_external_urls.sql` is authored but
-> not applied. After application, `exercise_media.r2_key` is nullable for external media and
-> `exercise_media.url` stores reviewed HTTPS media. Every row must have at least one locator: an R2 key,
-> or an HTTPS URL. R2 media remains unique by `exercise_id + r2_key`; external media is unique by
-> `exercise_id + url`. Authenticated coaches and admins may insert, update, and delete media through RLS;
-> athletes remain read-only and receive no mutation policy.
+> **Exercise-media contract:** `20260816120000_exercise_media_external_urls.sql` is applied in
+> production. `exercise_media.r2_key` is nullable for external media and `exercise_media.url` stores
+> reviewed HTTPS media. Every row must have at least one locator: an R2 key or an HTTPS URL. R2 media
+> remains unique by `exercise_id + r2_key`; external media is unique by `exercise_id + url`.
+> `20260908120000_exercise_media_security_lifecycle.sql` is the pending C2A hardening migration. It
+> constrains lifecycle status, requires usable locators for `READY`, revokes direct authenticated
+> writes, limits server-authorized Coach mutations to media on their own custom exercises, and records
+> actor-bound SHA-256 idempotency fingerprints for new server-finalized media operations. Cleanup failures
+> return an authorized object key for a later C2 cleanup mechanism; they never make media publishable.
 - **`exercises`** — primary exercise catalog. Columns: `id`, `slug`, `name`, `primary_muscle`, `target_muscle`, `secondary_muscles`, `equipment`, `category`, `movement_pattern`, `difficulty`, `unilateral`, `setup_instructions`, `execution_instructions`, `breathing`, `coaching_cues`, `common_mistakes`, `safety_notes`, `default_sets`, `default_reps` (numeric compatibility/executable fallback), `default_reps_prescription` (nullable lossless display text; never parsed as reps), `tempo`, `source_type` (`yeti_first_party`/`legacy_catalog`/`custom`), `license`, `media_status`, `media_notes`, `recommended_rest_seconds`, `hypertrophy_reps`, `strength_reps`, `endurance_reps`, `metadata`, `instructions`, `gif_url`, `video_url`, `media_type`, `thumbnail_url`, `source`, `source_id`, `is_public`, `created_by_coach_id`, `archived_at`, `default_rest_period_sec`, `created_at`, `updated_at`. `UNIQUE(name)` and `UNIQUE(slug)`. Full-text search gin indexed on `name`. RLS keeps catalog reads available to authenticated clients. Phase A editor writes use `save_exercise_editor(...)`; Phase B adds `save_exercise_editor_v2(p_payload jsonb)`: admins may update existing global rows and custom rows, while coaches may create/update only rows with `source_type = 'custom'` and `created_by_coach_id = auth.uid()`. Direct browser INSERT/UPDATE/DELETE grants on `exercises` and child relation tables are revoked; provenance fields are immutable. Active dashboard lists exclude archived rows, but ID-based reads remain available for historical workout references.
-- **`exercise_media`** — Cloudflare R2 media references for exercises (`exercise_id`, `media_type` [video|gif|thumbnail|image], `file_format` [mp4|gif|webp|jpg|png], `r2_bucket`, `r2_key`, `url`, `thumbnail_url`, `is_primary`, `media_status`, `media_notes`, `created_at`, `updated_at`).
+- **`exercise_media`** — Cloudflare R2 media references for exercises (`exercise_id`, `media_type` [video|gif|thumbnail|image], `file_format` [mp4|gif|webp|jpg|png], `r2_bucket`, `r2_key`, `url`, `thumbnail_url`, `is_primary`, `media_status`, `media_notes`, `idempotency_actor_id`, `idempotency_fingerprint`, `created_at`, `updated_at`).
 - **`exercise_aliases`** — search alias lookup (`exercise_id`, `alias`, `created_at`). Indexed for fast full-text matching. Direct mutations revoked; managed atomically via `save_exercise_editor_v2`.
 - **`exercise_tags`** — categorization and AI tags (`exercise_id`, `tag`, `tag_type`, `created_at`). Direct mutations revoked; managed atomically via `save_exercise_editor_v2`.
 - **`exercise_muscles`** — normalized muscle involvement map (`exercise_id`, `muscle`, `role` [primary|secondary|stabilizer], `created_at`). Direct mutations revoked; managed atomically via `save_exercise_editor_v2` and projected to flat compatibility fields `primary_muscle` / `secondary_muscles`.

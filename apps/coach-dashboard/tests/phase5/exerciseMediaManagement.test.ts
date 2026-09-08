@@ -16,6 +16,7 @@ import {
 
 const managerSource = readFileSync('components/ExerciseMediaManager.tsx', 'utf8');
 const pageSource = readFileSync('app/exercises/page.tsx', 'utf8');
+const snapshotSource = readFileSync('lib/exerciseQualitySnapshot.ts', 'utf8');
 
 function media(overrides: Partial<ExerciseMediaRecord>): ExerciseMediaRecord {
   return {
@@ -172,14 +173,13 @@ describe('exercise media URL management', () => {
       .not.toBe(previewErrorKey(media({ id: 'r2', url: null, r2_key: 'a.webp' }), 'https://signed.example.com/two'));
   });
 
-  it('uses authenticated RLS mutations and never deletes an R2 object', () => {
-    expect(managerSource).toContain("supabase.from('exercise_media').insert");
-    expect(managerSource).toContain("supabase.from('exercise_media').update");
-    expect(managerSource).toContain("supabase.from('exercise_media').delete");
-    expect(managerSource).toContain('r2_key: null');
-    expect(managerSource).toContain(".eq('id', form.row.id).eq('exercise_id', exerciseId)");
-    expect(managerSource).toContain(".eq('id', row.id).eq('exercise_id', exerciseId)");
-    expect(managerSource).not.toMatch(/functions\.invoke\(['"][^'"]*(delete|remove)[^'"]*r2/i);
+  it('routes mutations through the authorized server media boundary', () => {
+    expect(managerSource).not.toContain("supabase.from('exercise_media').insert");
+    expect(managerSource).not.toContain("supabase.from('exercise_media').update");
+    expect(managerSource).not.toContain("supabase.from('exercise_media').delete");
+    expect(managerSource).toContain("supabase.functions.invoke('upload-to-r2'");
+    expect(managerSource).toContain("action: 'save-external-media'");
+    expect(managerSource).toContain("action: 'delete-exercise-media'");
     expect(managerSource).toContain('await onChanged()');
   });
 
@@ -197,13 +197,10 @@ describe('exercise media URL management', () => {
   });
 
   it('loads complete media metadata and applies global completeness filtering before pagination', () => {
-    expect(pageSource).toContain('is_primary, media_status, media_notes, created_at');
-    expect(pageSource).toContain(".in('exercise_id', idChunk)");
-    expect(pageSource).toContain('.range(from, to)');
-    expect(pageSource).toContain('matchesExerciseMediaFilter');
-    expect(pageSource).toContain('nextTotalCount = filteredIds.length');
-    expect(pageSource).toContain('const pageIds = filteredIds.slice(from, from + pageSize)');
-    expect(pageSource).toContain(".select(mediaStatusFilter === 'all' ? '*' : 'id'");
+    expect(snapshotSource).toContain('is_primary, media_status, media_notes, created_at');
+    expect(snapshotSource).toMatch(/client,\s*'exercise_media'/);
+    expect(snapshotSource).toContain("query.order(orderColumn, { ascending: true }).range(from, from + pageSize - 1)");
+    expect(pageSource).toContain('filterExerciseQualitySnapshot');
     expect(pageSource).toContain('<option value="missing_gif">Missing GIF</option>');
     expect(pageSource).toContain('<option value="missing_video">Missing Video</option>');
     expect(pageSource).toContain('<option value="missing_thumbnail">Missing Thumbnail</option>');

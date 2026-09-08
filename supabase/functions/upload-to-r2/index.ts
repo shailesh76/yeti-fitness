@@ -1,135 +1,93 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { S3Client, PutObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.535.0"
-import { createAnonClient } from '../_shared/supabaseClient.ts'
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from 'https://esm.sh/@aws-sdk/client-s3@3.535.0';
+import { createAnonClient, createServiceRoleClient } from '../_shared/supabaseClient.ts';
+import { createUploadToR2Handler, type MediaRow } from './handler.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function r2Config() {
+  const accessKeyId = Deno.env.get('R2_ACCESS_KEY_ID');
+  const secretAccessKey = Deno.env.get('R2_SECRET_ACCESS_KEY');
+  const accountId = Deno.env.get('R2_ACCOUNT_ID');
+  const bucketName = Deno.env.get('R2_BUCKET_NAME');
+  const publicUrl = Deno.env.get('R2_PUBLIC_URL') ?? null;
+  if (!accessKeyId || !secretAccessKey || !accountId || !bucketName) {
+    throw new Error('R2 credentials are not configured on the server');
+  }
+  return {
+    bucketName,
+    publicUrl,
+    client: new S3Client({
+      region: 'auto',
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId, secretAccessKey },
+    }),
+  };
 }
 
+const service = createServiceRoleClient();
+const r2 = r2Config();
+
+const handler = createUploadToR2Handler({
+  async authenticate(req) {
+    const authHeader = req.headers.get('Authorization') ?? req.headers.get('authorization');
+    if (!authHeader) return null;
+    const client = createAnonClient(authHeader);
+    const { data: { user }, error } = await client.auth.getUser();
+    if (error || !user) return null;
+    const { data: profile, error: profileError } = await service.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    if (profileError || !profile?.role) return null;
+    return { id: user.id, role: profile.role };
+  },
+  async getExercise(exerciseId) {
+    const { data, error } = await service.from('exercises').select('id, source_type, created_by_coach_id').eq('id', exerciseId).maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+  async getMedia(mediaId) {
+    const { data, error } = await service.from('exercise_media').select('id, exercise_id, media_type, file_format, r2_bucket, r2_key, url, is_primary, media_status, idempotency_actor_id, idempotency_fingerprint').eq('id', mediaId).maybeSingle();
+    if (error) throw error;
+    return data as MediaRow | null;
+  },
+  async putObject(key, bytes, contentType) {
+    await r2.client.send(new PutObjectCommand({ Bucket: r2.bucketName, Key: key, Body: bytes, ContentType: contentType }));
+  },
+  async deleteObject(key) {
+    await r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucketName, Key: key }));
+  },
+  async insertMedia(row) {
+    const { data, error } = await service.from('exercise_media').insert(row).select().single();
+    if (error) throw error;
+    return data as MediaRow;
+  },
+  async updateMedia(mediaId, values) {
+    const { data, error } = await service.from('exercise_media').update(values).eq('id', mediaId).select().single();
+    if (error) throw error;
+    return data as MediaRow;
+  },
+  async deleteMedia(mediaId) {
+    const { error } = await service.from('exercise_media').delete().eq('id', mediaId);
+    if (error) throw error;
+  },
+  publicUrl(key) {
+    return r2.publicUrl ? `${r2.publicUrl.replace(/\/$/, '')}/${key}` : null;
+  },
+  bucketName: r2.bucketName,
+  randomUUID: () => crypto.randomUUID(),
+});
+
 serve(async (req) => {
-  // Handle CORS preflight options request
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
   try {
-    // 1. Authenticate user
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
-
-    const supabaseClient = createAnonClient(authHeader)
-
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized user session" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
-
-    // 2. Parse request payload
-    const { file, filePath, fileName, folder, contentType } = await req.json()
-    if (!file || (!filePath && (!folder || !fileName)) || !contentType) {
-      return new Response(JSON.stringify({ error: "Missing required parameters (file, filePath/fileName/folder, contentType)" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
-
-    let finalPath = filePath
-    if (!finalPath) {
-      if (folder === 'progress-photos' || folder === 'food-scans') {
-        finalPath = `${folder}/${user.id}/${fileName}`
-      } else {
-        finalPath = `${folder}/${fileName}`
-      }
-    }
-
-    // 3. Authorization Checks (Path Restrictions)
-    if (finalPath.startsWith('progress-photos/') || finalPath.startsWith('food-scans/')) {
-      const parts = finalPath.split('/')
-      const pathUserId = parts[1]
-      if (pathUserId !== user.id) {
-        return new Response(JSON.stringify({ error: "Forbidden: You cannot upload to another user's directory" }), {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        })
-      }
-    } else if (!finalPath.startsWith('exercises/')) {
-      // Any other path is forbidden for security
-      return new Response(JSON.stringify({ error: "Forbidden: Invalid upload path" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
-
-    // Decode base64 file data
-    let cleanFile = file
-    if (cleanFile.includes("base64,")) {
-      cleanFile = cleanFile.substring(cleanFile.indexOf("base64,") + 7)
-    }
-    cleanFile = cleanFile.replace(/\s/g, "")
-    const binaryData = Uint8Array.from(atob(cleanFile), c => c.charCodeAt(0))
-
-    // 4. Initialize R2/S3 Client
-    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID")
-    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY")
-    const accountId = Deno.env.get("R2_ACCOUNT_ID")
-    const bucketName = Deno.env.get("R2_BUCKET_NAME")
-    const publicUrl = Deno.env.get("R2_PUBLIC_URL")
-
-    if (!accessKeyId || !secretAccessKey || !accountId || !bucketName) {
-      return new Response(JSON.stringify({ error: "R2 credentials are not configured on the server" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      })
-    }
-
-    const s3Client = new S3Client({
-      region: "auto",
-      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    })
-
-    // 5. Upload Object to R2
-    const uploadParams = {
-      Bucket: bucketName,
-      Key: finalPath,
-      Body: binaryData,
-      ContentType: contentType,
-    }
-
-    await s3Client.send(new PutObjectCommand(uploadParams))
-
-    // 6. Respond with URL
-    // If it's an exercise asset, we return the direct public R2 URL.
-    // If it's a private asset, we return the path so the client can query a signed URL.
-    let url = ""
-    if (finalPath.startsWith('exercises/') && publicUrl) {
-      url = `${publicUrl.replace(/\/$/, '')}/${finalPath}`
-    } else {
-      url = finalPath // Client will get signed URL on demand
-    }
-
-    return new Response(JSON.stringify({ success: true, url, key: finalPath }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    })
-
+    const response = await handler(req);
+    return new Response(response.body, { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    console.error("Error in upload-to-r2:", error)
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error('Error in upload-to-r2:', error instanceof Error ? error.message : 'Unknown error');
+    return new Response(JSON.stringify({ error: 'Exercise media request failed.' }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    })
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
-})
+});
