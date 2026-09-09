@@ -732,7 +732,21 @@ export default function ExerciseLibraryPage() {
                 exerciseName={selectedExercise.name}
                 media={selectedMedia}
                 loading={loadingDetails}
-                canManage={canManageMedia}
+                canManage={
+                  canManageMedia && Boolean(
+                    editorIdentity?.role === 'admin'
+                    || (editorIdentity?.role === 'coach'
+                      && selectedExercise.source_type === 'custom'
+                      && selectedExercise.created_by_coach_id === editorIdentity.userId),
+                  )
+                }
+                manageBlockedReason={
+                  editorIdentity?.role === 'coach' && selectedExercise.source_type !== 'custom'
+                    ? 'Canonical and legacy exercise media can only be managed by an admin.'
+                    : editorIdentity?.role === 'coach' && selectedExercise.source_type === 'custom' && selectedExercise.created_by_coach_id !== editorIdentity.userId
+                      ? 'This custom exercise belongs to another coach, so its media can only be managed by an admin.'
+                      : null
+                }
                 onChanged={loadExerciseSubDetails}
               />
 

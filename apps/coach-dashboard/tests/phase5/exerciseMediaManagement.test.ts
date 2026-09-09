@@ -189,8 +189,8 @@ describe('exercise media URL management', () => {
     expect(managerSource).toContain("startAdd('video')");
     expect(managerSource).toContain("startAdd('image')");
     expect(managerSource).toContain('startEdit(item)');
-    expect(managerSource).toContain('removeExternalMedia(item)');
-    expect(managerSource).toContain('canManage && isExternalMedia(item)');
+    expect(managerSource).toContain('removeMedia(item)');
+    expect(managerSource).toContain('startUpload');
     expect(managerSource).toContain('This exercise already uses that media URL.');
     expect(managerSource).toContain("disabled={form.mode === 'edit'}");
     expect(managerSource).not.toContain('onChange={(event) => setForm({ ...form, primary:');
@@ -286,6 +286,8 @@ describe('exercise media URL management', () => {
   it('implements generic locator semantics without hardcoded CDN hostnames', () => {
     expect(managerSource).not.toMatch(/cdn\.yeti\.fit/i);
     expect(managerSource).not.toMatch(/cdn\.yetifitness\.app/i);
-    expect(managerSource).toContain('resolveExerciseMediaUrl(item,');
+    // C2B: the manager previews TO_CREATE assets through the workflow
+    // resolver; the READY-gated C1 resolveExerciseMediaUrl stays lib-level.
+    expect(managerSource).toContain('resolvePreviewMediaUrl(item,');
   });
 });
