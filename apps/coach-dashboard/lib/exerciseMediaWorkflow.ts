@@ -95,6 +95,10 @@ export function buildSetExerciseMediaStatusBody(
   return { action: 'set-exercise-media-status', exerciseId, mediaId, status };
 }
 
+export function buildSetExerciseMediaPrimaryBody(exerciseId: string, mediaId: string): Record<string, unknown> {
+  return { action: 'set-exercise-media-primary', exerciseId, mediaId };
+}
+
 export interface InvokeLikeError {
   message?: string;
   status?: number;

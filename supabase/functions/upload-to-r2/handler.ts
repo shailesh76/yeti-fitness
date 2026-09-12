@@ -24,6 +24,7 @@ export interface MediaRow {
   url: string | null;
   is_primary: boolean;
   media_status: MediaStatus;
+  media_notes?: string | null;
   idempotency_actor_id?: string | null;
   idempotency_fingerprint?: string | null;
 }
@@ -36,6 +37,7 @@ export interface ExerciseMediaServices {
   deleteObject(key: string): Promise<void>;
   insertMedia(row: MediaRow): Promise<MediaRow>;
   updateMedia(mediaId: string, values: Partial<MediaRow>): Promise<MediaRow>;
+  setPrimary(exerciseId: string, mediaId: string): Promise<MediaRow>;
   deleteMedia(mediaId: string): Promise<void>;
   publicUrl(key: string): string | null;
   bucketName: string;
@@ -271,6 +273,9 @@ export function createUploadToR2Handler(services: ExerciseMediaServices) {
       const extension = formatForExternalUrl(mediaType, url);
       if (!extension) return json(400, { error: 'Media type and URL format do not match.' });
       if (payload.status !== undefined) return json(400, { error: 'Media status must be changed through the publication action.' });
+      const mediaNotes = typeof payload.mediaNotes === 'string' && payload.mediaNotes.trim()
+        ? payload.mediaNotes.trim().slice(0, 2000)
+        : null;
       const fingerprint = await operationFingerprint({
         action,
         exerciseId: exercise.id,
@@ -278,6 +283,7 @@ export function createUploadToR2Handler(services: ExerciseMediaServices) {
         fileFormat: extension,
         url,
         isPrimary: payload.isPrimary === true,
+        mediaNotes,
       });
 
       if (payload.mediaId) {
@@ -290,6 +296,7 @@ export function createUploadToR2Handler(services: ExerciseMediaServices) {
           url,
           is_primary: payload.isPrimary === true,
           media_status: 'TO_CREATE',
+          media_notes: mediaNotes,
         });
         return json(200, { success: true, media });
       }
@@ -311,6 +318,7 @@ export function createUploadToR2Handler(services: ExerciseMediaServices) {
         url,
         is_primary: payload.isPrimary === true,
         media_status: 'TO_CREATE',
+        media_notes: mediaNotes,
         idempotency_actor_id: actor.id,
         idempotency_fingerprint: fingerprint,
       });
@@ -325,6 +333,13 @@ export function createUploadToR2Handler(services: ExerciseMediaServices) {
         return json(400, { error: 'READY media requires a usable locator.' });
       }
       const media = await services.updateMedia(target.media.id, { media_status: payload.status });
+      return json(200, { success: true, media });
+    }
+
+    if (action === 'set-exercise-media-primary') {
+      const target = await ownedMedia(actor, payload.exerciseId, payload.mediaId, services);
+      if (target instanceof Response) return target;
+      const media = await services.setPrimary(target.exercise.id, target.media.id);
       return json(200, { success: true, media });
     }
 

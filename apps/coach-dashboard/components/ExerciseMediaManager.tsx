@@ -15,6 +15,7 @@ import {
 import {
   UPLOAD_ACCEPT_ATTRIBUTE,
   buildSetExerciseMediaStatusBody,
+  buildSetExerciseMediaPrimaryBody,
   buildUploadExerciseMediaBody,
   canApprovePreviewMedia,
   createUploadIdempotencyKey,
@@ -299,6 +300,19 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     setMessage({ kind: 'success', text: outcome.message });
   }
 
+  async function setPrimaryMedia(row: ExerciseMediaRecord) {
+    if (row.is_primary) return;
+    setTransitioningId(row.id);
+    setMessage(null);
+    const { data, error } = await supabase.functions.invoke('upload-to-r2', {
+      body: buildSetExerciseMediaPrimaryBody(exerciseId, row.id),
+    });
+    const outcome = describeMediaInvokeResult(data, invokeErrorShape(error), 'Primary media updated.', 'Could not set primary media.');
+    if (outcome.kind === 'success') await onChanged();
+    setTransitioningId(null);
+    setMessage({ kind: outcome.kind === 'success' ? 'success' : 'error', text: outcome.message });
+  }
+
   function approveMedia(row: ExerciseMediaRecord) {
     void setMediaStatus(row, 'READY');
   }
@@ -352,6 +366,10 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         <p className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-2 text-[10px] text-gray-400">{manageBlockedReason}</p>
       )}
 
+      {media.length > 0 && !media.some((item) => item.is_primary) && (
+        <p className="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[10px] text-amber-300">Review queue: no primary media selected.</p>
+      )}
+
       <div className="relative flex h-52 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30">
         {loading ? (
           <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
@@ -401,6 +419,9 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
                 )}
                 {canManage && itemIsPublishable && (
                   <button type="button" disabled={transitioningId === item.id} onClick={() => unpublishMedia(item)} className="p-1 text-gray-400 hover:text-amber-300 disabled:opacity-40" title="Unpublish for review"><AlertCircle className="h-3.5 w-3.5" /></button>
+                )}
+                {canManage && !item.is_primary && (
+                  <button type="button" disabled={transitioningId === item.id} onClick={() => void setPrimaryMedia(item)} className="rounded border border-white/10 px-2 py-1 text-[9px] font-bold text-gray-300 hover:text-white disabled:opacity-40" title="Set as primary media">Set primary</button>
                 )}
                 {canManage && <button type="button" onClick={() => startEdit(item)} className="p-1 text-gray-400 hover:text-blue-300" title={item.r2_key ? 'Replace R2 media with URL' : 'Edit URL'}><Pencil className="h-3.5 w-3.5" /></button>}
                 {canManage && <button type="button" disabled={removingId === item.id} onClick={() => removeMedia(item)} className="p-1 text-gray-400 hover:text-rose-400 disabled:opacity-40" title="Remove media"><Trash2 className="h-3.5 w-3.5" /></button>}

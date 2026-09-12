@@ -73,6 +73,12 @@ function setup(actor: Actor | null, exercise: ExerciseScope = {
       rows.set(id, updated);
       return updated;
     },
+    setPrimary: async (exerciseId, mediaId) => {
+      const target = rows.get(mediaId);
+      if (!target || target.exercise_id !== exerciseId) throw new Error('missing');
+      for (const [id, row] of rows) rows.set(id, { ...row, is_primary: id === mediaId });
+      return rows.get(mediaId)!;
+    },
     deleteMedia: async (id) => { rows.delete(id); },
     publicUrl: (key) => `https://cdn.example.com/${key}`,
     bucketName: 'dude-media',

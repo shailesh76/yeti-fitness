@@ -68,6 +68,14 @@ const handler = createUploadToR2Handler({
     if (error) throw error;
     return data as MediaRow;
   },
+  async setPrimary(exerciseId, mediaId) {
+    const { data, error } = await service.rpc('set_exercise_media_primary', {
+      p_exercise_id: exerciseId,
+      p_media_id: mediaId,
+    });
+    if (error) throw error;
+    return data as MediaRow;
+  },
   async deleteMedia(mediaId) {
     const { error } = await service.from('exercise_media').delete().eq('id', mediaId);
     if (error) throw error;
