@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Film, Image as ImageIcon, Loader2, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -12,6 +12,7 @@ import {
   orderExerciseMedia,
   previewErrorKey,
 } from '@/lib/exerciseMedia';
+import { canMutateExerciseMedia, mediaForActiveExercise } from '@/lib/exerciseMediaContext';
 import {
   UPLOAD_ACCEPT_ATTRIBUTE,
   buildSetExerciseMediaStatusBody,
@@ -39,6 +40,7 @@ interface ExerciseMediaManagerProps {
 }
 
 interface MediaFormState {
+  exerciseId: string;
   mode: 'add' | 'edit';
   type: ExerciseMediaType;
   url: string;
@@ -51,6 +53,7 @@ interface MediaFormState {
 }
 
 interface UploadFormState {
+  exerciseId: string;
   file: File | null;
   mediaType: ExerciseMediaType | '';
   primary: boolean;
@@ -97,8 +100,25 @@ function encodeFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading, canManage, manageBlockedReason, onChanged }: ExerciseMediaManagerProps) {
-  const orderedMedia = useMemo(() => orderExerciseMedia(media), [media]);
+export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading, canManage: mayManage, manageBlockedReason, onChanged }: ExerciseMediaManagerProps) {
+  const canManage = mayManage && !loading;
+  const orderedMedia = useMemo(() => orderExerciseMedia(
+    loading ? [] : mediaForActiveExercise(media, exerciseId),
+  ), [media, loading, exerciseId]);
+  const activeContext = useRef({ exerciseId, canManage, loading, media: orderedMedia, mounted: true });
+  activeContext.current = { exerciseId, canManage, loading, media: orderedMedia, mounted: activeContext.current.mounted };
+  const isActive = () => activeContext.current.mounted && activeContext.current.exerciseId === exerciseId;
+  const canAct = (row?: ExerciseMediaRecord) => isActive() && canMutateExerciseMedia({
+    exerciseId,
+    media: activeContext.current.media,
+    row,
+    canManage: activeContext.current.canManage,
+    loading: activeContext.current.loading,
+  });
+  useEffect(() => {
+    activeContext.current.mounted = true;
+    return () => { activeContext.current.mounted = false; };
+  }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>(EMPTY_URLS);
   const [previewErrors, setPreviewErrors] = useState<Set<string>>(new Set());
@@ -115,6 +135,8 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     setForm(null);
     setUploadForm(null);
     setMessage(null);
+    setResolvedUrls(EMPTY_URLS);
+    setPreviewErrors(new Set());
   }, [exerciseId]);
 
   useEffect(() => {
@@ -136,11 +158,14 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         });
         if (resolved) next[item.id] = resolved;
       }));
-      if (!cancelled) setResolvedUrls(next);
+      if (!cancelled
+        && activeContext.current.mounted
+        && activeContext.current.exerciseId === exerciseId
+        && activeContext.current.media === orderedMedia) setResolvedUrls(next);
     }
     resolveUrls();
     return () => { cancelled = true; };
-  }, [orderedMedia]);
+  }, [orderedMedia, exerciseId]);
 
   const selected = orderedMedia.find((item) => item.id === selectedId) ?? orderedMedia[0] ?? null;
   const selectedIsPublishable = selected ? isUsableExerciseMedia(selected) : false;
@@ -148,15 +173,17 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   const selectedPreviewErrorKey = selected ? previewErrorKey(selected, selectedUrl) : null;
 
   function startAdd(type: EditableMediaType) {
+    if (!canAct()) return;
     setMessage(null);
     setUploadForm(null);
-    setForm({ mode: 'add', type, url: '', status: 'TO_CREATE', primary: media.length === 0, row: null });
+    setForm({ exerciseId, mode: 'add', type, url: '', status: 'TO_CREATE', primary: orderedMedia.length === 0, row: null });
   }
 
   function startUpload() {
+    if (!canAct()) return;
     setMessage(null);
     setForm(null);
-    setUploadForm({ file: null, mediaType: '', primary: media.length === 0, idempotencyKey: createUploadIdempotencyKey(), fileIssue: null });
+    setUploadForm({ exerciseId, file: null, mediaType: '', primary: orderedMedia.length === 0, idempotencyKey: createUploadIdempotencyKey(), fileIssue: null });
   }
 
   function pickUploadFile(file: File | null) {
@@ -186,12 +213,14 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   async function submitUpload() {
+    if (!canAct() || uploadForm?.exerciseId !== exerciseId) return;
     if (!uploadForm?.file || !uploadForm.mediaType || uploadForm.fileIssue) return;
     const { file, mediaType, primary, idempotencyKey } = uploadForm;
     setUploading(true);
     setMessage(null);
     try {
       const fileBase64 = await encodeFileAsBase64(file);
+      if (!canAct()) return;
       const { data, error } = await supabase.functions.invoke('upload-to-r2', {
         body: buildUploadExerciseMediaBody({
           exerciseId,
@@ -203,17 +232,20 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         }),
       });
       const outcome = describeMediaInvokeResult(data, invokeErrorShape(error), 'Uploaded — awaiting approval.', 'Could not upload media.');
+      if (!isActive()) return;
       if (outcome.kind === 'error') {
         setMessage({ kind: 'error', text: outcome.message });
         return;
       }
       await onChanged();
+      if (!isActive()) return;
       if (typeof outcome.media?.id === 'string') setSelectedId(outcome.media.id);
       setUploadForm(null);
       setMessage(outcome.kind === 'cleanup-pending'
         ? { kind: 'error', text: `${outcome.message} The uploaded media is saved and awaiting approval.` }
         : { kind: 'success', text: outcome.message });
     } catch (encodeError) {
+      if (!isActive()) return;
       setMessage({ kind: 'error', text: encodeError instanceof Error ? encodeError.message : 'Could not read the selected file.' });
     } finally {
       setUploading(false);
@@ -221,9 +253,11 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   function startEdit(row: ExerciseMediaRecord) {
+    if (!canAct(row)) return;
     setMessage(null);
     setUploadForm(null);
     setForm({
+      exerciseId,
       mode: 'edit',
       type: row.media_type,
       url: row.url ?? '',
@@ -234,6 +268,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   async function saveMedia() {
+    if (!canAct(form?.row ?? undefined) || form?.exerciseId !== exerciseId) return;
     if (!form || !isValidExerciseMediaUrl(form.url.trim(), form.type)) {
       setMessage({ kind: 'error', text: 'Enter a complete HTTPS URL without spaces.' });
       return;
@@ -243,11 +278,12 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
       && !window.confirm('Saving a replacement will mark this published asset as awaiting approval again. Continue?')) {
       return;
     }
+    if (!canAct(form.row ?? undefined)) return;
 
     setSaving(true);
     setMessage(null);
     const url = form.url.trim();
-    const duplicate = hasDuplicateExerciseMediaUrl(media, url, form.row?.id);
+    const duplicate = hasDuplicateExerciseMediaUrl(orderedMedia, url, form.row?.id);
     if (duplicate) {
       setMessage({ kind: 'error', text: 'This exercise already uses that media URL.' });
       setSaving(false);
@@ -266,6 +302,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     });
 
     const outcome = describeMediaInvokeResult(data, invokeErrorShape(error), 'Media saved — awaiting approval.', 'Could not save media.');
+    if (!isActive()) return;
     if (outcome.kind === 'error') {
       setMessage({ kind: 'error', text: outcome.message });
       setSaving(false);
@@ -273,6 +310,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
     }
 
     await onChanged();
+    if (!isActive()) return;
     if (typeof outcome.media?.id === 'string') setSelectedId(outcome.media.id);
     setForm(null);
     setSaving(false);
@@ -280,6 +318,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   async function setMediaStatus(row: ExerciseMediaRecord, status: 'TO_CREATE' | 'READY') {
+    if (!canAct(row)) return;
     setTransitioningId(row.id);
     setMessage(null);
     const { data, error } = await supabase.functions.invoke('upload-to-r2', {
@@ -291,7 +330,9 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
       status === 'READY' ? 'Media approved and published.' : 'Media unpublished for review.',
       'Could not update the media status.',
     );
+    if (!isActive()) return;
     await onChanged();
+    if (!isActive()) return;
     setTransitioningId(null);
     if (outcome.kind === 'error' || outcome.kind === 'cleanup-pending') {
       setMessage({ kind: 'error', text: outcome.message });
@@ -301,6 +342,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   async function setPrimaryMedia(row: ExerciseMediaRecord) {
+    if (!canAct(row)) return;
     if (row.is_primary) return;
     setTransitioningId(row.id);
     setMessage(null);
@@ -308,7 +350,9 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
       body: buildSetExerciseMediaPrimaryBody(exerciseId, row.id),
     });
     const outcome = describeMediaInvokeResult(data, invokeErrorShape(error), 'Primary media updated.', 'Could not set primary media.');
+    if (!isActive()) return;
     if (outcome.kind === 'success') await onChanged();
+    if (!isActive()) return;
     setTransitioningId(null);
     setMessage({ kind: outcome.kind === 'success' ? 'success' : 'error', text: outcome.message });
   }
@@ -318,18 +362,23 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
   }
 
   function unpublishMedia(row: ExerciseMediaRecord) {
+    if (!canAct(row)) return;
     if (!window.confirm('Unpublish this media for re-review? It will no longer count toward exercise quality.')) return;
+    if (!canAct(row)) return;
     void setMediaStatus(row, 'TO_CREATE');
   }
 
   async function removeMedia(row: ExerciseMediaRecord) {
+    if (!canAct(row)) return;
     const description = row.r2_key ? 'stored media file' : `${typeLabel(row.media_type).toLowerCase()} URL`;
     if (!window.confirm(`Remove this ${description} from ${exerciseName}?`)) return;
+    if (!canAct(row)) return;
     setRemovingId(row.id);
     setMessage(null);
     const { data, error } = await supabase.functions.invoke('upload-to-r2', {
       body: { action: 'delete-exercise-media', exerciseId, mediaId: row.id },
     });
+    if (!isActive()) return;
     if (error || !data?.success) {
       const outcome = describeMediaInvokeResult(data, invokeErrorShape(error), '', 'Could not remove media.');
       setMessage({ kind: 'error', text: outcome.kind === 'error' ? outcome.message : 'Could not remove media.' });
@@ -366,7 +415,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         <p className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-2 text-[10px] text-gray-400">{manageBlockedReason}</p>
       )}
 
-      {media.length > 0 && !media.some((item) => item.is_primary) && (
+      {orderedMedia.length > 0 && !orderedMedia.some((item) => item.is_primary) && (
         <p className="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[10px] text-amber-300">Review queue: no primary media selected.</p>
       )}
 
@@ -431,7 +480,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         </div>
       )}
 
-      {uploadForm && canManage && (
+      {uploadForm && uploadForm.exerciseId === exerciseId && canManage && !loading && (
         <div className="space-y-3 rounded-md border border-blue-500/30 bg-blue-500/[0.06] p-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-white">Upload media file</p>
@@ -475,7 +524,7 @@ export function ExerciseMediaManager({ exerciseId, exerciseName, media, loading,
         </div>
       )}
 
-      {form && canManage && (
+      {form && form.exerciseId === exerciseId && canManage && !loading && (
         <div className="space-y-3 rounded-md border border-blue-500/30 bg-blue-500/[0.06] p-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-white">{form.mode === 'add' ? `Add ${typeLabel(form.type)} URL` : form.row?.r2_key ? 'Replace R2 media with URL' : 'Edit media URL'}</p>

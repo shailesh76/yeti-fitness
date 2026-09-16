@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft, Search, SlidersHorizontal, Star, Plus, 
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { ExerciseMediaManager } from '@/components/ExerciseMediaManager';
+import { createExerciseDetailRequestGate } from '@/lib/exerciseMediaContext';
 import {
   type ExerciseMediaCompletenessFilter,
   type ExerciseMediaRecord
@@ -104,6 +105,9 @@ export default function ExerciseLibraryPage() {
   const [selectedMuscles, setSelectedMuscles] = useState<ExerciseMuscle[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<ExerciseMediaRecord[]>([]);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+  const [detailsExerciseId, setDetailsExerciseId] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequests = useRef(createExerciseDetailRequestGate());
   const [canManageMedia, setCanManageMedia] = useState(false);
   const [editorIdentity, setEditorIdentity] = useState<{ userId: string; role: string } | null>(null);
   const [detailTab, setDetailTab] = useState<'overview' | 'instructions' | 'muscles' | 'variations'>('overview');
@@ -227,31 +231,43 @@ export default function ExerciseLibraryPage() {
 
   // Load Sub-details (Aliases, Muscles, Media) for Selected Exercise
   const loadExerciseSubDetails = useCallback(async () => {
-    if (!selectedExercise) return;
+    const exerciseId = selectedExercise?.id;
+    if (!exerciseId) return;
+    const isCurrent = detailRequests.current.begin(exerciseId);
     setLoadingDetails(true);
+    setDetailsExerciseId(null);
+    setSelectedAliases([]);
+    setSelectedMuscles([]);
+    setSelectedMedia([]);
+    setDetailError(null);
 
     try {
       const [aliasRes, muscleRes, mediaRes] = await Promise.all([
-        supabase.from('exercise_aliases').select('id, alias').eq('exercise_id', selectedExercise.id),
-        supabase.from('exercise_muscles').select('id, muscle, role').eq('exercise_id', selectedExercise.id),
+        supabase.from('exercise_aliases').select('id, alias').eq('exercise_id', exerciseId),
+        supabase.from('exercise_muscles').select('id, muscle, role').eq('exercise_id', exerciseId),
         supabase
           .from('exercise_media')
           .select('id, exercise_id, media_type, file_format, url, r2_key, thumbnail_url, is_primary, media_status, media_notes, created_at')
-          .eq('exercise_id', selectedExercise.id),
+          .eq('exercise_id', exerciseId),
       ]);
-
-      if (aliasRes.data) setSelectedAliases(aliasRes.data);
-      if (muscleRes.data) setSelectedMuscles(muscleRes.data);
-      if (mediaRes.data) setSelectedMedia(mediaRes.data as ExerciseMediaRecord[]);
-    } catch (err) {
-      console.error('Failed to load sub details:', err);
+      if (!isCurrent()) return;
+      if (aliasRes.error || muscleRes.error || mediaRes.error) throw new Error('Exercise details could not be loaded.');
+      if (mediaRes.data?.some((row) => row.exercise_id !== exerciseId)) throw new Error('Exercise media context mismatch.');
+      setSelectedAliases(aliasRes.data ?? []);
+      setSelectedMuscles(muscleRes.data ?? []);
+      setSelectedMedia((mediaRes.data ?? []) as ExerciseMediaRecord[]);
+      setDetailsExerciseId(exerciseId);
+    } catch {
+      if (isCurrent()) setDetailError('Exercise details could not be loaded. Please try again.');
     } finally {
-      setLoadingDetails(false);
+      if (isCurrent()) setLoadingDetails(false);
     }
-  }, [selectedExercise]);
+  }, [selectedExercise?.id]);
 
   useEffect(() => {
+    const requestGate = detailRequests.current;
     void loadExerciseSubDetails();
+    return () => requestGate.invalidate();
   }, [loadExerciseSubDetails]);
 
   // Favorite toggle helper
@@ -728,12 +744,13 @@ export default function ExerciseLibraryPage() {
             <div className="bg-[#111A23] border border-white/10 rounded-2xl p-5 space-y-5">
               
               <ExerciseMediaManager
+                key={selectedExercise.id}
                 exerciseId={selectedExercise.id}
                 exerciseName={selectedExercise.name}
-                media={selectedMedia}
-                loading={loadingDetails}
+                media={detailsExerciseId === selectedExercise.id ? selectedMedia : []}
+                loading={loadingDetails || (detailsExerciseId !== selectedExercise.id && !detailError)}
                 canManage={
-                  canManageMedia && Boolean(
+                  detailsExerciseId === selectedExercise.id && !loadingDetails && canManageMedia && Boolean(
                     editorIdentity?.role === 'admin'
                     || (editorIdentity?.role === 'coach'
                       && selectedExercise.source_type === 'custom'
@@ -749,6 +766,7 @@ export default function ExerciseLibraryPage() {
                 }
                 onChanged={loadExerciseSubDetails}
               />
+              {detailError && <p role="alert" className="text-xs text-red-300">{detailError}</p>}
 
               {/* Quality Assessment Scorecard Banner */}
               {(() => {
